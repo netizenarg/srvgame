@@ -8,6 +8,7 @@
 #include <algorithm>
 
 #include "../../include/game/ChunkCache.hpp"
+#include "../../include/game/RAIIThread.hpp"
 
 ChunkCache::ChunkCache(const CacheConfig& config) 
     : config_(config) {
@@ -20,22 +21,20 @@ ChunkCache::ChunkCache(const CacheConfig& config)
         LoadFromDisk();
     }
     
-    // Start background save thread
+    // Start background save thread using RAIIThread
     if (config_.async_save) {
         running_ = true;
-        save_thread_ = std::thread(&ChunkCache::SaveThreadFunc, this);
+        save_thread_ = RAIIThread([this]() { SaveThreadFunc(); });
     }
 }
 
 ChunkCache::~ChunkCache() {
+    // RAIIThread will automatically stop and join in its destructor
     {
         std::lock_guard<std::mutex> lock(save_mutex_);
         running_ = false;
     }
     save_cv_.notify_all();
-    if (save_thread_.joinable()) {
-        save_thread_.join();
-    }
     
     // Save remaining dirty chunks
     Flush();

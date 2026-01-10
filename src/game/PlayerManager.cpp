@@ -2,9 +2,10 @@
 #include <cmath>
 #include <chrono>
 
-#include "../../include/game/PlayerManager.hpp"
 #include "../../include/logging/Logger.hpp"
 #include "../../include/database/CitusClient.hpp"
+#include "../../include/game/RAIIThread.hpp"
+#include "../../include/game/PlayerManager.hpp"
 
 // =============== Player Implementation ===============
 
@@ -600,9 +601,9 @@ cleanupInterval_(std::chrono::minutes(10)) {
 
     Logger::Info("PlayerManager initialized");
 
-    // Start background threads
-    saveThread_ = std::thread(&PlayerManager::SaveLoop, this);
-    cleanupThread_ = std::thread(&PlayerManager::CleanupLoop, this);
+    // Start background threads using RAIIThread
+    saveThread_ = RAIIThread([this]() { SaveLoop(); });
+    cleanupThread_ = RAIIThread([this]() { CleanupLoop(); });
 }
 
 PlayerManager::~PlayerManager() {
@@ -623,14 +624,9 @@ void PlayerManager::Shutdown() {
     saveCV_.notify_all();
     cleanupCV_.notify_all();
 
-    // Wait for threads
-    if (saveThread_.joinable()) {
-        saveThread_.join();
-    }
-
-    if (cleanupThread_.joinable()) {
-        cleanupThread_.join();
-    }
+    // RAIIThread destructors will handle thread cleanup automatically
+    saveThread_.Stop();
+    cleanupThread_.Stop();
 
     // Save all players before shutdown
     SaveAllPlayers();

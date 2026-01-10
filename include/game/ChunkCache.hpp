@@ -17,6 +17,7 @@
 
 #include "../../include/game/WorldChunk.hpp"
 #include "../../include/game/ChunkLOD.hpp"
+#include "../../include/game/RAIIThread.hpp"
 
 class ChunkCache {
 public:
@@ -144,7 +145,7 @@ private:
     
     // Background workers
     std::atomic<bool> running_{false};
-    std::thread save_thread_;
+    RAIIThread save_thread_;  // Changed from std::thread to RAIIThread
     std::queue<std::string> save_queue_;
     std::condition_variable save_cv_;
     std::mutex save_mutex_;

@@ -5,6 +5,7 @@
 
 #include "../../include/game/ChunkStreamer.hpp"
 #include "../../include/game/WorldGenerator.hpp"
+#include "../../include/game/RAIIThread.hpp"
 
 ChunkStreamer::ChunkStreamer(std::shared_ptr<ChunkPool> pool,
                              std::shared_ptr<ChunkCache> cache,
@@ -35,14 +36,14 @@ bool ChunkStreamer::Start() {
     
     running_ = true;
     
-    // Start loader threads
+    // Start loader threads using RAIIThread
     for (size_t i = 0; i < config_.max_concurrent_loads; ++i) {
-        loader_threads_.emplace_back(&ChunkStreamer::LoaderThread, this, i);
+        loader_threads_.AddThreadWithId([this](int id) { LoaderThread(id); });
     }
     
-    // Start unloader threads
+    // Start unloader threads using RAIIThread
     for (size_t i = 0; i < config_.max_concurrent_unloads; ++i) {
-        unloader_threads_.emplace_back(&ChunkStreamer::UnloaderThread, this, i);
+        unloader_threads_.AddThreadWithId([this](int id) { UnloaderThread(id); });
     }
     
     return true;
@@ -52,16 +53,9 @@ void ChunkStreamer::Stop() {
     running_ = false;
     queue_cv_.notify_all();
     
-    for (auto& thread : loader_threads_) {
-        if (thread.joinable()) thread.join();
-    }
-    
-    for (auto& thread : unloader_threads_) {
-        if (thread.joinable()) thread.join();
-    }
-    
-    loader_threads_.clear();
-    unloader_threads_.clear();
+    // RAIIThread will handle cleanup automatically
+    loader_threads_.StopAll();
+    unloader_threads_.StopAll();
     
     // Clear all queues and state
     std::lock_guard<std::mutex> lock(queue_mutex_);

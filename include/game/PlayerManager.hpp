@@ -6,6 +6,7 @@
 #include <nlohmann/json.hpp>
 
 #include "../../include/database/CitusClient.hpp"
+#include "../../include/game/RAIIThread.hpp"
 
 class Player {
 public:
@@ -62,7 +63,7 @@ public:
     void CleanupInactivePlayers();
 
 private:
-    PlayerManager() = default;
+    PlayerManager();
 
     mutable std::shared_mutex playersMutex_;
     std::unordered_map<int64_t, std::shared_ptr<Player>> players_;
@@ -71,5 +72,22 @@ private:
     std::unordered_map<uint64_t, int64_t> sessionToPlayer_;
     std::unordered_map<int64_t, uint64_t> playerToSession_;
 
+    // Thread management with RAII
+    RAIIThread saveThread_;      // Added
+    RAIIThread cleanupThread_;   // Added
+    
+    std::atomic<bool> running_{true};
+    std::chrono::minutes saveInterval_{5};
+    std::chrono::minutes cleanupInterval_{10};
+    
+    std::condition_variable saveCV_;
+    std::condition_variable cleanupCV_;
+    std::mutex saveMutex_;
+    std::mutex cleanupMutex_;
+
     CitusClient& dbClient_;
+
+    // Thread functions
+    void SaveLoop();
+    void CleanupLoop();
 };
