@@ -5,6 +5,11 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/noise.hpp>
 
+#include "../../include/config/ConfigManager.hpp"
+#include "../../include/logging/Logger.hpp"
+#include "../../include/database/CitusClient.hpp"
+#include "../../include/scripting/PythonScripting.hpp"
+#include "../../include/network/ConnectionManager.hpp"
 #include "../../include/game/WorldChunk.hpp"
 #include "../../include/game/WorldGenerator.hpp"
 #include "../../include/game/NPCSystem.hpp"
@@ -12,11 +17,7 @@
 #include "../../include/game/CollisionSystem.hpp"
 #include "../../include/game/EntityManager.hpp"
 #include "../../include/game/GameLogic.hpp"
-#include "../../include/config/ConfigManager.hpp"
-#include "../../include/logging/Logger.hpp"
-#include "../../include/database/CitusClient.hpp"
-#include "../../include/scripting/PythonScripting.hpp"
-#include "../../include/network/ConnectionManager.hpp"
+#include "../../include/game/RAIIThread.hpp"
 
 // =============== Constants ===============
 const float BROADCAST_RANGE = 100.0f;
@@ -178,15 +179,15 @@ void GameLogic::Initialize() {
         }
     }
 
-    // Start game loop thread
+    // Start game loop thread using RAIIThread
     running_ = true;
-    gameLoopThread_ = std::thread(&GameLogic::GameLoop, this);
+    gameLoopThread_ = RAIIThread([this]() { GameLoop(); });
 
-    // Start NPC spawner thread
-    spawnerThread_ = std::thread(&GameLogic::SpawnerLoop, this);
+    // Start NPC spawner thread using RAIIThread
+    spawnerThread_ = RAIIThread([this]() { SpawnerLoop(); });
 
-    // Start periodic save thread
-    saveThread_ = std::thread(&GameLogic::SaveLoop, this);
+    // Start periodic save thread using RAIIThread
+    saveThread_ = RAIIThread([this]() { SaveLoop(); });
 
     Logger::Info("GameLogic integrated system initialized successfully");
 }
@@ -265,7 +266,7 @@ void GameLogic::Shutdown() {
         pythonScripting_.Shutdown();
     }
 
-    // Stop all threads
+    // Stop all threads using RAIIThread's destructor
     running_ = false;
 
     // Notify all condition variables
@@ -273,18 +274,10 @@ void GameLogic::Shutdown() {
     spawnerCV_.notify_all();
     saveCV_.notify_all();
 
-    // Wait for threads to finish
-    if (gameLoopThread_.joinable()) {
-        gameLoopThread_.join();
-    }
-
-    if (spawnerThread_.joinable()) {
-        spawnerThread_.join();
-    }
-
-    if (saveThread_.joinable()) {
-        saveThread_.join();
-    }
+    // RAIIThread destructors will handle thread cleanup automatically
+    gameLoopThread_.Stop();
+    spawnerThread_.Stop();
+    saveThread_.Stop();
 
     // Save final game state
     SaveGameState();

@@ -25,6 +25,7 @@
 #include "../../include/network/ConnectionManager.hpp"
 #include "../../include/network/BinaryProtocol.hpp"
 #include "../../include/network/PredictionSystem.hpp"
+#include "../../include/game/RAIIThread.hpp"
 
 class GameLogic {
 public:
@@ -154,9 +155,9 @@ private:
 
     // Threading and synchronization
     std::atomic<bool> running_{false};
-    std::thread gameLoopThread_;
-    std::thread spawnerThread_;
-    std::thread saveThread_;
+    RAIIThread gameLoopThread_;  // Changed from std::thread to RAIIThread
+    RAIIThread spawnerThread_;   // Changed from std::thread to RAIIThread
+    RAIIThread saveThread_;      // Changed from std::thread to RAIIThread
     std::condition_variable gameLoopCV_;
     std::condition_variable spawnerCV_;
     std::condition_variable saveCV_;

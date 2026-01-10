@@ -17,6 +17,7 @@
 #include "../../include/game/ChunkPool.hpp"
 #include "../../include/game/ChunkLOD.hpp"
 #include "../../include/game/ChunkCache.hpp"
+#include "../../include/game/RAIIThread.hpp"
 
 class ChunkStreamer {
 public:
@@ -93,8 +94,8 @@ public:
 
 private:
     // Worker threads
-    std::vector<std::thread> loader_threads_;
-    std::vector<std::thread> unloader_threads_;
+    ThreadPool loader_threads_;  // Changed from std::vector<std::thread> to ThreadPool
+    ThreadPool unloader_threads_;  // Changed from std::vector<std::thread> to ThreadPool
     
     // Queues
     std::priority_queue<ChunkRequest> load_queue_;
