@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <thread>
 #include <chrono>
+#include <algorithm>
 
 #include "../../include/game/ChunkCache.hpp"
 
@@ -50,11 +51,28 @@ bool ChunkCache::Put(int x, int z, ChunkLOD lod,
     std::unique_lock<std::shared_mutex> lock(cache_mutex_);
     
     // Check if we need to evict
-    if (memory_cache_.size() >= config_.max_memory_cache_size ||
-        stats_.memory_usage_bytes + estimated_size > config_.max_memory_size_bytes) {
+    bool needs_eviction = (memory_cache_.size() >= config_.max_memory_cache_size ||
+                          stats_.memory_usage_bytes + estimated_size > config_.max_memory_size_bytes);
+    
+    if (needs_eviction) {
+        // Release lock temporarily to avoid deadlock during eviction
         lock.unlock();
         ApplyEvictionPolicy();
         lock.lock();
+        
+        // Re-check condition after eviction
+        if (memory_cache_.size() >= config_.max_memory_cache_size ||
+            stats_.memory_usage_bytes + estimated_size > config_.max_memory_size_bytes) {
+            // Still too full after eviction
+            return false;
+        }
+    }
+    
+    // Check if key already exists to update memory usage correctly
+    auto existing_it = memory_cache_.find(key);
+    if (existing_it != memory_cache_.end()) {
+        UpdateMemoryUsage(-existing_it->second.size_bytes);
+        access_order_.remove(key);
     }
     
     // Create cache entry
@@ -69,7 +87,7 @@ bool ChunkCache::Put(int x, int z, ChunkLOD lod,
     };
     
     // Add to memory cache
-    memory_cache_[key] = entry;
+    memory_cache_[key] = std::move(entry);
     access_order_.push_front(key); // Most recently used
     access_frequency_[key] = 1;
     
@@ -89,9 +107,9 @@ bool ChunkCache::Put(int x, int z, ChunkLOD lod,
 std::shared_ptr<WorldChunk> ChunkCache::Get(int x, int z, ChunkLOD lod) {
     std::string key = MakeCacheKey(x, z, lod);
     
-    // Try memory cache first
+    // Try memory cache first with exclusive lock since we modify access tracking
     {
-        std::shared_lock<std::shared_mutex> lock(cache_mutex_);
+        std::unique_lock<std::shared_mutex> lock(cache_mutex_);
         auto it = memory_cache_.find(key);
         if (it != memory_cache_.end()) {
             // Update access info
@@ -124,7 +142,7 @@ std::shared_ptr<WorldChunk> ChunkCache::Get(int x, int z, ChunkLOD lod) {
             RecordHit(CacheLevel::DISK);
             RecordLoad(load_time);
             
-            // Add to memory cache
+            // Add to memory cache with proper locking
             Put(x, z, lod, chunk);
             
             return chunk;
@@ -190,7 +208,12 @@ void ChunkCache::Clear() {
     memory_cache_.clear();
     access_order_.clear();
     access_frequency_.clear();
-    UpdateMemoryUsage(-stats_.memory_usage_bytes);
+    
+    // Reset memory usage with thread-safe update
+    {
+        std::lock_guard<std::mutex> stats_lock(stats_mutex_);
+        stats_.memory_usage_bytes = 0;
+    }
     
     // Clear disk cache if enabled
     if (config_.enable_disk_cache) {
@@ -201,7 +224,12 @@ void ChunkCache::Clear() {
             std::filesystem::remove(pair.second.filename);
         }
         disk_cache_index_.clear();
-        stats_.disk_usage_bytes = 0;
+        
+        // Reset disk usage with thread-safe update
+        {
+            std::lock_guard<std::mutex> stats_lock(stats_mutex_);
+            stats_.disk_usage_bytes = 0;
+        }
         
         lock.lock();
     }
@@ -342,7 +370,12 @@ bool ChunkCache::LoadFromDisk() {
         entry.lod = static_cast<ChunkLOD>(lod_int);
         
         disk_cache_index_[key] = entry;
-        stats_.disk_usage_bytes += size_bytes;
+        
+        // Thread-safe disk usage update
+        {
+            std::lock_guard<std::mutex> stats_lock(stats_mutex_);
+            stats_.disk_usage_bytes += size_bytes;
+        }
     }
     
     return index_stream.good();
@@ -382,10 +415,12 @@ void ChunkCache::SetConfig(const CacheConfig& config) {
 }
 
 size_t ChunkCache::GetMemoryUsage() const {
+    std::lock_guard<std::mutex> lock(stats_mutex_);
     return stats_.memory_usage_bytes;
 }
 
 size_t ChunkCache::GetDiskUsage() const {
+    std::lock_guard<std::mutex> lock(stats_mutex_);
     return stats_.disk_usage_bytes;
 }
 
@@ -417,6 +452,8 @@ std::string ChunkCache::GetDiskFilename(int x, int z, ChunkLOD lod) const {
 }
 
 void ChunkCache::ApplyEvictionPolicy() {
+    std::unique_lock<std::shared_mutex> lock(cache_mutex_);
+    
     switch (config_.eviction_policy) {
         case CacheConfig::EvictionPolicy::LRU:
             LRUEviction();
@@ -431,8 +468,6 @@ void ChunkCache::ApplyEvictionPolicy() {
 }
 
 void ChunkCache::LRUEviction() {
-    std::unique_lock<std::shared_mutex> lock(cache_mutex_);
-    
     while (!access_order_.empty() && 
            (memory_cache_.size() > config_.max_memory_cache_size ||
             stats_.memory_usage_bytes > config_.max_memory_size_bytes)) {
@@ -443,19 +478,38 @@ void ChunkCache::LRUEviction() {
         
         auto it = memory_cache_.find(key);
         if (it != memory_cache_.end()) {
-            // Update memory usage
-            UpdateMemoryUsage(-it->second.size_bytes);
+            // Save chunk data before potentially releasing the lock
+            auto chunk_copy = it->second.chunk;
+            bool is_dirty = it->second.dirty;
+            size_t chunk_size = it->second.size_bytes;
             
-            // Save to disk if dirty
-            if (it->second.dirty && config_.enable_disk_cache) {
-                lock.unlock();
-                SaveToDiskInternal(key, it->second);
-                lock.lock();
-            }
-            
-            // Remove from memory
+            // Remove from memory structures while holding lock
+            UpdateMemoryUsage(-chunk_size);
             memory_cache_.erase(it);
             access_frequency_.erase(key);
+            
+            // Save to disk if dirty and disk cache is enabled
+            if (is_dirty && config_.enable_disk_cache) {
+                // Create temporary entry for saving without holding cache lock
+                CacheEntry temp_entry{
+                    .chunk = chunk_copy,
+                    .size_bytes = chunk_size,
+                    .access_count = 0,
+                    .last_access = std::chrono::steady_clock::now(),
+                    .creation_time = std::chrono::steady_clock::now(),
+                    .dirty = true,
+                    .persisted = false
+                };
+                
+                // Release cache lock for disk I/O
+                cache_mutex_.unlock();
+                try {
+                    SaveToDiskInternal(key, temp_entry);
+                } catch (...) {
+                    // Log error but continue eviction
+                }
+                cache_mutex_.lock();
+            }
             
             stats_.cache_evictions++;
         }
@@ -463,43 +517,59 @@ void ChunkCache::LRUEviction() {
 }
 
 void ChunkCache::LFUEviction() {
-    std::unique_lock<std::shared_mutex> lock(cache_mutex_);
+    // Create a copy of frequencies to avoid modifying while iterating
+    std::vector<std::pair<std::string, uint64_t>> frequencies;
+    frequencies.reserve(access_frequency_.size());
+    for (const auto& pair : access_frequency_) {
+        frequencies.emplace_back(pair.first, pair.second);
+    }
     
-    while (!access_frequency_.empty() && 
-           (memory_cache_.size() > config_.max_memory_cache_size ||
-            stats_.memory_usage_bytes > config_.max_memory_size_bytes)) {
-        
-        // Find least frequently used key
-        std::string lfu_key;
-        uint64_t min_frequency = UINT64_MAX;
-        
-        for (const auto& pair : access_frequency_) {
-            if (pair.second < min_frequency) {
-                min_frequency = pair.second;
-                lfu_key = pair.first;
-            }
+    // Sort by frequency (ascending)
+    std::sort(frequencies.begin(), frequencies.end(),
+              [](const auto& a, const auto& b) {
+                  return a.second < b.second;
+              });
+    
+    for (const auto& freq_pair : frequencies) {
+        if (memory_cache_.size() <= config_.max_memory_cache_size &&
+            stats_.memory_usage_bytes <= config_.max_memory_size_bytes) {
+            break;
         }
         
-        if (lfu_key.empty()) break;
-        
-        auto it = memory_cache_.find(lfu_key);
+        const std::string& key = freq_pair.first;
+        auto it = memory_cache_.find(key);
         if (it != memory_cache_.end()) {
-            // Update memory usage
-            UpdateMemoryUsage(-it->second.size_bytes);
+            // Save chunk data before potentially releasing the lock
+            auto chunk_copy = it->second.chunk;
+            bool is_dirty = it->second.dirty;
+            size_t chunk_size = it->second.size_bytes;
             
-            // Save to disk if dirty
-            if (it->second.dirty && config_.enable_disk_cache) {
-                lock.unlock();
-                SaveToDiskInternal(lfu_key, it->second);
-                lock.lock();
-            }
-            
-            // Remove from memory
+            // Remove from memory structures while holding lock
+            UpdateMemoryUsage(-chunk_size);
             memory_cache_.erase(it);
-            access_frequency_.erase(lfu_key);
+            access_frequency_.erase(key);
+            access_order_.remove(key);
             
-            // Remove from LRU list
-            access_order_.remove(lfu_key);
+            // Save to disk if dirty and disk cache is enabled
+            if (is_dirty && config_.enable_disk_cache) {
+                CacheEntry temp_entry{
+                    .chunk = chunk_copy,
+                    .size_bytes = chunk_size,
+                    .access_count = 0,
+                    .last_access = std::chrono::steady_clock::now(),
+                    .creation_time = std::chrono::steady_clock::now(),
+                    .dirty = true,
+                    .persisted = false
+                };
+                
+                cache_mutex_.unlock();
+                try {
+                    SaveToDiskInternal(key, temp_entry);
+                } catch (...) {
+                    // Log error but continue eviction
+                }
+                cache_mutex_.lock();
+            }
             
             stats_.cache_evictions++;
         }
@@ -507,9 +577,7 @@ void ChunkCache::LFUEviction() {
 }
 
 void ChunkCache::FIFOEviction() {
-    std::unique_lock<std::shared_mutex> lock(cache_mutex_);
-    
-    // Sort by creation time
+    // Collect creation times while holding lock
     std::vector<std::pair<std::string, std::chrono::steady_clock::time_point>> creation_times;
     creation_times.reserve(memory_cache_.size());
     
@@ -517,6 +585,7 @@ void ChunkCache::FIFOEviction() {
         creation_times.emplace_back(pair.first, pair.second.creation_time);
     }
     
+    // Sort by creation time (oldest first)
     std::sort(creation_times.begin(), creation_times.end(),
               [](const auto& a, const auto& b) {
                   return a.second < b.second;
@@ -531,20 +600,37 @@ void ChunkCache::FIFOEviction() {
         const std::string& key = pair.first;
         auto it = memory_cache_.find(key);
         if (it != memory_cache_.end()) {
-            // Update memory usage
-            UpdateMemoryUsage(-it->second.size_bytes);
+            // Save chunk data before potentially releasing the lock
+            auto chunk_copy = it->second.chunk;
+            bool is_dirty = it->second.dirty;
+            size_t chunk_size = it->second.size_bytes;
             
-            // Save to disk if dirty
-            if (it->second.dirty && config_.enable_disk_cache) {
-                lock.unlock();
-                SaveToDiskInternal(key, it->second);
-                lock.lock();
-            }
-            
-            // Remove from memory
+            // Remove from memory structures while holding lock
+            UpdateMemoryUsage(-chunk_size);
             memory_cache_.erase(it);
             access_frequency_.erase(key);
             access_order_.remove(key);
+            
+            // Save to disk if dirty and disk cache is enabled
+            if (is_dirty && config_.enable_disk_cache) {
+                CacheEntry temp_entry{
+                    .chunk = chunk_copy,
+                    .size_bytes = chunk_size,
+                    .access_count = 0,
+                    .last_access = std::chrono::steady_clock::now(),
+                    .creation_time = std::chrono::steady_clock::now(),
+                    .dirty = true,
+                    .persisted = false
+                };
+                
+                cache_mutex_.unlock();
+                try {
+                    SaveToDiskInternal(key, temp_entry);
+                } catch (...) {
+                    // Log error but continue eviction
+                }
+                cache_mutex_.lock();
+            }
             
             stats_.cache_evictions++;
         }
@@ -568,6 +654,7 @@ size_t ChunkCache::EstimateChunkSize(const WorldChunk& chunk) const {
 }
 
 void ChunkCache::UpdateMemoryUsage(size_t delta) {
+    std::lock_guard<std::mutex> lock(stats_mutex_);
     stats_.memory_usage_bytes += delta;
     if (delta < 0 && stats_.memory_usage_bytes < 0) {
         stats_.memory_usage_bytes = 0;
@@ -591,6 +678,17 @@ bool ChunkCache::SaveToDiskInternal(const std::string& key, const CacheEntry& en
         
         if (oldest != disk_cache_index_.end()) {
             std::filesystem::remove(oldest->second.filename);
+            
+            // Thread-safe disk usage update
+            {
+                std::lock_guard<std::mutex> stats_lock(stats_mutex_);
+                if (stats_.disk_usage_bytes >= oldest->second.size_bytes) {
+                    stats_.disk_usage_bytes -= oldest->second.size_bytes;
+                } else {
+                    stats_.disk_usage_bytes = 0;
+                }
+            }
+            
             disk_cache_index_.erase(oldest);
         }
     }
@@ -646,7 +744,12 @@ bool ChunkCache::SaveToDiskInternal(const std::string& key, const CacheEntry& en
     disk_entry.lod = lod;
     
     disk_cache_index_[key] = disk_entry;
-    stats_.disk_usage_bytes += data_size;
+    
+    // Thread-safe disk usage update
+    {
+        std::lock_guard<std::mutex> stats_lock(stats_mutex_);
+        stats_.disk_usage_bytes += data_size;
+    }
     
     return true;
 }
@@ -664,6 +767,15 @@ std::shared_ptr<WorldChunk> ChunkCache::LoadFromDiskInternal(const std::string& 
     // Read file
     std::ifstream file(disk_entry.filename, std::ios::binary);
     if (!file) {
+        // Clean up invalid entry
+        {
+            std::lock_guard<std::mutex> stats_lock(stats_mutex_);
+            if (stats_.disk_usage_bytes >= disk_entry.size_bytes) {
+                stats_.disk_usage_bytes -= disk_entry.size_bytes;
+            } else {
+                stats_.disk_usage_bytes = 0;
+            }
+        }
         disk_cache_index_.erase(it);
         return nullptr;
     }
@@ -681,6 +793,15 @@ std::shared_ptr<WorldChunk> ChunkCache::LoadFromDiskInternal(const std::string& 
     file.read(reinterpret_cast<char*>(file_data.data()), data_size);
     
     if (!file.good()) {
+        // Clean up invalid entry
+        {
+            std::lock_guard<std::mutex> stats_lock(stats_mutex_);
+            if (stats_.disk_usage_bytes >= disk_entry.size_bytes) {
+                stats_.disk_usage_bytes -= disk_entry.size_bytes;
+            } else {
+                stats_.disk_usage_bytes = 0;
+            }
+        }
         disk_cache_index_.erase(it);
         return nullptr;
     }
@@ -708,6 +829,15 @@ std::shared_ptr<WorldChunk> ChunkCache::LoadFromDiskInternal(const std::string& 
     // Deserialize chunk
     auto chunk = DeserializeChunk(chunk_data, x, z, lod);
     if (!chunk) {
+        // Clean up invalid entry
+        {
+            std::lock_guard<std::mutex> stats_lock(stats_mutex_);
+            if (stats_.disk_usage_bytes >= disk_entry.size_bytes) {
+                stats_.disk_usage_bytes -= disk_entry.size_bytes;
+            } else {
+                stats_.disk_usage_bytes = 0;
+            }
+        }
         disk_cache_index_.erase(it);
         return nullptr;
     }
@@ -724,11 +854,14 @@ bool ChunkCache::RemoveFromDisk(const std::string& key) {
     // Remove file
     std::filesystem::remove(it->second.filename);
     
-    // Update disk usage
-    if (stats_.disk_usage_bytes >= it->second.size_bytes) {
-        stats_.disk_usage_bytes -= it->second.size_bytes;
-    } else {
-        stats_.disk_usage_bytes = 0;
+    // Thread-safe disk usage update
+    {
+        std::lock_guard<std::mutex> stats_lock(stats_mutex_);
+        if (stats_.disk_usage_bytes >= it->second.size_bytes) {
+            stats_.disk_usage_bytes -= it->second.size_bytes;
+        } else {
+            stats_.disk_usage_bytes = 0;
+        }
     }
     
     disk_cache_index_.erase(it);
@@ -870,7 +1003,11 @@ void ChunkCache::SaveThreadFunc() {
                     float save_time = std::chrono::duration<float, std::milli>(
                         end_time - start_time).count();
                     RecordSave(save_time);
-                    stats_.cache_saves++;
+                    
+                    {
+                        std::lock_guard<std::mutex> stats_lock(stats_mutex_);
+                        stats_.cache_saves++;
+                    }
                 }
             }
         }

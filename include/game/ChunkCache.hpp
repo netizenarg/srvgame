@@ -148,11 +148,14 @@ private:
     std::queue<std::string> save_queue_;
     std::condition_variable save_cv_;
     std::mutex save_mutex_;
-    
+
+    // atomic flag for thread-safe operations
+    std::atomic<bool> is_evicting_{false};
+
     // Helper methods
     std::string MakeCacheKey(int x, int z, ChunkLOD lod) const;
     std::string GetDiskFilename(int x, int z, ChunkLOD lod) const;
-    
+
     // Cache policies
     void ApplyEvictionPolicy();
     void LRUEviction();
