@@ -2,10 +2,8 @@
 #include "logging/Logger.hpp"
 #include "network/GameServer.hpp"
 #include "process/ProcessPool.hpp"
-#include "game/GameLogic.hpp"
+#include "game/GameLogic.hpp"  // Updated include
 #include "database/CitusClient.hpp"
-#include "game/WorldGenerator.hpp"
-#include "game/NPCSystem.hpp"
 #include <iostream>
 #include <csignal>
 #include <thread>
@@ -50,7 +48,7 @@ void WorkerMain(int workerId) {
 
                              // Configure world settings
                              GameLogic::WorldConfig worldConfig;
-                             worldConfig.seed = config.GetWorldSeed() + workerId; // Different seed per worker
+                             worldConfig.seed = config.GetWorldSeed() + workerId;
                              worldConfig.viewDistance = config.GetViewDistance();
                              worldConfig.chunkSize = config.GetChunkSize();
                              worldConfig.maxActiveChunks = config.GetMaxActiveChunks();
@@ -70,33 +68,31 @@ void WorkerMain(int workerId) {
                              // Create game server
                              GameServer server(config);
 
-                             // Set session factory with enhanced 3D world handlers
+                             // Set session factory
                              server.SetSessionFactory([workerId](asio::ip::tcp::socket socket) {
                                  auto session = std::make_shared<GameSession>(std::move(socket));
 
                                  Logger::Debug("Worker {} created new game session {}",
                                                workerId, session->GetSessionId());
 
-                                 // Enhanced message handler for 3D world system
+                                 // Message handler
                                  session->SetMessageHandler([session, workerId](const nlohmann::json& msg) {
                                      try {
                                          std::string msgType = msg.value("type", "");
 
-                                         // Special handling for 3D world messages
+                                         // 3D world messages
                                          if (msgType == "world_chunk_request" ||
                                              msgType == "player_position_update" ||
                                              msgType == "npc_interaction" ||
                                              msgType == "familiar_command" ||
                                              msgType == "collision_check") {
 
-                                             Logger::Debug("Worker {} processing 3D world message: {} from session {}",
-                                                           workerId, msgType, session->GetSessionId());
+                                             Logger::Debug("Worker {} processing 3D world message: {}",
+                                                           workerId, msgType);
 
-                                             // Direct handling through GameLogic
                                              GameLogic::GetInstance().HandleMessage(session->GetSessionId(), msg);
 
                                              } else {
-                                                 // Existing message handling
                                                  GameLogic::GetInstance().HandleMessage(session->GetSessionId(), msg);
                                              }
                                      } catch (const std::exception& e) {
@@ -105,7 +101,7 @@ void WorkerMain(int workerId) {
                                      }
                                  });
 
-                                 // Enhanced close handler
+                                 // Close handler
                                  session->SetCloseHandler([session, workerId]() {
                                      Logger::Info("Worker {} session {} closing", workerId, session->GetSessionId());
 
@@ -114,7 +110,6 @@ void WorkerMain(int workerId) {
                                      uint64_t sessionId = session->GetSessionId();
                                      PlayerManager::GetInstance().PlayerDisconnected(sessionId);
 
-                                     // Notify game logic for 3D world cleanup
                                      GameLogic::GetInstance().OnPlayerDisconnected(sessionId);
 
                                      Logger::Debug("Worker {} session {} cleanup complete", workerId, sessionId);
@@ -138,13 +133,8 @@ void WorkerMain(int workerId) {
                                          auto currentTime = std::chrono::steady_clock::now();
                                          auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(currentTime - lastCleanupTime);
 
-                                         // Perform periodic world maintenance every 30 seconds
                                          if (elapsed.count() >= 30) {
                                              Logger::Debug("Worker {} performing periodic world maintenance", workerId);
-
-                                             // Clean up old NPCs and chunks
-                                             // This would be implemented in GameLogic
-
                                              lastCleanupTime = currentTime;
                                          }
 
@@ -174,9 +164,8 @@ void WorkerMain(int workerId) {
                              Logger::Info("Worker {} beginning cleanup...", workerId);
                              gameLogic.Shutdown();
 
-                             // Additional cleanup for 3D world system
                              Logger::Info("Worker {} saving world state...", workerId);
-                             // Save world state to database here
+                             // Save world state
 
                              Logger::Info("Worker {} shutdown complete", workerId);
 }
@@ -196,7 +185,7 @@ int main(int argc, char* argv[]) {
     // Initialize logging
     Logger::Initialize();
 
-    Logger::Info("Starting 3D Game Server v2.0.0 with Infinite World System");
+    Logger::Info("Starting 3D Game Server v2.0.0 with LogicCore System");
     Logger::Info("World Seed: {}", config.GetWorldSeed());
     Logger::Info("View Distance: {} chunks", config.GetViewDistance());
     Logger::Info("Chunk Size: {} units", config.GetChunkSize());
@@ -215,9 +204,6 @@ int main(int argc, char* argv[]) {
     Logger::Info("Master process waiting for shutdown signal...");
     while (!g_shutdown.load()) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
-
-        // Optional: Monitor worker health
-        // processPool.CheckWorkerHealth();
     }
 
     // Shutdown process pool gracefully

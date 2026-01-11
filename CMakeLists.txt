@@ -13,16 +13,23 @@ find_package(nlohmann_json REQUIRED)
 # Add GLM include directory
 include_directories(${glm_INCLUDE_DIRS})
 
-# Add loot system source files
+# Core logic system
+set(LOGIC_CORE_SOURCES
+    src/game/LogicCore.cpp
+    src/game/LogicWorld.cpp
+    src/game/LogicEntity.cpp
+    src/game/GameLogic.cpp
+)
+
+# Loot system source files
 set(LOOT_SOURCES
     src/game/LootItem.cpp
     src/game/InventorySystem.cpp
     src/game/LootTable.cpp
 )
 
-# Source files for 3D world system
+# 3D world system
 set(WORLD_SOURCES
-    src/game/GameLogic.cpp
     src/game/WorldChunk.cpp
     src/game/WorldGenerator.cpp
     src/game/NPCSystem.cpp
@@ -41,14 +48,14 @@ include_directories(
 )
 
 # Main executable
-add_executable(gameserver3d
+add_executable(gameserver
     src/main.cpp
+    ${LOGIC_CORE_SOURCES}
     ${WORLD_SOURCES}
-    # ... existing source files ...
 )
 
 # Link libraries
-target_link_libraries(gameserver3d
+target_link_libraries(gameserver
     ${OPENGL_LIBRARIES}
     ${CMAKE_THREAD_LIBS_INIT}
     asio::asio
@@ -57,12 +64,12 @@ target_link_libraries(gameserver3d
 
 # Compiler flags
 if(MSVC)
-    target_compile_options(gameserver3d PRIVATE /W4)
+    target_compile_options(gameserver PRIVATE /W4)
 else()
-    target_compile_options(gameserver3d PRIVATE -Wall -Wextra -pedantic)
+    target_compile_options(gameserver PRIVATE -Wall -Wextra -pedantic)
 endif()
 
 # Installation
-install(TARGETS gameserver3d DESTINATION bin)
+install(TARGETS gameserver DESTINATION bin)
 install(DIRECTORY config/ DESTINATION config)
 install(DIRECTORY scripts/ DESTINATION scripts)
