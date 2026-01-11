@@ -4,8 +4,14 @@
 #include <vector>
 #include <memory>
 #include <unordered_set>
+#include <unordered_map>
+#include <mutex>
+#include <string>
 
 #include "../../include/game/WorldChunk.hpp"
+
+// Forward declarations
+enum class CollisionType : uint8_t;
 
 struct RaycastHit {
     bool hit = false;
@@ -16,19 +22,20 @@ struct RaycastHit {
     uint64_t chunkId = 0;
 };
 
+// Define CollisionType enum here since it's specific to CollisionSystem
+enum class CollisionType : uint8_t {
+    NONE,
+    WORLD,
+    ENTITY,
+    TRIGGER
+};
+
 struct CollisionResult {
     bool collided = false;
     glm::vec3 resolution;
     float penetration = 0.0f;
     uint64_t collidedWith = 0; // entityId or 0 for world
     CollisionType type = CollisionType::NONE;
-};
-
-enum class CollisionType {
-    NONE,
-    WORLD,
-    ENTITY,
-    TRIGGER
 };
 
 struct BoundingSphere {
