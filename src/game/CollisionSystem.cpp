@@ -1,17 +1,27 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <cfloat>
+#include <limits>
 
 #include "../../include/game/CollisionSystem.hpp"
 
+// Constants
+static constexpr float EPSILON = 1e-6f;
+static constexpr float INV_EPSILON = 1e6f;
+
 // BoundingSphere implementation
 bool BoundingSphere::Intersects(const BoundingSphere& other) const {
+    if (!IsValid() || !other.IsValid()) return false;
+    
     float distanceSquared = glm::distance2(center, other.center);
     float radiusSum = radius + other.radius;
     return distanceSquared <= (radiusSum * radiusSum);
 }
 
 bool BoundingSphere::IntersectsRay(const glm::vec3& origin, const glm::vec3& direction, float& distance) const {
+    if (!IsValid()) return false;
+    
     glm::vec3 oc = origin - center;
     float a = glm::dot(direction, direction);
     float b = 2.0f * glm::dot(oc, direction);
@@ -40,21 +50,28 @@ bool BoundingSphere::IntersectsRay(const glm::vec3& origin, const glm::vec3& dir
 
 // BoundingBox implementation
 bool BoundingBox::Intersects(const BoundingBox& other) const {
+    if (!IsValid() || !other.IsValid()) return false;
+    
     return (min.x <= other.max.x && max.x >= other.min.x) &&
            (min.y <= other.max.y && max.y >= other.min.y) &&
            (min.z <= other.max.z && max.z >= other.min.z);
 }
 
 bool BoundingBox::IntersectsSphere(const glm::vec3& center, float radius) const {
+    if (!IsValid() || radius < 0.0f) return false;
+    
     // Find the closest point on the box to the sphere center
     float closestX = std::clamp(center.x, min.x, max.x);
     float closestY = std::clamp(center.y, min.y, max.y);
     float closestZ = std::clamp(center.z, min.z, max.z);
     
     // Calculate distance between closest point and sphere center
-    float distance = glm::distance(glm::vec3(closestX, closestY, closestZ), center);
+    float distanceSquared = 
+        (center.x - closestX) * (center.x - closestX) +
+        (center.y - closestY) * (center.y - closestY) +
+        (center.z - closestZ) * (center.z - closestZ);
     
-    return distance <= radius;
+    return distanceSquared <= (radius * radius);
 }
 
 glm::vec3 BoundingBox::GetCenter() const {
@@ -68,126 +85,191 @@ float BoundingBox::GetRadius() const {
 
 // CollisionSystem implementation
 CollisionSystem::CollisionSystem() {
-    // Initialize spatial grid
     spatialGrid_.clear();
-    gridCellSize_ = 10.0f;
+    spatialGrid_.reserve(1024); // Pre-allocate space
 }
 
-void CollisionSystem::RegisterEntity(uint64_t entityId, const BoundingSphere& bounds, CollisionType type) {
+void CollisionSystem::SetGridCellSize(float size) {
     std::lock_guard<std::mutex> lock(mutex_);
+    
+    if (size < 0.1f) size = 0.1f;
+    if (size > 100.0f) size = 100.0f;
+    
+    gridCellSize_ = size;
+    
+    // Rebuild spatial grid with new cell size
+    spatialGrid_.clear();
+    for (const auto& [entityId, entity] : entities_) {
+        GridCellKey key = GetGridKey(entity.bounds.center);
+        spatialGrid_[key].entities.insert(entityId);
+    }
+}
+
+void CollisionSystem::SetWorldBounds(const BoundingBox& bounds) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    
+    if (bounds.IsValid()) {
+        worldBounds_ = bounds;
+    }
+}
+
+bool CollisionSystem::RegisterEntity(uint64_t entityId, const BoundingSphere& bounds, CollisionType type, bool isStatic) {
+    if (entityId == 0) return false; // 0 is reserved for world
+    if (!ValidateBounds(bounds)) return false;
+    if (!ValidatePosition(bounds.center)) return false;
+    
+    std::lock_guard<std::mutex> lock(mutex_);
+    
+    // Check if entity already exists
+    if (entities_.find(entityId) != entities_.end()) {
+        return false;
+    }
     
     CollisionEntity entity;
     entity.id = entityId;
     entity.bounds = bounds;
     entity.type = type;
-    entity.isStatic = false; // By default, entities are dynamic
+    entity.isStatic = isStatic;
+    entity.isValid = true;
     
     entities_[entityId] = entity;
     
     // Add to spatial grid
-    std::string gridKey = GetGridKey(bounds.center);
-    spatialGrid_[gridKey].entities.insert(entityId);
+    GridCellKey key = GetGridKey(bounds.center);
+    spatialGrid_[key].entities.insert(entityId);
+    
+    return true;
 }
 
-void CollisionSystem::UpdateEntity(uint64_t entityId, const glm::vec3& position) {
+bool CollisionSystem::UpdateEntity(uint64_t entityId, const glm::vec3& position) {
+    if (!ValidatePosition(position)) return false;
+    
     std::lock_guard<std::mutex> lock(mutex_);
     
     auto it = entities_.find(entityId);
-    if (it != entities_.end()) {
-        // Remove from old grid cell
-        std::string oldGridKey = GetGridKey(it->second.bounds.center);
-        spatialGrid_[oldGridKey].entities.erase(entityId);
-        
-        // Update position
-        it->second.bounds.center = position;
-        
-        // Add to new grid cell
-        std::string newGridKey = GetGridKey(position);
-        spatialGrid_[newGridKey].entities.insert(entityId);
+    if (it == entities_.end() || !it->second.isValid) {
+        return false;
     }
+    
+    // Skip update for static entities
+    if (it->second.isStatic) {
+        return true;
+    }
+    
+    // Remove from old grid cell
+    GridCellKey oldKey = GetGridKey(it->second.bounds.center);
+    RemoveFromGrid(entityId, oldKey);
+    
+    // Update position
+    it->second.bounds.center = position;
+    
+    // Add to new grid cell
+    GridCellKey newKey = GetGridKey(position);
+    AddToGrid(entityId, newKey);
+    
+    return true;
 }
 
-void CollisionSystem::UnregisterEntity(uint64_t entityId) {
+bool CollisionSystem::UnregisterEntity(uint64_t entityId) {
     std::lock_guard<std::mutex> lock(mutex_);
     
     auto it = entities_.find(entityId);
-    if (it != entities_.end()) {
-        // Remove from spatial grid
-        std::string gridKey = GetGridKey(it->second.bounds.center);
-        spatialGrid_[gridKey].entities.erase(entityId);
-        
-        // Remove from entities map
-        entities_.erase(it);
+    if (it == entities_.end()) {
+        return false;
     }
+    
+    // Remove from spatial grid
+    GridCellKey key = GetGridKey(it->second.bounds.center);
+    RemoveFromGrid(entityId, key);
+    
+    // Remove from entities map
+    entities_.erase(it);
+    
+    // Clean up empty grid cells periodically
+    if (entities_.empty() || entities_.size() % 100 == 0) {
+        CleanEmptyGridCells();
+    }
+    
+    return true;
+}
+
+const BoundingSphere* CollisionSystem::GetEntityBounds(uint64_t entityId) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    
+    auto it = entities_.find(entityId);
+    if (it == entities_.end() || !it->second.isValid) {
+        return nullptr;
+    }
+    
+    return &it->second.bounds;
+}
+
+bool CollisionSystem::IsEntityRegistered(uint64_t entityId) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return entities_.find(entityId) != entities_.end();
 }
 
 void CollisionSystem::RegisterChunk(const WorldChunk& chunk) {
     std::lock_guard<std::mutex> lock(mutex_);
     
+    uint64_t chunkId = CalculateChunkId(chunk.GetChunkX(), chunk.GetChunkZ());
+    
+    // Check if chunk already exists
+    if (chunks_.find(chunkId) != chunks_.end()) {
+        return;
+    }
+    
     // Create collision chunk
     CollisionChunk collisionChunk;
     collisionChunk.chunkX = chunk.GetChunkX();
     collisionChunk.chunkZ = chunk.GetChunkZ();
+    collisionChunk.chunkId = chunkId;
     
     // Calculate bounding box for the chunk
     glm::vec3 worldPos = chunk.GetWorldPosition();
     collisionChunk.bounds.min = worldPos;
     collisionChunk.bounds.max = worldPos + glm::vec3(WorldChunk::CHUNK_WIDTH, 100.0f, WorldChunk::CHUNK_WIDTH);
     
-    // Extract collision obstacles from chunk
-    const auto& collisionVerts = chunk.GetCollisionVertices();
-    const auto& collisionTris = chunk.GetCollisionTriangles();
-    
-    // For now, we'll create bounding spheres for each triangle
-    // In a more optimized system, you'd use the actual triangle mesh
-    for (const auto& tri : collisionTris) {
-        if (tri.v0 < collisionVerts.size() && 
-            tri.v1 < collisionVerts.size() && 
-            tri.v2 < collisionVerts.size()) {
-            
-            glm::vec3 v0 = collisionVerts[tri.v0];
-            glm::vec3 v1 = collisionVerts[tri.v1];
-            glm::vec3 v2 = collisionVerts[tri.v2];
-            
-            // Calculate triangle center
-            glm::vec3 center = (v0 + v1 + v2) / 3.0f;
-            
-            // Calculate bounding sphere radius
-            float maxDist = std::max({
-                glm::distance(center, v0),
-                glm::distance(center, v1),
-                glm::distance(center, v2)
-            });
-            
-            BoundingSphere sphere;
-            sphere.center = center;
-            sphere.radius = maxDist;
-            
-            collisionChunk.obstacles.push_back(sphere);
-        }
+    if (!collisionChunk.bounds.IsValid()) {
+        return;
     }
     
+    // Build optimized collision data
+    BuildChunkCollisionData(collisionChunk, chunk);
+    
     // Store the chunk
-    std::string key = std::to_string(chunk.GetChunkX()) + "_" + std::to_string(chunk.GetChunkZ());
-    chunks_[key] = collisionChunk;
+    chunks_[chunkId] = std::move(collisionChunk);
 }
 
 void CollisionSystem::UnregisterChunk(int chunkX, int chunkZ) {
     std::lock_guard<std::mutex> lock(mutex_);
     
-    std::string key = std::to_string(chunkX) + "_" + std::to_string(chunkZ);
-    chunks_.erase(key);
+    uint64_t chunkId = CalculateChunkId(chunkX, chunkZ);
+    chunks_.erase(chunkId);
+}
+
+void CollisionSystem::ClearAllChunks() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    chunks_.clear();
 }
 
 CollisionResult CollisionSystem::CheckCollision(const glm::vec3& position, float radius, uint64_t excludeId) {
+    if (!ValidatePosition(position) || radius < 0.0f) {
+        return CollisionResult(); // Invalid input
+    }
+    
     std::lock_guard<std::mutex> lock(mutex_);
     
     CollisionResult result;
     BoundingSphere testSphere{position, radius};
     
+    if (!testSphere.IsValid()) {
+        return result;
+    }
+    
     // Check against entities
     for (const auto& [entityId, entity] : entities_) {
-        if (entityId == excludeId) continue;
+        if (entityId == excludeId || !entity.isValid) continue;
         
         if (TestSphereSphere(testSphere, entity.bounds, result)) {
             result.collided = true;
@@ -198,28 +280,60 @@ CollisionResult CollisionSystem::CheckCollision(const glm::vec3& position, float
     }
     
     // Check against world chunks
-    for (const auto& [key, chunk] : chunks_) {
-        // First check bounding box
+    for (const auto& [chunkId, chunk] : chunks_) {
+        // Early out with bounding box test
         if (!chunk.bounds.IntersectsSphere(position, radius)) {
             continue;
         }
         
-        // Then check individual obstacles
-        for (const auto& obstacle : chunk.obstacles) {
-            if (TestSphereSphere(testSphere, obstacle, result)) {
-                result.collided = true;
-                result.collidedWith = 0; // World collision
-                result.type = CollisionType::WORLD;
-                result.chunkId = std::stoull(key);
-                return result;
+        // Test against chunk bounding box first
+        if (TestSphereBox(testSphere, chunk.bounds, result)) {
+            result.collided = true;
+            result.collidedWith = 0; // World collision
+            result.type = CollisionType::WORLD;
+            result.chunkId = chunkId;
+            
+            // If chunk has detailed collision data, test against triangles
+            if (chunk.hasCollisionData) {
+                bool detailedCollision = false;
+                CollisionResult detailedResult;
+                
+                // Test against triangles (simplified - should use spatial partitioning)
+                for (const auto& tri : chunk.triangles) {
+                    if (tri[0] < chunk.vertices.size() && 
+                        tri[1] < chunk.vertices.size() && 
+                        tri[2] < chunk.vertices.size()) {
+                        
+                        const glm::vec3& v0 = chunk.vertices[tri[0]];
+                        const glm::vec3& v1 = chunk.vertices[tri[1]];
+                        const glm::vec3& v2 = chunk.vertices[tri[2]];
+                        
+                        if (TestSphereTriangle(position, radius, v0, v1, v2, detailedResult)) {
+                            if (!detailedCollision || detailedResult.penetration < result.penetration) {
+                                detailedCollision = true;
+                                result = detailedResult;
+                                result.collidedWith = 0;
+                                result.type = CollisionType::WORLD;
+                                result.chunkId = chunkId;
+                            }
+                        }
+                    }
+                }
             }
+            
+            return result;
         }
     }
     
     return result;
 }
 
-bool CollisionSystem::Raycast(const glm::vec3& origin, const glm::vec3& direction, float maxDistance, RaycastHit& hit) {
+bool CollisionSystem::Raycast(const glm::vec3& origin, const glm::vec3& direction, float maxDistance, 
+                             RaycastHit& hit, uint64_t excludeId) {
+    if (!ValidatePosition(origin) || maxDistance <= 0.0f) {
+        return false;
+    }
+    
     std::lock_guard<std::mutex> lock(mutex_);
     
     glm::vec3 normalizedDir = glm::normalize(direction);
@@ -228,6 +342,8 @@ bool CollisionSystem::Raycast(const glm::vec3& origin, const glm::vec3& directio
     
     // Check against entities
     for (const auto& [entityId, entity] : entities_) {
+        if (entityId == excludeId || !entity.isValid) continue;
+        
         float distance;
         if (entity.bounds.IntersectsRay(origin, normalizedDir, distance) && 
             distance < closestDistance && distance >= 0.0f) {
@@ -243,55 +359,81 @@ bool CollisionSystem::Raycast(const glm::vec3& origin, const glm::vec3& directio
     }
     
     // Check against world chunks
-    for (const auto& [key, chunk] : chunks_) {
-        // Simple AABB ray test first
-        // For simplicity, we'll just check against the bounding box
-        // In a real implementation, you'd test against the actual geometry
-        
-        // Test against bounding box
-        // This is a simplified ray-AABB test
-        float tMin = 0.0f;
-        float tMax = maxDistance;
-        
-        for (int i = 0; i < 3; i++) {
-            float invD = 1.0f / normalizedDir[i];
-            float t0 = (chunk.bounds.min[i] - origin[i]) * invD;
-            float t1 = (chunk.bounds.max[i] - origin[i]) * invD;
-            
-            if (invD < 0.0f) std::swap(t0, t1);
-            
-            tMin = std::max(tMin, t0);
-            tMax = std::min(tMax, t1);
-            
-            if (tMax <= tMin) break;
+    for (const auto& [chunkId, chunk] : chunks_) {
+        float tMin, tMax;
+        if (!TestRayAABB(origin, normalizedDir, chunk.bounds, tMin, tMax)) {
+            continue;
         }
         
-        if (tMax > tMin && tMin < closestDistance) {
+        if (tMin < 0.0f) tMin = tMax;
+        if (tMin < 0.0f || tMin > closestDistance) {
+            continue;
+        }
+        
+        // Test against detailed geometry if available
+        if (chunk.hasCollisionData) {
+            bool chunkHit = false;
+            float chunkDistance = closestDistance;
+            glm::vec3 chunkNormal;
+            
+            // Simplified triangle testing - should use BVH or similar
+            for (const auto& tri : chunk.triangles) {
+                if (tri[0] >= chunk.vertices.size() || 
+                    tri[1] >= chunk.vertices.size() || 
+                    tri[2] >= chunk.vertices.size()) {
+                    continue;
+                }
+                
+                float t;
+                glm::vec3 normal;
+                const glm::vec3& v0 = chunk.vertices[tri[0]];
+                const glm::vec3& v1 = chunk.vertices[tri[1]];
+                const glm::vec3& v2 = chunk.vertices[tri[2]];
+                
+                if (TestRayTriangle(origin, normalizedDir, v0, v1, v2, t, normal) &&
+                    t < chunkDistance && t >= 0.0f) {
+                    chunkHit = true;
+                    chunkDistance = t;
+                    chunkNormal = normal;
+                }
+            }
+            
+            if (chunkHit) {
+                hit.hit = true;
+                hit.point = origin + normalizedDir * chunkDistance;
+                hit.normal = chunkNormal;
+                hit.distance = chunkDistance;
+                hit.chunkId = chunkId;
+                closestDistance = chunkDistance;
+                foundHit = true;
+            }
+        } else {
+            // Use bounding box hit as fallback
             hit.hit = true;
             hit.point = origin + normalizedDir * tMin;
             hit.distance = tMin;
-            hit.chunkId = std::stoull(key);
+            hit.chunkId = chunkId;
             
-            // Calculate normal
+            // Calculate normal from bounding box
             glm::vec3 center = chunk.bounds.GetCenter();
             glm::vec3 pointInBox = hit.point - center;
             glm::vec3 halfSize = (chunk.bounds.max - chunk.bounds.min) * 0.5f;
             
-            // Find which face was hit
+            // Find which face was hit based on minimum penetration
             glm::vec3 normal(0.0f);
-            float minDist = FLT_MAX;
+            float minPenetration = FLT_MAX;
             
             for (int i = 0; i < 3; i++) {
                 float distToMin = std::abs(pointInBox[i] - (-halfSize[i]));
                 float distToMax = std::abs(pointInBox[i] - halfSize[i]);
                 
-                if (distToMin < minDist) {
-                    minDist = distToMin;
+                if (distToMin < minPenetration) {
+                    minPenetration = distToMin;
                     normal = glm::vec3(0.0f);
                     normal[i] = -1.0f;
                 }
-                if (distToMax < minDist) {
-                    minDist = distToMax;
+                if (distToMax < minPenetration) {
+                    minPenetration = distToMax;
                     normal = glm::vec3(0.0f);
                     normal[i] = 1.0f;
                 }
@@ -307,33 +449,42 @@ bool CollisionSystem::Raycast(const glm::vec3& origin, const glm::vec3& directio
 }
 
 std::vector<uint64_t> CollisionSystem::GetEntitiesInRadius(const glm::vec3& position, float radius) {
+    if (!ValidatePosition(position) || radius < 0.0f) {
+        return {};
+    }
+    
     std::lock_guard<std::mutex> lock(mutex_);
     
     std::vector<uint64_t> entitiesInRadius;
     BoundingSphere testSphere{position, radius};
     
-    // Get potential entities from spatial grid cells that intersect the sphere
-    // This is a simplified version - in reality you'd get all grid cells within radius
-    std::string centerGridKey = GetGridKey(position);
+    if (!testSphere.IsValid()) {
+        return entitiesInRadius;
+    }
     
-    // Check surrounding grid cells (3x3x3 area)
-    int gridRadius = static_cast<int>(std::ceil(radius / gridCellSize_));
+    // Calculate grid bounds based on radius
+    GridCellKey minKey = GetGridKey(position - glm::vec3(radius));
+    GridCellKey maxKey = GetGridKey(position + glm::vec3(radius));
     
-    for (int dx = -gridRadius; dx <= gridRadius; dx++) {
-        for (int dy = -gridRadius; dy <= gridRadius; dy++) {
-            for (int dz = -gridRadius; dz <= gridRadius; dz++) {
-                // Calculate grid cell offset
-                glm::vec3 offset(dx * gridCellSize_, dy * gridCellSize_, dz * gridCellSize_);
-                std::string gridKey = GetGridKey(position + offset);
+    // Track processed entities to avoid duplicates
+    std::unordered_set<uint64_t> processed;
+    
+    // Check only the necessary grid cells
+    for (int x = minKey.x; x <= maxKey.x; x++) {
+        for (int y = minKey.y; y <= maxKey.y; y++) {
+            for (int z = minKey.z; z <= maxKey.z; z++) {
+                GridCellKey cellKey{x, y, z};
+                auto it = spatialGrid_.find(cellKey);
+                if (it == spatialGrid_.end()) continue;
                 
-                auto it = spatialGrid_.find(gridKey);
-                if (it != spatialGrid_.end()) {
-                    for (uint64_t entityId : it->second.entities) {
-                        auto entityIt = entities_.find(entityId);
-                        if (entityIt != entities_.end()) {
-                            if (testSphere.Intersects(entityIt->second.bounds)) {
-                                entitiesInRadius.push_back(entityId);
-                            }
+                for (uint64_t entityId : it->second.entities) {
+                    if (processed.find(entityId) != processed.end()) continue;
+                    
+                    auto entityIt = entities_.find(entityId);
+                    if (entityIt != entities_.end() && entityIt->second.isValid) {
+                        if (testSphere.Intersects(entityIt->second.bounds)) {
+                            entitiesInRadius.push_back(entityId);
+                            processed.insert(entityId);
                         }
                     }
                 }
@@ -345,9 +496,13 @@ std::vector<uint64_t> CollisionSystem::GetEntitiesInRadius(const glm::vec3& posi
 }
 
 void CollisionSystem::UpdateBroadPhase() {
-    // Update spatial grid and broad phase pairs
-    // This method could be optimized, but for now we'll just update all entities
-    // In a real system, you'd only update dynamic entities
+    std::lock_guard<std::mutex> lock(mutex_);
+    
+    // Clean up empty grid cells
+    CleanEmptyGridCells();
+    
+    // Update spatial partitioning if needed
+    // This could rebuild the grid if cell size changed significantly
 }
 
 std::vector<std::pair<uint64_t, uint64_t>> CollisionSystem::GetPotentialCollisions() {
@@ -356,21 +511,25 @@ std::vector<std::pair<uint64_t, uint64_t>> CollisionSystem::GetPotentialCollisio
     std::vector<std::pair<uint64_t, uint64_t>> potentialCollisions;
     
     // For each grid cell, check all entity pairs
-    for (const auto& [gridKey, cell] : spatialGrid_) {
+    for (const auto& [cellKey, cell] : spatialGrid_) {
         if (cell.entities.size() < 2) continue;
         
         std::vector<uint64_t> entities(cell.entities.begin(), cell.entities.end());
         
         for (size_t i = 0; i < entities.size(); i++) {
             auto entityA = entities_.find(entities[i]);
-            if (entityA == entities_.end()) continue;
+            if (entityA == entities_.end() || !entityA->second.isValid) continue;
             
             for (size_t j = i + 1; j < entities.size(); j++) {
                 auto entityB = entities_.find(entities[j]);
-                if (entityB == entities_.end()) continue;
+                if (entityB == entities_.end() || !entityB->second.isValid) continue;
                 
-                // Check if they might collide (broad phase using AABB)
-                // For spheres, we can use the actual sphere test
+                // Skip static-static pairs (they never move)
+                if (entityA->second.isStatic && entityB->second.isStatic) {
+                    continue;
+                }
+                
+                // Check if they might collide
                 if (entityA->second.bounds.Intersects(entityB->second.bounds)) {
                     potentialCollisions.emplace_back(entities[i], entities[j]);
                 }
@@ -382,27 +541,52 @@ std::vector<std::pair<uint64_t, uint64_t>> CollisionSystem::GetPotentialCollisio
 }
 
 // Private helper methods
-std::string CollisionSystem::GetGridKey(const glm::vec3& position) const {
+CollisionSystem::GridCellKey CollisionSystem::GetGridKey(const glm::vec3& position) const {
     int gridX = static_cast<int>(std::floor(position.x / gridCellSize_));
     int gridY = static_cast<int>(std::floor(position.y / gridCellSize_));
     int gridZ = static_cast<int>(std::floor(position.z / gridCellSize_));
     
-    return std::to_string(gridX) + "_" + std::to_string(gridY) + "_" + std::to_string(gridZ);
+    return GridCellKey{gridX, gridY, gridZ};
+}
+
+void CollisionSystem::RemoveFromGrid(uint64_t entityId, const GridCellKey& oldKey) {
+    auto it = spatialGrid_.find(oldKey);
+    if (it != spatialGrid_.end()) {
+        it->second.entities.erase(entityId);
+        // Note: We don't immediately remove empty cells here to avoid thrashing
+    }
+}
+
+void CollisionSystem::AddToGrid(uint64_t entityId, const GridCellKey& newKey) {
+    spatialGrid_[newKey].entities.insert(entityId);
+}
+
+void CollisionSystem::CleanEmptyGridCells() {
+    // Remove empty grid cells to save memory
+    for (auto it = spatialGrid_.begin(); it != spatialGrid_.end(); ) {
+        if (it->second.entities.empty()) {
+            it = spatialGrid_.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 bool CollisionSystem::TestSphereSphere(const BoundingSphere& a, const BoundingSphere& b, CollisionResult& result) const {
+    if (!a.IsValid() || !b.IsValid()) return false;
+    
     glm::vec3 delta = b.center - a.center;
     float distanceSquared = glm::dot(delta, delta);
     float radiusSum = a.radius + b.radius;
     
     if (distanceSquared <= radiusSum * radiusSum) {
         float distance = std::sqrt(distanceSquared);
-        if (distance > 0.0f) {
+        if (distance > EPSILON) {
             result.resolution = delta * (radiusSum - distance) / distance;
             result.penetration = radiusSum - distance;
         } else {
             // Spheres are exactly overlapping
-            result.resolution = glm::vec3(0.0f, b.radius, 0.0f);
+            result.resolution = glm::vec3(0.0f, 1.0f, 0.0f) * radiusSum;
             result.penetration = radiusSum;
         }
         return true;
@@ -412,6 +596,8 @@ bool CollisionSystem::TestSphereSphere(const BoundingSphere& a, const BoundingSp
 }
 
 bool CollisionSystem::TestSphereBox(const BoundingSphere& sphere, const BoundingBox& box, CollisionResult& result) const {
+    if (!sphere.IsValid() || !box.IsValid()) return false;
+    
     // Find the closest point on the box to the sphere center
     glm::vec3 closestPoint;
     closestPoint.x = std::clamp(sphere.center.x, box.min.x, box.max.x);
@@ -424,30 +610,34 @@ bool CollisionSystem::TestSphereBox(const BoundingSphere& sphere, const Bounding
     
     if (distanceSquared <= sphere.radius * sphere.radius) {
         float distance = std::sqrt(distanceSquared);
-        if (distance > 0.0f) {
+        if (distance > EPSILON) {
             result.resolution = delta * (sphere.radius - distance) / distance;
             result.penetration = sphere.radius - distance;
         } else {
             // Sphere center is inside the box
-            // Push out in the direction of the nearest face
+            // Find the minimum penetration axis
             glm::vec3 boxCenter = box.GetCenter();
             glm::vec3 toCenter = sphere.center - boxCenter;
             glm::vec3 halfSize = (box.max - box.min) * 0.5f;
             
-            // Find the minimum penetration
-            float minPenetration = sphere.radius + halfSize.x - std::abs(toCenter.x);
-            glm::vec3 normal = glm::vec3(toCenter.x > 0 ? 1.0f : -1.0f, 0.0f, 0.0f);
+            // Calculate penetration on each axis
+            glm::vec3 penetrations;
+            penetrations.x = sphere.radius + halfSize.x - std::abs(toCenter.x);
+            penetrations.y = sphere.radius + halfSize.y - std::abs(toCenter.y);
+            penetrations.z = sphere.radius + halfSize.z - std::abs(toCenter.z);
             
-            float penetrationY = sphere.radius + halfSize.y - std::abs(toCenter.y);
-            if (penetrationY < minPenetration) {
-                minPenetration = penetrationY;
-                normal = glm::vec3(0.0f, toCenter.y > 0 ? 1.0f : -1.0f, 0.0f);
+            // Find the minimum positive penetration
+            float minPenetration = penetrations.x;
+            glm::vec3 normal = glm::vec3((toCenter.x > 0) ? 1.0f : -1.0f, 0.0f, 0.0f);
+            
+            if (penetrations.y < minPenetration) {
+                minPenetration = penetrations.y;
+                normal = glm::vec3(0.0f, (toCenter.y > 0) ? 1.0f : -1.0f, 0.0f);
             }
             
-            float penetrationZ = sphere.radius + halfSize.z - std::abs(toCenter.z);
-            if (penetrationZ < minPenetration) {
-                minPenetration = penetrationZ;
-                normal = glm::vec3(0.0f, 0.0f, toCenter.z > 0 ? 1.0f : -1.0f);
+            if (penetrations.z < minPenetration) {
+                minPenetration = penetrations.z;
+                normal = glm::vec3(0.0f, 0.0f, (toCenter.z > 0) ? 1.0f : -1.0f);
             }
             
             result.resolution = normal * minPenetration;
@@ -460,20 +650,26 @@ bool CollisionSystem::TestSphereBox(const BoundingSphere& sphere, const Bounding
 }
 
 bool CollisionSystem::TestSphereTriangle(const glm::vec3& sphereCenter, float radius,
-                                         const glm::vec3& v0, const glm::vec3& v1, const glm::vec3& v2,
-                                         CollisionResult& result) const {
-    // Möller–Trumbore algorithm for closest point on triangle to sphere
-    
-    // Calculate triangle edges
+                                        const glm::vec3& v0, const glm::vec3& v1, const glm::vec3& v2,
+                                        CollisionResult& result) const {
+    // Check for degenerate triangle
     glm::vec3 edge1 = v1 - v0;
     glm::vec3 edge2 = v2 - v0;
-    glm::vec3 normal = glm::normalize(glm::cross(edge1, edge2));
+    glm::vec3 normal = glm::cross(edge1, edge2);
     
-    // Calculate vector from vertex to sphere center
+    float areaSquared = glm::dot(normal, normal);
+    if (areaSquared < EPSILON) {
+        return false; // Degenerate triangle
+    }
+    
+    // Normalize the normal
+    normal = glm::normalize(normal);
+    
+    // Calculate distance from sphere center to triangle plane
     glm::vec3 toSphere = sphereCenter - v0;
-    
-    // Calculate projection onto triangle plane
     float distanceToPlane = glm::dot(toSphere, normal);
+    
+    // Project sphere center onto triangle plane
     glm::vec3 projectedPoint = sphereCenter - normal * distanceToPlane;
     
     // Check if projected point is inside triangle using barycentric coordinates
@@ -489,9 +685,8 @@ bool CollisionSystem::TestSphereTriangle(const glm::vec3& sphereCenter, float ra
     float d21 = glm::dot(v0p, v0v2);
     
     float denom = d00 * d11 - d01 * d01;
-    if (std::abs(denom) < 1e-6f) {
-        // Degenerate triangle
-        return false;
+    if (std::abs(denom) < EPSILON) {
+        return false; // Degenerate triangle
     }
     
     v = (d11 * d20 - d01 * d21) / denom;
@@ -499,76 +694,204 @@ bool CollisionSystem::TestSphereTriangle(const glm::vec3& sphereCenter, float ra
     u = 1.0f - v - w;
     
     // Check if point is inside triangle
-    if (u >= 0.0f && v >= 0.0f && w >= 0.0f) {
-        // Point is inside triangle
-        float distance = std::abs(distanceToPlane);
-        if (distance <= radius) {
-            result.resolution = normal * (radius - distance) * (distanceToPlane > 0 ? 1.0f : -1.0f);
-            result.penetration = radius - distance;
+    if (u >= -EPSILON && v >= -EPSILON && w >= -EPSILON) {
+        // Point is inside triangle (or on edge)
+        float signedDistance = distanceToPlane;
+        float absoluteDistance = std::abs(signedDistance);
+        
+        if (absoluteDistance <= radius) {
+            result.resolution = normal * (radius - absoluteDistance) * (signedDistance > 0 ? 1.0f : -1.0f);
+            result.penetration = radius - absoluteDistance;
             return true;
         }
-    } else {
-        // Point is outside triangle, check against edges
-        // This is simplified - in a full implementation you'd check all three edges
-        // and the three vertices
-        float minDistance = FLT_MAX;
-        glm::vec3 closestPoint;
-        
-        // Check edges
-        auto checkEdge = [&](const glm::vec3& a, const glm::vec3& b) {
-            glm::vec3 ab = b - a;
-            glm::vec3 ap = sphereCenter - a;
-            float t = glm::dot(ap, ab) / glm::dot(ab, ab);
-            t = std::clamp(t, 0.0f, 1.0f);
-            glm::vec3 closest = a + ab * t;
-            float dist = glm::distance(sphereCenter, closest);
-            if (dist < minDistance) {
-                minDistance = dist;
-                closestPoint = closest;
-            }
-        };
-        
-        checkEdge(v0, v1);
-        checkEdge(v1, v2);
-        checkEdge(v2, v0);
-        
-        // Check vertices
-        auto checkVertex = [&](const glm::vec3& vertex) {
-            float dist = glm::distance(sphereCenter, vertex);
-            if (dist < minDistance) {
-                minDistance = dist;
-                closestPoint = vertex;
-            }
-        };
-        
-        checkVertex(v0);
-        checkVertex(v1);
-        checkVertex(v2);
-        
-        if (minDistance <= radius) {
-            result.resolution = glm::normalize(sphereCenter - closestPoint) * (radius - minDistance);
-            result.penetration = radius - minDistance;
-            return true;
+    }
+    
+    // Point is outside triangle, check against edges and vertices
+    float minDistanceSquared = std::numeric_limits<float>::max();
+    glm::vec3 closestPoint;
+    
+    // Check edges
+    auto checkEdge = [&](const glm::vec3& a, const glm::vec3& b) {
+        glm::vec3 ab = b - a;
+        glm::vec3 ap = sphereCenter - a;
+        float t = glm::dot(ap, ab) / glm::dot(ab, ab);
+        t = std::clamp(t, 0.0f, 1.0f);
+        glm::vec3 closest = a + ab * t;
+        float distSq = glm::distance2(sphereCenter, closest);
+        if (distSq < minDistanceSquared) {
+            minDistanceSquared = distSq;
+            closestPoint = closest;
         }
+    };
+    
+    checkEdge(v0, v1);
+    checkEdge(v1, v2);
+    checkEdge(v2, v0);
+    
+    // Check vertices
+    auto checkVertex = [&](const glm::vec3& vertex) {
+        float distSq = glm::distance2(sphereCenter, vertex);
+        if (distSq < minDistanceSquared) {
+            minDistanceSquared = distSq;
+            closestPoint = vertex;
+        }
+    };
+    
+    checkVertex(v0);
+    checkVertex(v1);
+    checkVertex(v2);
+    
+    float minDistance = std::sqrt(minDistanceSquared);
+    if (minDistance <= radius) {
+        glm::vec3 delta = sphereCenter - closestPoint;
+        if (minDistance > EPSILON) {
+            result.resolution = delta * (radius - minDistance) / minDistance;
+        } else {
+            result.resolution = normal * radius;
+        }
+        result.penetration = radius - minDistance;
+        return true;
     }
     
     return false;
 }
 
-void CollisionSystem::UpdateEntityInGrid(uint64_t entityId, const glm::vec3& oldPos, const glm::vec3& newPos) {
-    // Remove from old grid cell
-    std::string oldGridKey = GetGridKey(oldPos);
-    auto oldIt = spatialGrid_.find(oldGridKey);
-    if (oldIt != spatialGrid_.end()) {
-        oldIt->second.entities.erase(entityId);
-        if (oldIt->second.entities.empty()) {
-            spatialGrid_.erase(oldIt);
+bool CollisionSystem::TestRayAABB(const glm::vec3& origin, const glm::vec3& dir, 
+                                 const BoundingBox& box, float& tMin, float& tMax) const {
+    if (!box.IsValid()) return false;
+    
+    tMin = 0.0f;
+    tMax = std::numeric_limits<float>::max();
+    
+    for (int i = 0; i < 3; i++) {
+        if (std::abs(dir[i]) < EPSILON) {
+            // Ray is parallel to this slab
+            if (origin[i] < box.min[i] || origin[i] > box.max[i]) {
+                return false;
+            }
+        } else {
+            float invDir = 1.0f / dir[i];
+            float t1 = (box.min[i] - origin[i]) * invDir;
+            float t2 = (box.max[i] - origin[i]) * invDir;
+            
+            if (t1 > t2) std::swap(t1, t2);
+            
+            tMin = std::max(tMin, t1);
+            tMax = std::min(tMax, t2);
+            
+            if (tMin > tMax) return false;
         }
     }
     
-    // Add to new grid cell
-    std::string newGridKey = GetGridKey(newPos);
-    spatialGrid_[newGridKey].entities.insert(entityId);
+    return true;
+}
+
+bool CollisionSystem::TestRayTriangle(const glm::vec3& origin, const glm::vec3& dir,
+                                     const glm::vec3& v0, const glm::vec3& v1, const glm::vec3& v2,
+                                     float& t, glm::vec3& normal) const {
+    // Möller–Trumbore algorithm
+    glm::vec3 edge1 = v1 - v0;
+    glm::vec3 edge2 = v2 - v0;
+    
+    glm::vec3 pvec = glm::cross(dir, edge2);
+    float det = glm::dot(edge1, pvec);
+    
+    // Ray and triangle are parallel if det is close to 0
+    if (std::abs(det) < EPSILON) {
+        return false;
+    }
+    
+    float invDet = 1.0f / det;
+    
+    glm::vec3 tvec = origin - v0;
+    float u = glm::dot(tvec, pvec) * invDet;
+    
+    if (u < 0.0f || u > 1.0f) {
+        return false;
+    }
+    
+    glm::vec3 qvec = glm::cross(tvec, edge1);
+    float v = glm::dot(dir, qvec) * invDet;
+    
+    if (v < 0.0f || u + v > 1.0f) {
+        return false;
+    }
+    
+    t = glm::dot(edge2, qvec) * invDet;
+    
+    if (t < EPSILON) {
+        return false; // Intersection behind ray origin
+    }
+    
+    normal = glm::normalize(glm::cross(edge1, edge2));
+    return true;
+}
+
+bool CollisionSystem::ValidatePosition(const glm::vec3& position) const {
+    // Check for NaN and infinite values
+    if (!glm::all(glm::isfinite(position))) {
+        return false;
+    }
+    
+    // Check if within world bounds
+    if (!worldBounds_.IntersectsSphere(position, 0.0f)) {
+        return false;
+    }
+    
+    return true;
+}
+
+bool CollisionSystem::ValidateBounds(const BoundingSphere& bounds) const {
+    if (!bounds.IsValid()) return false;
+    return ValidatePosition(bounds.center) && bounds.radius >= 0.0f;
+}
+
+bool CollisionSystem::ValidateBounds(const BoundingBox& bounds) const {
+    return bounds.IsValid();
+}
+
+uint64_t CollisionSystem::CalculateChunkId(int chunkX, int chunkZ) const {
+    // Encode both coordinates into a single 64-bit integer
+    // Using 32 bits for each coordinate
+    uint64_t x = static_cast<uint32_t>(chunkX);
+    uint64_t z = static_cast<uint32_t>(chunkZ);
+    
+    return (x << 32) | z;
+}
+
+void CollisionSystem::BuildChunkCollisionData(CollisionChunk& chunk, const WorldChunk& worldChunk) {
+    const auto& collisionVerts = worldChunk.GetCollisionVertices();
+    const auto& collisionTris = worldChunk.GetCollisionTriangles();
+    
+    if (collisionVerts.empty() || collisionTris.empty()) {
+        chunk.hasCollisionData = false;
+        return;
+    }
+    
+    chunk.hasCollisionData = true;
+    chunk.vertices = collisionVerts;
+    chunk.triangles.reserve(collisionTris.size());
+    
+    // Convert triangle indices
+    for (const auto& tri : collisionTris) {
+        if (tri.v0 < collisionVerts.size() && 
+            tri.v1 < collisionVerts.size() && 
+            tri.v2 < collisionVerts.size()) {
+            chunk.triangles.push_back({tri.v0, tri.v1, tri.v2});
+        }
+    }
+    
+    // Optional: Build spatial acceleration structure (BVH, Octree) here
+    // For now, we just store the raw triangle data
+}
+
+void CollisionSystem::UpdateEntityInGrid(uint64_t entityId, const glm::vec3& oldPos, const glm::vec3& newPos) {
+    // This method should only be called from within locked methods
+    GridCellKey oldKey = GetGridKey(oldPos);
+    RemoveFromGrid(entityId, oldKey);
+    
+    GridCellKey newKey = GetGridKey(newPos);
+    AddToGrid(entityId, newKey);
     
     // Update entity position in entity map
     auto entityIt = entities_.find(entityId);
