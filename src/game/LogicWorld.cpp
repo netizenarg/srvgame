@@ -1,0 +1,144 @@
+#include <cmath>
+
+#include "../../include/config/ConfigManager.hpp"
+#include "../../include/logging/Logger.hpp"
+#include "../../include/database/CitusClient.hpp"
+#include "../../include/game/LogicWorld.hpp"
+
+LogicWorld::LogicWorld() {
+    Logger::Debug("LogicWorld created");
+}
+
+LogicWorld::~LogicWorld() {
+    Shutdown();
+}
+
+void LogicWorld::Initialize(const WorldConfig& config) {
+    worldConfig_ = config;
+    
+    WorldGenerator::GenerationConfig genConfig;
+    genConfig.seed = worldConfig_.seed;
+    genConfig.terrainScale = worldConfig_.terrainScale;
+    genConfig.terrainHeight = worldConfig_.maxTerrainHeight;
+    genConfig.waterLevel = worldConfig_.waterLevel;
+    
+    worldGenerator_ = std::make_unique<WorldGenerator>(genConfig);
+    Logger::Info("LogicWorld initialized with seed: {}", worldConfig_.seed);
+}
+
+void LogicWorld::Shutdown() {
+    std::lock_guard<std::mutex> lock(chunksMutex_);
+    loadedChunks_.clear();
+    activeChunkCount_ = 0;
+    worldGenerator_.reset();
+    Logger::Info("LogicWorld shutdown");
+}
+
+std::string LogicWorld::GetChunkKey(int chunkX, int chunkZ) const {
+    return std::to_string(chunkX) + "_" + std::to_string(chunkZ);
+}
+
+std::shared_ptr<WorldChunk> LogicWorld::GetOrCreateChunk(int chunkX, int chunkZ) {
+    std::string chunkKey = GetChunkKey(chunkX, chunkZ);
+    
+    std::lock_guard<std::mutex> lock(chunksMutex_);
+    
+    auto it = loadedChunks_.find(chunkKey);
+    if (it != loadedChunks_.end()) {
+        return it->second;
+    }
+    
+    if (activeChunkCount_ >= worldConfig_.maxActiveChunks) {
+        if (!loadedChunks_.empty()) {
+            auto first = loadedChunks_.begin();
+            loadedChunks_.erase(first);
+            activeChunkCount_--;
+        }
+    }
+    
+    auto chunk = worldGenerator_->GenerateChunk(chunkX, chunkZ);
+    if (!chunk) {
+        Logger::Error("Failed to generate chunk [{}, {}]", chunkX, chunkZ);
+        return nullptr;
+    }
+    
+    loadedChunks_[chunkKey] = chunk;
+    activeChunkCount_++;
+    
+    Logger::Debug("Generated chunk [{}, {}], total: {}", chunkX, chunkZ, activeChunkCount_);
+    return chunk;
+}
+
+void LogicWorld::UnloadDistantChunks(const glm::vec3& centerPosition, float keepRadius) {
+    std::lock_guard<std::mutex> lock(chunksMutex_);
+    
+    auto it = loadedChunks_.begin();
+    while (it != loadedChunks_.end()) {
+        WorldChunk* chunk = it->second.get();
+        glm::vec3 chunkCenter = chunk->GetCenter();
+        float distance = glm::distance(centerPosition, chunkCenter);
+        
+        if (distance > keepRadius) {
+            it = loadedChunks_.erase(it);
+            activeChunkCount_--;
+        } else {
+            ++it;
+        }
+    }
+}
+
+void LogicWorld::GenerateWorldAroundPlayer(const glm::vec3& position, int viewDistance) {
+    int playerChunkX = static_cast<int>(std::floor(position.x / worldConfig_.chunkSize));
+    int playerChunkZ = static_cast<int>(std::floor(position.z / worldConfig_.chunkSize));
+    
+    for (int dx = -viewDistance; dx <= viewDistance; ++dx) {
+        for (int dz = -viewDistance; dz <= viewDistance; ++dz) {
+            int chunkX = playerChunkX + dx;
+            int chunkZ = playerChunkZ + dz;
+            GetOrCreateChunk(chunkX, chunkZ);
+        }
+    }
+}
+
+void LogicWorld::PreloadWorldData(float radius) {
+    Logger::Info("Preloading world data within radius {}...", radius);
+    
+    int chunksToLoad = static_cast<int>((radius / worldConfig_.chunkSize) * 2) + 1;
+    
+    for (int x = -chunksToLoad; x <= chunksToLoad; ++x) {
+        for (int z = -chunksToLoad; z <= chunksToLoad; ++z) {
+            GetOrCreateChunk(x, z);
+        }
+    }
+    
+    Logger::Info("Preloaded {} chunks", (chunksToLoad * 2 + 1) * (chunksToLoad * 2 + 1));
+}
+
+float LogicWorld::GetTerrainHeight(float x, float z) const {
+    if (!worldGenerator_) {
+        return worldConfig_.waterLevel;
+    }
+    return worldGenerator_->GetTerrainHeight(x, z);
+}
+
+BiomeType LogicWorld::GetBiomeAt(float x, float z) const {
+    if (!worldGenerator_) {
+        return BiomeType::PLAINS;
+    }
+    return worldGenerator_->GetBiomeAt(x, z);
+}
+
+void LogicWorld::SaveChunkData() {
+    std::lock_guard<std::mutex> lock(chunksMutex_);
+    auto& dbClient = CitusClient::GetInstance();
+    
+    for (const auto& [key, chunk] : loadedChunks_) {
+        try {
+            nlohmann::json chunkData = chunk->Serialize();
+            dbClient.SaveChunkData(chunk->GetChunkX(), chunk->GetChunkZ(), chunkData);
+        } catch (const std::exception& e) {
+            Logger::Error("Failed to save chunk [{}, {}]: {}",
+                         chunk->GetChunkX(), chunk->GetChunkZ(), e.what());
+        }
+    }
+}
