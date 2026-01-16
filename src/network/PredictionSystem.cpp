@@ -292,18 +292,15 @@ ServerState ServerState::Deserialize(const uint8_t* data, size_t length) {
 
 ServerState ServerState::Interpolate(const ServerState& a, const ServerState& b, float t) {
     t = glm::clamp(t, 0.0f, 1.0f);
-    
+
     ServerState result;
+    result.last_processed_input = 0;
     result.position = glm::mix(a.position, b.position, t);
     result.velocity = glm::mix(a.velocity, b.velocity, t);
     result.rotation = glm::mix(a.rotation, b.rotation, t);
     result.on_ground = t < 0.5f ? a.on_ground : b.on_ground;
-    result.timestamp = static_cast<uint64_t>(glm::mix(
-        static_cast<float>(a.timestamp),
-        static_cast<float>(b.timestamp),
-        t
-    ));
-    
+    result.timestamp = static_cast<uint64_t>(glm::mix(static_cast<float>(a.timestamp), static_cast<float>(b.timestamp), t));
+
     return result;
 }
 
