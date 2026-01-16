@@ -1,13 +1,14 @@
-#include "config/ConfigManager.hpp"
-#include "logging/Logger.hpp"
-#include "network/GameServer.hpp"
-#include "process/ProcessPool.hpp"
-#include "game/GameLogic.hpp"  // Updated include
-#include "database/CitusClient.hpp"
 #include <iostream>
 #include <csignal>
 #include <thread>
 #include <chrono>
+
+#include "../include/config/ConfigManager.hpp"
+#include "../include/logging/Logger.hpp"
+#include "../include/network/GameServer.hpp"
+#include "../include/process/ProcessPool.hpp"
+#include "../include/game/GameLogic.hpp"
+#include "../include/database/CitusClient.hpp"
 
 std::atomic<bool> g_shutdown(false);
 
