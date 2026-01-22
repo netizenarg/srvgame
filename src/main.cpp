@@ -31,144 +31,150 @@ void WorkerMain(int workerId) {
     Logger::Initialize("Worker" + std::to_string(workerId));
     Logger::Info("Initializing 3D game world system");
 
-    // Initialize database
+    // Initialize database client
     auto& dbClient = CitusClient::GetInstance();
-    std::vector<std::string> workerNodes = config.GetCitusWorkerNodes();
-    if (!dbClient.Initialize(
+    
+    // Build connection string
+    std::string connInfo =
         "host=" + config.GetDatabaseHost() +
         " port=" + std::to_string(config.GetDatabasePort()) +
         " dbname=" + config.GetDatabaseName() +
         " user=" + config.GetDatabaseUser() +
-        " password=" + config.GetDatabasePassword(),
-                             workerNodes)) {
+        " password=" + config.GetDatabasePassword();
+    
+    // Get worker nodes for Citus (empty for PostgreSQL)
+    std::vector<std::string> workerNodes = config.GetCitusWorkerNodes();
+    
+    if (!dbClient.Initialize(connInfo, workerNodes)) {
         Logger::Error("Worker {} failed to initialize database", workerId);
-                             }
+        return;
+    }
 
-                             // Initialize game logic with 3D world system
-                             auto& gameLogic = GameLogic::GetInstance();
+    // Initialize game logic with 3D world system
+    auto& gameLogic = GameLogic::GetInstance();
 
-                             // Configure world settings
-                             GameLogic::WorldConfig worldConfig;
-                             worldConfig.seed = config.GetWorldSeed() + workerId;
-                             worldConfig.viewDistance = config.GetViewDistance();
-                             worldConfig.chunkSize = config.GetChunkSize();
-                             worldConfig.maxActiveChunks = config.GetMaxActiveChunks();
-                             worldConfig.terrainScale = config.GetTerrainScale();
-                             worldConfig.maxTerrainHeight = config.GetMaxTerrainHeight();
-                             worldConfig.waterLevel = config.GetWaterLevel();
+    // Configure world settings
+    GameLogic::WorldConfig worldConfig;
+    worldConfig.seed = config.GetWorldSeed() + workerId;
+    worldConfig.viewDistance = config.GetViewDistance();
+    worldConfig.chunkSize = config.GetChunkSize();
+    worldConfig.maxActiveChunks = config.GetMaxActiveChunks();
+    worldConfig.terrainScale = config.GetTerrainScale();
+    worldConfig.maxTerrainHeight = config.GetMaxTerrainHeight();
+    worldConfig.waterLevel = config.GetWaterLevel();
 
-                             gameLogic.SetWorldConfig(worldConfig);
-                             gameLogic.Initialize();
+    gameLogic.SetWorldConfig(worldConfig);
+    gameLogic.Initialize();
 
-                             // Preload world data if configured
-                             if (config.ShouldPreloadWorld()) {
-                                 Logger::Info("Worker {} preloading world data...", workerId);
-                                 gameLogic.PreloadWorldData(config.GetWorldPreloadRadius());
-                             }
+    // Preload world data if configured
+    if (config.ShouldPreloadWorld()) {
+        Logger::Info("Worker {} preloading world data...", workerId);
+        gameLogic.PreloadWorldData(config.GetWorldPreloadRadius());
+    }
 
-                             // Create game server
-                             GameServer server(config);
+    // Create game server
+    GameServer server(config);
 
-                             // Set session factory
-                             server.SetSessionFactory([workerId](asio::ip::tcp::socket socket) {
-                                 auto session = std::make_shared<GameSession>(std::move(socket));
+    // Set session factory
+    server.SetSessionFactory([workerId](asio::ip::tcp::socket socket) {
+        auto session = std::make_shared<GameSession>(std::move(socket));
 
-                                 Logger::Debug("Worker {} created new game session {}",
-                                               workerId, session->GetSessionId());
+        Logger::Debug("Worker {} created new game session {}",
+                     workerId, session->GetSessionId());
 
-                                 // Message handler
-                                 session->SetMessageHandler([session, workerId](const nlohmann::json& msg) {
-                                     try {
-                                         std::string msgType = msg.value("type", "");
+        // Message handler
+        session->SetMessageHandler([session, workerId](const nlohmann::json& msg) {
+            try {
+                std::string msgType = msg.value("type", "");
 
-                                         // 3D world messages
-                                         if (msgType == "world_chunk_request" ||
-                                             msgType == "player_position_update" ||
-                                             msgType == "npc_interaction" ||
-                                             msgType == "familiar_command" ||
-                                             msgType == "collision_check") {
+                // 3D world messages
+                if (msgType == "world_chunk_request" ||
+                    msgType == "player_position_update" ||
+                    msgType == "npc_interaction" ||
+                    msgType == "familiar_command" ||
+                    msgType == "collision_check") {
 
-                                             Logger::Debug("Worker {} processing 3D world message: {}",
-                                                           workerId, msgType);
+                    Logger::Debug("Worker {} processing 3D world message: {}",
+                                 workerId, msgType);
 
-                                             GameLogic::GetInstance().HandleMessage(session->GetSessionId(), msg);
+                    GameLogic::GetInstance().HandleMessage(session->GetSessionId(), msg);
 
-                                             } else {
-                                                 GameLogic::GetInstance().HandleMessage(session->GetSessionId(), msg);
-                                             }
-                                     } catch (const std::exception& e) {
-                                         Logger::Error("Worker {} error processing message: {}", workerId, e.what());
-                                         session->SendError("Internal server error", 500);
-                                     }
-                                 });
+                } else {
+                    GameLogic::GetInstance().HandleMessage(session->GetSessionId(), msg);
+                }
+            } catch (const std::exception& e) {
+                Logger::Error("Worker {} error processing message: {}", workerId, e.what());
+                session->SendError("Internal server error", 500);
+            }
+        });
 
-                                 // Close handler
-                                 session->SetCloseHandler([session, workerId]() {
-                                     Logger::Info("Worker {} session {} closing", workerId, session->GetSessionId());
+        // Close handler
+        session->SetCloseHandler([session, workerId]() {
+            Logger::Info("Worker {} session {} closing", workerId, session->GetSessionId());
 
-                                     ConnectionManager::GetInstance().Stop(session);
+            ConnectionManager::GetInstance().Stop(session);
 
-                                     uint64_t sessionId = session->GetSessionId();
-                                     PlayerManager::GetInstance().PlayerDisconnected(sessionId);
+            uint64_t sessionId = session->GetSessionId();
+            PlayerManager::GetInstance().PlayerDisconnected(sessionId);
 
-                                     GameLogic::GetInstance().OnPlayerDisconnected(sessionId);
+            GameLogic::GetInstance().OnPlayerDisconnected(sessionId);
 
-                                     Logger::Debug("Worker {} session {} cleanup complete", workerId, sessionId);
-                                 });
+            Logger::Debug("Worker {} session {} cleanup complete", workerId, sessionId);
+        });
 
-                                 return session;
-                             });
+        return session;
+    });
 
-                             // Initialize and run server
-                             if (server.Initialize()) {
-                                 Logger::Info("Worker {} 3D game server initialized", workerId);
+    // Initialize and run server
+    if (server.Initialize()) {
+        Logger::Info("Worker {} 3D game server initialized", workerId);
 
-                                 // Start background world maintenance thread
-                                 std::atomic<bool> worldMaintenanceRunning{true};
-                                 std::thread worldMaintenanceThread([&gameLogic, &worldMaintenanceRunning, workerId]() {
-                                     Logger::Info("Worker {} starting world maintenance thread", workerId);
+        // Start background world maintenance thread
+        std::atomic<bool> worldMaintenanceRunning{true};
+        std::thread worldMaintenanceThread([&gameLogic, &worldMaintenanceRunning, workerId]() {
+            Logger::Info("Worker {} starting world maintenance thread", workerId);
 
-                                     auto lastCleanupTime = std::chrono::steady_clock::now();
+            auto lastCleanupTime = std::chrono::steady_clock::now();
 
-                                     while (worldMaintenanceRunning && gameLogic.IsRunning()) {
-                                         auto currentTime = std::chrono::steady_clock::now();
-                                         auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(currentTime - lastCleanupTime);
+            while (worldMaintenanceRunning && gameLogic.IsRunning()) {
+                auto currentTime = std::chrono::steady_clock::now();
+                auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(currentTime - lastCleanupTime);
 
-                                         if (elapsed.count() >= 30) {
-                                             Logger::Debug("Worker {} performing periodic world maintenance", workerId);
-                                             lastCleanupTime = currentTime;
-                                         }
+                if (elapsed.count() >= 30) {
+                    Logger::Debug("Worker {} performing periodic world maintenance", workerId);
+                    lastCleanupTime = currentTime;
+                }
 
-                                         std::this_thread::sleep_for(std::chrono::seconds(5));
-                                     }
+                std::this_thread::sleep_for(std::chrono::seconds(5));
+            }
 
-                                     Logger::Info("Worker {} world maintenance thread stopped", workerId);
-                                 });
+            Logger::Info("Worker {} world maintenance thread stopped", workerId);
+        });
 
-                                 // Start the server
-                                 Logger::Info("Worker {} starting server on port {}",
-                                              workerId, config.GetServerPort());
+        // Start the server
+        Logger::Info("Worker {} starting server on port {}",
+                    workerId, config.GetServerPort());
 
-                                 server.Run();
+        server.Run();
 
-                                 // Stop maintenance thread
-                                 worldMaintenanceRunning = false;
-                                 if (worldMaintenanceThread.joinable()) {
-                                     worldMaintenanceThread.join();
-                                 }
+        // Stop maintenance thread
+        worldMaintenanceRunning = false;
+        if (worldMaintenanceThread.joinable()) {
+            worldMaintenanceThread.join();
+        }
 
-                             } else {
-                                 Logger::Critical("Worker {} failed to initialize server", workerId);
-                             }
+    } else {
+        Logger::Critical("Worker {} failed to initialize server", workerId);
+    }
 
-                             // Cleanup
-                             Logger::Info("Worker {} beginning cleanup...", workerId);
-                             gameLogic.Shutdown();
+    // Cleanup
+    Logger::Info("Worker {} beginning cleanup...", workerId);
+    gameLogic.Shutdown();
 
-                             Logger::Info("Worker {} saving world state...", workerId);
-                             // Save world state
+    Logger::Info("Worker {} saving world state...", workerId);
+    // Save world state
 
-                             Logger::Info("Worker {} shutdown complete", workerId);
+    Logger::Info("Worker {} shutdown complete", workerId);
 }
 
 int main(int argc, char* argv[]) {
@@ -187,6 +193,7 @@ int main(int argc, char* argv[]) {
     Logger::Initialize();
 
     Logger::Info("Starting 3D Game Server v2.0.0 with LogicCore System");
+    Logger::Info("Database Backend: {}", config.GetDatabaseBackend());
     Logger::Info("World Seed: {}", config.GetWorldSeed());
     Logger::Info("View Distance: {} chunks", config.GetViewDistance());
     Logger::Info("Chunk Size: {} units", config.GetChunkSize());

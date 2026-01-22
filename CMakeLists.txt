@@ -1,14 +1,18 @@
 cmake_minimum_required(VERSION 3.15)
-project(GameServer3D)
+project(GameServer)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Option for Citus support
+option(USE_CITUS "Enable Citus distributed database support" OFF)
 
 # Find dependencies
 find_package(OpenGL REQUIRED)
 find_package(glm REQUIRED)
 find_package(asio REQUIRED)
 find_package(nlohmann_json REQUIRED)
+find_package(PostgreSQL REQUIRED)
 
 # Add GLM include directory
 include_directories(${glm_INCLUDE_DIRS})
@@ -40,11 +44,27 @@ set(WORLD_SOURCES
     ${LOOT_SOURCES}
 )
 
+# Database system
+set(DATABASE_SOURCES
+    src/database/DatabasePool.cpp
+    src/database/PostgreSQLBackend.cpp
+)
+
+if(USE_CITUS)
+    message(STATUS "Building with Citus support")
+    list(APPEND DATABASE_SOURCES src/database/CitusBackend.cpp)
+    add_definitions(-DUSE_CITUS=1)
+else()
+    message(STATUS "Building without Citus (PostgreSQL only)")
+    add_definitions(-DUSE_CITUS=0)
+endif()
+
 # Include directories
 include_directories(
     include
     ${OPENGL_INCLUDE_DIR}
     ${glm_INCLUDE_DIRS}
+    ${PostgreSQL_INCLUDE_DIRS}
 )
 
 # Main executable
@@ -52,6 +72,7 @@ add_executable(gameserver
     src/main.cpp
     ${LOGIC_CORE_SOURCES}
     ${WORLD_SOURCES}
+    ${DATABASE_SOURCES}
 )
 
 # Link libraries
@@ -60,6 +81,7 @@ target_link_libraries(gameserver
     ${CMAKE_THREAD_LIBS_INIT}
     asio::asio
     nlohmann_json::nlohmann_json
+    ${PostgreSQL_LIBRARIES}
 )
 
 # Compiler flags

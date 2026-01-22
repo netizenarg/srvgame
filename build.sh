@@ -19,13 +19,22 @@ sudo apt-get install -y \
     python3-dev \
     libssl-dev \
     zlib1g-dev \
-    postgresql-15 \
-    postgresql-15-citus-12
+    postgresql-15
+
+# Optional: Install Citus only if requested
+if [ "$1" = "--with-citus" ]; then
+    echo "Installing Citus extension..."
+    sudo apt-get install -y postgresql-15-citus-12
+    export USE_CITUS=ON
+else
+    echo "Building without Citus (PostgreSQL only)"
+    export USE_CITUS=OFF
+fi
 
 # Build
 mkdir -p build
 cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
+cmake .. -DUSE_CITUS=${USE_CITUS:-OFF} -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)
 
 echo "Build complete!"
