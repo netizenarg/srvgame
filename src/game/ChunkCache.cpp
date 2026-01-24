@@ -991,20 +991,18 @@ void ChunkCache::SaveThreadFunc() {
         
         {
             std::unique_lock<std::mutex> lock(save_mutex_);
-            save_cv_.wait(lock, [this] {
-                return !running_ || !save_queue_.empty();
-            });
-            
+            if (save_queue_.empty()) {
+                save_cv_.wait(lock, [this] {return !running_ || !save_queue_.empty();});
+            }
             if (!running_) break;
-            
-            // Collect batch of keys to save
-            while (!save_queue_.empty() && 
-                   batch_keys.size() < config_.save_batch_size) {
+
+            // Collect batch
+            while (!save_queue_.empty() && batch_keys.size() < config_.save_batch_size) {
                 batch_keys.push_back(save_queue_.front());
                 save_queue_.pop();
             }
         }
-        
+
         // Process batch
         for (const auto& key : batch_keys) {
             std::shared_lock<std::shared_mutex> cache_lock(cache_mutex_);
