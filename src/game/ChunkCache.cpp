@@ -437,8 +437,11 @@ std::vector<std::string> ChunkCache::GetCachedChunkKeys() const {
 }
 
 std::string ChunkCache::MakeCacheKey(int x, int z, ChunkLOD lod) const {
-    return std::to_string(x) + "_" + std::to_string(z) + "_" + 
-           std::to_string(static_cast<int>(lod));
+    std::stringstream ss;
+    ss << std::setw(8) << std::setfill('0') << std::hex << x << "_"
+    << std::setw(8) << std::setfill('0') << std::hex << z << "_"
+    << static_cast<int>(lod);
+    return ss.str();
 }
 
 std::string ChunkCache::GetDiskFilename(int x, int z, ChunkLOD lod) const {
