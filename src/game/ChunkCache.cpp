@@ -444,6 +444,26 @@ std::string ChunkCache::MakeCacheKey(int x, int z, ChunkLOD lod) const {
     return ss.str();
 }
 
+bool ChunkCache::ParseCacheKey(const std::string& key, int& x, int& z, ChunkLOD& lod) const {
+    std::istringstream ss(key);
+    std::string x_str, z_str, lod_str;
+
+    if (!std::getline(ss, x_str, '_') ||
+        !std::getline(ss, z_str, '_') ||
+        !std::getline(ss, lod_str, '_')) {
+        return false;
+        }
+
+        try {
+            x = std::stoi(x_str, nullptr, 16);
+            z = std::stoi(z_str, nullptr, 16);
+            lod = static_cast<ChunkLOD>(std::stoi(lod_str));
+            return true;
+        } catch (...) {
+            return false;
+        }
+}
+
 std::string ChunkCache::GetDiskFilename(int x, int z, ChunkLOD lod) const {
     std::stringstream ss;
     ss << config_.disk_cache_path << "/chunk_"

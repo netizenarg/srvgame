@@ -155,6 +155,7 @@ private:
 
     // Helper methods
     std::string MakeCacheKey(int x, int z, ChunkLOD lod) const;
+    bool ParseCacheKey(const std::string& key, int& x, int& z, ChunkLOD& lod);
     std::string GetDiskFilename(int x, int z, ChunkLOD lod) const;
 
     // Cache policies
