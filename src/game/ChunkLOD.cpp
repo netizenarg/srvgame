@@ -206,86 +206,164 @@ void LODChunk::GenerateBillboard() {
 }
 
 void LODChunk::SimplifyMesh(int factor) {
-    if (factor <= 1) return;
-    
+    if (factor <= 1 || vertices_.empty()) return;
+
     std::vector<Vertex> simplified_vertices;
     std::vector<Triangle> simplified_triangles;
-    
-    // Simple grid-based simplification
-    std::unordered_map<std::string, uint32_t> vertex_map;
-    
+
+    // Use a more efficient key structure: quantize to integer grid
+    struct QuantizedKey {
+        int x, y, z;
+
+        bool operator==(const QuantizedKey& other) const {
+            return x == other.x && y == other.y && z == other.z;
+        }
+
+        struct Hash {
+            size_t operator()(const QuantizedKey& k) const {
+                // Simple hash combining
+                size_t h1 = std::hash<int>()(k.x);
+                size_t h2 = std::hash<int>()(k.y);
+                size_t h3 = std::hash<int>()(k.z);
+                return h1 ^ (h2 << 1) ^ (h3 << 2);
+            }
+        };
+    };
+
+    std::unordered_map<QuantizedKey, uint32_t, QuantizedKey::Hash> vertex_map;
+    std::unordered_map<uint32_t, std::vector<uint32_t>> vertex_groups; // Map from simplified vertex to original vertices
+    std::vector<Vertex> temp_simplified_vertices;
+
+    // First pass: collect vertices into groups based on quantized position
     for (size_t i = 0; i < vertices_.size(); ++i) {
         const auto& v = vertices_[i];
-        
+
         // Quantize vertex position
-        glm::vec3 quantized = {
-            std::round(v.position.x / factor) * factor,
-            std::round(v.position.y / factor) * factor,
-            std::round(v.position.z / factor) * factor
+        QuantizedKey key = {
+            static_cast<int>(std::round(v.position.x / factor)),
+            static_cast<int>(std::round(v.position.y / factor)),
+            static_cast<int>(std::round(v.position.z / factor))
         };
-        
-        std::string key = std::to_string(quantized.x) + "_" + 
-                         std::to_string(quantized.y) + "_" + 
-                         std::to_string(quantized.z);
-        
+
         if (vertex_map.find(key) == vertex_map.end()) {
-            vertex_map[key] = static_cast<uint32_t>(simplified_vertices.size());
-            
+            uint32_t new_index = static_cast<uint32_t>(temp_simplified_vertices.size());
+            vertex_map[key] = new_index;
+
             Vertex new_vertex = v;
-            new_vertex.position = quantized;
-            simplified_vertices.push_back(new_vertex);
+            new_vertex.position = {
+                key.x * static_cast<float>(factor),
+                key.y * static_cast<float>(factor),
+                key.z * static_cast<float>(factor)
+            };
+            temp_simplified_vertices.push_back(new_vertex);
+            vertex_groups[new_index].push_back(static_cast<uint32_t>(i));
+        } else {
+            uint32_t existing_index = vertex_map[key];
+            vertex_groups[existing_index].push_back(static_cast<uint32_t>(i));
         }
     }
-    
-    // Remap triangles
-    for (const auto& tri : triangles_) {
-        glm::vec3 v0 = vertices_[tri.v0].position;
-        glm::vec3 v1 = vertices_[tri.v1].position;
-        glm::vec3 v2 = vertices_[tri.v2].position;
-        
-        glm::vec3 quantized_v0 = {
-            std::round(v0.x / factor) * factor,
-            std::round(v0.y / factor) * factor,
-            std::round(v0.z / factor) * factor
-        };
-        
-        glm::vec3 quantized_v1 = {
-            std::round(v1.x / factor) * factor,
-            std::round(v1.y / factor) * factor,
-            std::round(v1.z / factor) * factor
-        };
-        
-        glm::vec3 quantized_v2 = {
-            std::round(v2.x / factor) * factor,
-            std::round(v2.y / factor) * factor,
-            std::round(v2.z / factor) * factor
-        };
-        
-        std::string key0 = std::to_string(quantized_v0.x) + "_" + 
-                          std::to_string(quantized_v0.y) + "_" + 
-                          std::to_string(quantized_v0.z);
-        std::string key1 = std::to_string(quantized_v1.x) + "_" + 
-                          std::to_string(quantized_v1.y) + "_" + 
-                          std::to_string(quantized_v1.z);
-        std::string key2 = std::to_string(quantized_v2.x) + "_" + 
-                          std::to_string(quantized_v2.y) + "_" + 
-                          std::to_string(quantized_v2.z);
-        
-        if (vertex_map.find(key0) != vertex_map.end() &&
-            vertex_map.find(key1) != vertex_map.end() &&
-            vertex_map.find(key2) != vertex_map.end()) {
-            
-            uint32_t new_v0 = vertex_map[key0];
-            uint32_t new_v1 = vertex_map[key1];
-            uint32_t new_v2 = vertex_map[key2];
-            
-            // Check for degenerate triangles
-            if (new_v0 != new_v1 && new_v1 != new_v2 && new_v2 != new_v0) {
-                simplified_triangles.push_back({new_v0, new_v1, new_v2});
+
+    // Second pass: average attributes for vertices in each group
+    simplified_vertices.reserve(temp_simplified_vertices.size());
+    for (size_t i = 0; i < temp_simplified_vertices.size(); ++i) {
+        const auto& group = vertex_groups[static_cast<uint32_t>(i)];
+
+        if (group.size() == 1) {
+            // Single vertex in group, keep as is
+            simplified_vertices.push_back(temp_simplified_vertices[i]);
+        } else {
+            // Multiple vertices in group, average attributes
+            glm::vec3 avg_position = {0, 0, 0};
+            glm::vec3 avg_normal = {0, 0, 0};
+            glm::vec3 avg_color = {0, 0, 0};
+            glm::vec2 avg_uv = {0, 0};
+
+            for (uint32_t original_idx : group) {
+                const Vertex& v = vertices_[original_idx];
+                avg_position += v.position;
+                avg_normal += v.normal;
+                avg_color += v.color;
+                avg_uv += v.uv;
             }
+
+            float inv_count = 1.0f / group.size();
+            Vertex averaged_vertex = temp_simplified_vertices[i];
+            averaged_vertex.position = avg_position * inv_count;
+            averaged_vertex.normal = glm::normalize(avg_normal * inv_count);
+            averaged_vertex.color = avg_color * inv_count;
+            averaged_vertex.uv = avg_uv * inv_count;
+
+            simplified_vertices.push_back(averaged_vertex);
         }
     }
-    
+
+    // Third pass: remap triangles
+    std::unordered_map<uint64_t, bool> triangle_map; // To avoid duplicates
+    for (const auto& tri : triangles_) {
+        // Get quantized keys for each vertex
+        const Vertex& v0 = vertices_[tri.v0];
+        const Vertex& v1 = vertices_[tri.v1];
+        const Vertex& v2 = vertices_[tri.v2];
+
+        QuantizedKey key0 = {
+            static_cast<int>(std::round(v0.position.x / factor)),
+            static_cast<int>(std::round(v0.position.y / factor)),
+            static_cast<int>(std::round(v0.position.z / factor))
+        };
+        QuantizedKey key1 = {
+            static_cast<int>(std::round(v1.position.x / factor)),
+            static_cast<int>(std::round(v1.position.y / factor)),
+            static_cast<int>(std::round(v1.position.z / factor))
+        };
+        QuantizedKey key2 = {
+            static_cast<int>(std::round(v2.position.x / factor)),
+            static_cast<int>(std::round(v2.position.y / factor)),
+            static_cast<int>(std::round(v2.position.z / factor))
+        };
+
+        // Check if all vertices have been quantized
+        if (vertex_map.find(key0) == vertex_map.end() ||
+            vertex_map.find(key1) == vertex_map.end() ||
+            vertex_map.find(key2) == vertex_map.end()) {
+            continue; // Skip this triangle
+            }
+
+            uint32_t new_v0 = vertex_map[key0];
+        uint32_t new_v1 = vertex_map[key1];
+        uint32_t new_v2 = vertex_map[key2];
+
+        // Check for degenerate triangles (area check)
+        if (new_v0 == new_v1 || new_v1 == new_v2 || new_v2 == new_v0) {
+            continue; // Skip degenerate triangle
+        }
+
+        // Check triangle area to avoid extremely small triangles
+        const glm::vec3& p0 = simplified_vertices[new_v0].position;
+        const glm::vec3& p1 = simplified_vertices[new_v1].position;
+        const glm::vec3& p2 = simplified_vertices[new_v2].position;
+
+        glm::vec3 edge1 = p1 - p0;
+        glm::vec3 edge2 = p2 - p0;
+        glm::vec3 cross = glm::cross(edge1, edge2);
+        float area = glm::length(cross) * 0.5f;
+
+        if (area < 0.0001f) { // Minimum area threshold
+            continue; // Skip very small triangles
+        }
+
+        // Sort indices to create unique key for triangle (avoid duplicates)
+        uint32_t sorted[3] = {new_v0, new_v1, new_v2};
+        std::sort(std::begin(sorted), std::end(sorted));
+        uint64_t triangle_key = (static_cast<uint64_t>(sorted[0]) << 32) |
+        (static_cast<uint64_t>(sorted[1]) << 16) |
+        static_cast<uint64_t>(sorted[2]);
+
+        if (triangle_map.find(triangle_key) == triangle_map.end()) {
+            triangle_map[triangle_key] = true;
+            simplified_triangles.push_back({new_v0, new_v1, new_v2});
+        }
+    }
+
     vertices_ = std::move(simplified_vertices);
     triangles_ = std::move(simplified_triangles);
 }

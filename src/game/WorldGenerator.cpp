@@ -111,7 +111,8 @@ BiomeType WorldGenerator::GetBiomeAt(float x, float z) {
     float height = GetTerrainHeight(x, z);
     
     if (height < config_.waterLevel) {
-        if (humidity > 0.7f) return BiomeType::RIVER;
+        if (humidity > 0.7f)
+            return BiomeType::RIVER;
         return BiomeType::OCEAN;
     }
     

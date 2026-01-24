@@ -1,11 +1,15 @@
 #pragma once
 
+#include <memory>
 #include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
 
 #include "game/LogicCore.hpp"
 #include "game/LogicWorld.hpp"
 #include "game/LogicEntity.hpp"
+#include "game/WorldChunk.hpp"
+#include "game/ChunkLOD.hpp"
+#include "game/CollisionSystem.hpp"
 
 class GameLogic : public LogicCore {
 public:
