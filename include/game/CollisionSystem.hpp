@@ -10,7 +10,7 @@
 #include <cstdint>
 #include <limits>
 
-#include "../../include/game/WorldChunk.hpp"
+#include "game/WorldChunk.hpp"
 
 // Forward declarations
 enum class CollisionType : uint8_t;

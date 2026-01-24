@@ -1,8 +1,8 @@
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/daily_file_sink.h>
 
-#include "../../include/logging/Logger.hpp"
-#include "../../include/config/ConfigManager.hpp"
+#include "logging/Logger.hpp"
+#include "config/ConfigManager.hpp"
 
 std::shared_ptr<spdlog::logger> Logger::logger_;
 std::string Logger::configPath_;

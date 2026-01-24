@@ -1,11 +1,12 @@
 #pragma once
 
-#include "DatabaseBackend.hpp"
-#include "DatabasePool.hpp"
 #include <memory>
 #include <mutex>
 #include <unordered_map>
 #include <atomic>
+
+#include "database/Backend.hpp"
+#include "database/Pool.hpp"
 
 class PostgreSQLBackend : public DatabaseBackend {
 public:

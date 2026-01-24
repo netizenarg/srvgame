@@ -13,11 +13,11 @@
 #include <string>
 #include <chrono>
 
-#include "../../include/game/WorldChunk.hpp"
-#include "../../include/game/ChunkPool.hpp"
-#include "../../include/game/ChunkLOD.hpp"
-#include "../../include/game/ChunkCache.hpp"
-#include "../../include/game/RAIIThread.hpp"
+#include "game/WorldChunk.hpp"
+#include "game/ChunkPool.hpp"
+#include "game/ChunkLOD.hpp"
+#include "game/ChunkCache.hpp"
+#include "game/RAIIThread.hpp"
 
 class ChunkStreamer {
 public:

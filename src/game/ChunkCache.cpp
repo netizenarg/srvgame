@@ -7,8 +7,8 @@
 #include <chrono>
 #include <algorithm>
 
-#include "../../include/game/ChunkCache.hpp"
-#include "../../include/game/RAIIThread.hpp"
+#include "game/ChunkCache.hpp"
+#include "game/RAIIThread.hpp"
 
 ChunkCache::ChunkCache(const CacheConfig& config) 
     : config_(config) {
@@ -437,8 +437,31 @@ std::vector<std::string> ChunkCache::GetCachedChunkKeys() const {
 }
 
 std::string ChunkCache::MakeCacheKey(int x, int z, ChunkLOD lod) const {
-    return std::to_string(x) + "_" + std::to_string(z) + "_" + 
-           std::to_string(static_cast<int>(lod));
+    std::stringstream ss;
+    ss << std::setw(8) << std::setfill('0') << std::hex << x << "_"
+    << std::setw(8) << std::setfill('0') << std::hex << z << "_"
+    << static_cast<int>(lod);
+    return ss.str();
+}
+
+bool ChunkCache::ParseCacheKey(const std::string& key, int& x, int& z, ChunkLOD& lod) const {
+    std::istringstream ss(key);
+    std::string x_str, z_str, lod_str;
+
+    if (!std::getline(ss, x_str, '_') ||
+        !std::getline(ss, z_str, '_') ||
+        !std::getline(ss, lod_str, '_')) {
+        return false;
+        }
+
+        try {
+            x = std::stoi(x_str, nullptr, 16);
+            z = std::stoi(z_str, nullptr, 16);
+            lod = static_cast<ChunkLOD>(std::stoi(lod_str));
+            return true;
+        } catch (...) {
+            return false;
+        }
 }
 
 std::string ChunkCache::GetDiskFilename(int x, int z, ChunkLOD lod) const {
@@ -505,7 +528,7 @@ void ChunkCache::LRUEviction() {
                 try {
                     SaveToDiskInternal(key, temp_entry);
                 } catch (...) {
-                    // Log error but continue eviction
+                    Logger::Error("Failed ChunkCache::LRUEviction -> SaveToDiskInternal");
                 }
                 cache_mutex_.lock();
             }
@@ -565,7 +588,7 @@ void ChunkCache::LFUEviction() {
                 try {
                     SaveToDiskInternal(key, temp_entry);
                 } catch (...) {
-                    // Log error but continue eviction
+                    Logger::Error("Failed ChunkCache::LFUEviction -> SaveToDiskInternal");
                 }
                 cache_mutex_.lock();
             }
@@ -626,7 +649,7 @@ void ChunkCache::FIFOEviction() {
                 try {
                     SaveToDiskInternal(key, temp_entry);
                 } catch (...) {
-                    // Log error but continue eviction
+                    Logger::Error("Failed ChunkCache::FIFOEviction -> SaveToDiskInternal");
                 }
                 cache_mutex_.lock();
             }
@@ -968,20 +991,18 @@ void ChunkCache::SaveThreadFunc() {
         
         {
             std::unique_lock<std::mutex> lock(save_mutex_);
-            save_cv_.wait(lock, [this] {
-                return !running_ || !save_queue_.empty();
-            });
-            
+            if (save_queue_.empty()) {
+                save_cv_.wait(lock, [this] {return !running_ || !save_queue_.empty();});
+            }
             if (!running_) break;
-            
-            // Collect batch of keys to save
-            while (!save_queue_.empty() && 
-                   batch_keys.size() < config_.save_batch_size) {
+
+            // Collect batch
+            while (!save_queue_.empty() && batch_keys.size() < config_.save_batch_size) {
                 batch_keys.push_back(save_queue_.front());
                 save_queue_.pop();
             }
         }
-        
+
         // Process batch
         for (const auto& key : batch_keys) {
             std::shared_lock<std::shared_mutex> cache_lock(cache_mutex_);

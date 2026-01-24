@@ -4,7 +4,7 @@
 #include <random>
 #include <unordered_map>
 
-#include "../../include/game/LootItem.hpp"
+#include "game/LootItem.hpp"
 
 struct LootEntry {
     std::string itemId;

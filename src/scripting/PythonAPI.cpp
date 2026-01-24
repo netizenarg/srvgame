@@ -1,10 +1,10 @@
 #include <random>
 #include <uuid/uuid.h>
 
-#include "../../include/scripting/PythonScripting.hpp"
-#include "../../include/game/PlayerManager.hpp"
-#include "../../include/database/CitusClient.hpp"
-#include "../../include/network/ConnectionManager.hpp"
+#include "scripting/PythonScripting.hpp"
+#include "game/PlayerManager.hpp"
+#include "database/CitusClient.hpp"
+#include "network/ConnectionManager.hpp"
 
 namespace PythonScripting {
 

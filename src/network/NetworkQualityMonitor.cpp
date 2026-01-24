@@ -2,7 +2,7 @@
 #include <sstream>
 #include <iomanip>
 
-#include "../../include/network/NetworkQualityMonitor.hpp"
+#include "network/NetworkQualityMonitor.hpp"
 
 NetworkQualityMonitor::NetworkQualityMonitor(size_t max_samples)
     : max_samples_(max_samples) {

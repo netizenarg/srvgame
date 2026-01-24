@@ -7,7 +7,7 @@
 #include <chrono>
 #include <unordered_map>
 
-#include "../../include/game/WorldChunk.hpp"
+#include "game/WorldChunk.hpp"
 
 enum class ChunkLOD {
     HIGH = 0,      // Full detail (0-50 units)

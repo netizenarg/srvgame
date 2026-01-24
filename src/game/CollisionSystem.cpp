@@ -4,7 +4,7 @@
 #include <cfloat>
 #include <limits>
 
-#include "../../include/game/CollisionSystem.hpp"
+#include "game/CollisionSystem.hpp"
 
 // Constants
 static constexpr float EPSILON = 1e-6f;
@@ -886,16 +886,18 @@ void CollisionSystem::BuildChunkCollisionData(CollisionChunk& chunk, const World
 }
 
 void CollisionSystem::UpdateEntityInGrid(uint64_t entityId, const glm::vec3& oldPos, const glm::vec3& newPos) {
-    // This method should only be called from within locked methods
+    std::lock_guard<std::mutex> lock(mutex_);  // Add lock
+
+    auto entityIt = entities_.find(entityId);
+    if (entityIt == entities_.end() || !entityIt->second.isValid) {
+        return;
+    }
+
     GridCellKey oldKey = GetGridKey(oldPos);
     RemoveFromGrid(entityId, oldKey);
-    
+
     GridCellKey newKey = GetGridKey(newPos);
     AddToGrid(entityId, newKey);
-    
-    // Update entity position in entity map
-    auto entityIt = entities_.find(entityId);
-    if (entityIt != entities_.end()) {
-        entityIt->second.bounds.center = newPos;
-    }
+
+    entityIt->second.bounds.center = newPos;
 }

@@ -5,8 +5,8 @@
 #include <shared_mutex>
 #include <nlohmann/json.hpp>
 
-#include "../../include/database/CitusClient.hpp"
-#include "../../include/game/RAIIThread.hpp"
+#include "database/CitusClient.hpp"
+#include "game/RAIIThread.hpp"
 
 class Player {
 public:

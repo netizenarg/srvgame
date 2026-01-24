@@ -1,8 +1,8 @@
 #include <algorithm>
 #include <cmath>
 
-#include "../../include/network/BinaryProtocol.hpp"
-#include "../../include/network/PredictionSystem.hpp"
+#include "network/BinaryProtocol.hpp"
+#include "network/PredictionSystem.hpp"
 
 PredictionSystem::PredictionSystem() {
     last_confirmed_state_.timestamp = 0;

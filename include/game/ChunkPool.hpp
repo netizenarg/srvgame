@@ -10,7 +10,7 @@
 #include <thread>
 #include <chrono>
 
-#include "../../include/game/WorldChunk.hpp"
+#include "game/WorldChunk.hpp"
 
 class ChunkPool {
 public:

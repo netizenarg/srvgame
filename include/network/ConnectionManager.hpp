@@ -4,7 +4,7 @@
 #include <shared_mutex>
 #include <atomic>
 
-#include "../../include/network/GameSession.hpp"
+#include "network/GameSession.hpp"
 
 class ConnectionManager {
 public:

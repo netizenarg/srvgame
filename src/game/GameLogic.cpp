@@ -1,11 +1,11 @@
 #include <cmath>
 #include <glm/glm.hpp>
 
-#include "../../include/config/ConfigManager.hpp"
-#include "../../include/logging/Logger.hpp"
-#include "../../include/database/CitusClient.hpp"
-#include "../../include/network/ConnectionManager.hpp"
-#include "../../include/game/GameLogic.hpp"
+#include "config/ConfigManager.hpp"
+#include "logging/Logger.hpp"
+#include "database/CitusClient.hpp"
+#include "network/ConnectionManager.hpp"
+#include "game/GameLogic.hpp"
 
 // =============== Static Members ===============
 std::mutex GameLogic::instanceMutex_;

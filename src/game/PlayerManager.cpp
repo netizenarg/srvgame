@@ -2,10 +2,10 @@
 #include <cmath>
 #include <chrono>
 
-#include "../../include/logging/Logger.hpp"
-#include "../../include/database/CitusClient.hpp"
-#include "../../include/game/RAIIThread.hpp"
-#include "../../include/game/PlayerManager.hpp"
+#include "logging/Logger.hpp"
+#include "database/CitusClient.hpp"
+#include "game/RAIIThread.hpp"
+#include "game/PlayerManager.hpp"
 
 // =============== Player Implementation ===============
 

@@ -6,9 +6,9 @@
 #include <vector>
 #include <mutex>
 
-#include "GameEntity.hpp"
-#include "PlayerEntity.hpp"
-#include "NPCEntity.hpp"
+#include "game/GameEntity.hpp"
+#include "game/PlayerEntity.hpp"
+#include "game/NPCEntity.hpp"
 
 class EntityManager {
 public:

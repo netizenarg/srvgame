@@ -2,8 +2,8 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 
-#include "../../include/network/GameServer.hpp"
-#include "../../include/logging/Logger.hpp"
+#include "network/GameServer.hpp"
+#include "logging/Logger.hpp"
 
 GameServer::GameServer(const ConfigManager& config)
 : config_(config),

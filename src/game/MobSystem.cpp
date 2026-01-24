@@ -2,13 +2,13 @@
 #include <algorithm>
 #include <cmath>
 
-#include "../../include/game/MobSystem.hpp"
-#include "../../include/game/GameLogic.hpp"
-#include "../../include/game/PlayerManager.hpp"
-#include "../../include/game/EntityManager.hpp"
-#include "../../include/game/LootTableManager.hpp"
-#include "../../include/logging/Logger.hpp"
-#include "../../include/config/ConfigManager.hpp"
+#include "game/MobSystem.hpp"
+#include "game/GameLogic.hpp"
+#include "game/PlayerManager.hpp"
+#include "game/EntityManager.hpp"
+#include "game/LootTableManager.hpp"
+#include "logging/Logger.hpp"
+#include "config/ConfigManager.hpp"
 
 MobSystem& MobSystem::GetInstance() {
     static MobSystem instance;

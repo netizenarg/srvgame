@@ -2,9 +2,9 @@
 #include <cmath>
 #include <mutex>
 
-#include "../../include/game/NPCSystem.hpp"
-#include "../../include/game/GameEntity.hpp"
-#include "../../include/logging/Logger.hpp"
+#include "game/NPCSystem.hpp"
+#include "game/GameEntity.hpp"
+#include "logging/Logger.hpp"
 
 // =============== NPCEntity Implementation ===============
 

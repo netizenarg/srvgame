@@ -15,9 +15,10 @@
 #include <sstream>
 #include <iomanip>
 
-#include "../../include/game/WorldChunk.hpp"
-#include "../../include/game/ChunkLOD.hpp"
-#include "../../include/game/RAIIThread.hpp"
+#include "logging/Logger.hpp"
+#include "game/WorldChunk.hpp"
+#include "game/ChunkLOD.hpp"
+#include "game/RAIIThread.hpp"
 
 class ChunkCache {
 public:
@@ -155,6 +156,7 @@ private:
 
     // Helper methods
     std::string MakeCacheKey(int x, int z, ChunkLOD lod) const;
+    bool ParseCacheKey(const std::string& key, int& x, int& z, ChunkLOD& lod);
     std::string GetDiskFilename(int x, int z, ChunkLOD lod) const;
 
     // Cache policies

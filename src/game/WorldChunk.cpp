@@ -1,6 +1,6 @@
 #include <algorithm>
 
-#include "../../include/game/WorldChunk.hpp"
+#include "game/WorldChunk.hpp"
 
 const float WorldChunk::BLOCK_SIZE = 1.0f;
 const float WorldChunk::CHUNK_WIDTH = CHUNK_SIZE * BLOCK_SIZE;

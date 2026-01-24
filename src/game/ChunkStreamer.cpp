@@ -3,9 +3,9 @@
 #include <algorithm>
 #include <thread>
 
-#include "../../include/game/ChunkStreamer.hpp"
-#include "../../include/game/WorldGenerator.hpp"
-#include "../../include/game/RAIIThread.hpp"
+#include "game/ChunkStreamer.hpp"
+#include "game/WorldGenerator.hpp"
+#include "game/RAIIThread.hpp"
 
 ChunkStreamer::ChunkStreamer(std::shared_ptr<ChunkPool> pool,
                              std::shared_ptr<ChunkCache> cache,

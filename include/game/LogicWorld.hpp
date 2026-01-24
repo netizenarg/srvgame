@@ -5,8 +5,8 @@
 #include <memory>
 #include <mutex>
 
-#include "../../include/game/WorldChunk.hpp"
-#include "../../include/game/WorldGenerator.hpp"
+#include "game/WorldChunk.hpp"
+#include "game/WorldGenerator.hpp"
 
 class LogicWorld {
 public:

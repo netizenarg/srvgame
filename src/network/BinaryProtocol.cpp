@@ -2,7 +2,7 @@
 #include <cstring>
 #include <stdexcept>
 
-#include "../../include/network/BinaryProtocol.hpp"
+#include "network/BinaryProtocol.hpp"
 
 namespace BinaryProtocol {
 

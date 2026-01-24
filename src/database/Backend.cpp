@@ -1,10 +1,10 @@
 #include <memory>
 #include <stdexcept>
 
-#include "../../include/database/DatabaseBackend.hpp"
-#include "../../include/database/PostgreSQLBackend.hpp"
-#include "../../include/database/CitusBackend.hpp"
-#include "../../include/logging/Logger.hpp"
+#include "database/Backend.hpp"
+#include "database/PostgreSQLBackend.hpp"
+#include "database/CitusBackend.hpp"
+#include "logging/Logger.hpp"
 
 std::unique_ptr<DatabaseBackend> DatabaseBackend::CreateBackend(const std::string& type) {
     if (type == "postgresql" || type == "postgres") {

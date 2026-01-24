@@ -2,8 +2,8 @@
 #include <chrono>
 #include <thread>
 
-#include "../../include/game/ChunkPool.hpp"
-#include "../../include/game/WorldChunk.hpp"
+#include "game/ChunkPool.hpp"
+#include "game/WorldChunk.hpp"
 
 constexpr size_t ChunkPool::ESTIMATED_CHUNK_SIZE;
 

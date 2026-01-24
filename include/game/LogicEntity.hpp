@@ -5,11 +5,11 @@
 #include <memory>
 #include <mutex>
 
-#include "../../include/game/NPCSystem.hpp"
-#include "../../include/game/MobSystem.hpp"
-#include "../../include/game/EntityManager.hpp"
-#include "../../include/game/CollisionSystem.hpp"
-#include "../../include/game/LootItem.hpp"
+#include "game/NPCSystem.hpp"
+#include "game/MobSystem.hpp"
+#include "game/EntityManager.hpp"
+#include "game/CollisionSystem.hpp"
+#include "game/LootItem.hpp"
 
 class LogicEntity {
 public:

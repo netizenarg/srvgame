@@ -5,7 +5,7 @@
 #include <memory>
 #include <random>
 
-#include "../../include/game/WorldChunk.hpp"
+#include "game/WorldChunk.hpp"
 
 class WorldGenerator {
 public:
