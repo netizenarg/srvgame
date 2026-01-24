@@ -2,7 +2,7 @@
 #include <algorithm>
 #include <iostream>
 
-#include "../../include/game/SpatialGrid.hpp"
+#include "game/SpatialGrid.hpp"
 
 SpatialGrid::SpatialGrid(float cell_size, int32_t max_cells)
     : cell_size_(std::max(1.0f, cell_size)), max_cells_(std::max(1, max_cells)) {}

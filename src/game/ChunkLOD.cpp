@@ -4,8 +4,8 @@
 #include <algorithm>
 #include <string>
 
-#include "../../include/game/ChunkLOD.hpp"
-#include "../../include/game/WorldGenerator.hpp"
+#include "game/ChunkLOD.hpp"
+#include "game/WorldGenerator.hpp"
 
 LODChunk::LODChunk(int x, int z, ChunkLOD lod)
     : WorldChunk(x, z, lod), lod_(lod) {

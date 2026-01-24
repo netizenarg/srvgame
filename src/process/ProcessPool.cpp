@@ -4,8 +4,8 @@
 #include <unistd.h>
 #include <cstring>
 
-#include "../../include/process/ProcessPool.hpp"
-#include "../../include/logging/Logger.hpp"
+#include "process/ProcessPool.hpp"
+#include "logging/Logger.hpp"
 
 ProcessPool::ProcessPool(int numProcesses)
 : numProcesses_(numProcesses) {

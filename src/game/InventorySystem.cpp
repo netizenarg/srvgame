@@ -1,7 +1,7 @@
 #include "logging/Logger.hpp"
 #include <algorithm>
 
-#include "../../include/game/InventorySystem.hpp"
+#include "game/InventorySystem.hpp"
 
 nlohmann::json InventorySlot::Serialize() const {
     nlohmann::json result = {

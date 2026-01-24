@@ -3,8 +3,8 @@
 #include <stdexcept>
 #include <algorithm>
 
-#include "../../include/config/ConfigManager.hpp"
-#include "../../include/logging/Logger.hpp"
+#include "config/ConfigManager.hpp"
+#include "logging/Logger.hpp"
 
 ConfigManager& ConfigManager::GetInstance() {
     static ConfigManager instance;

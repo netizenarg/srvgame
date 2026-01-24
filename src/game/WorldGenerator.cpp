@@ -2,7 +2,7 @@
 #include <algorithm>
 #include <glm/gtc/noise.hpp>
 
-#include "../../include/game/WorldGenerator.hpp"
+#include "game/WorldGenerator.hpp"
 
 // Initialize static members
 const float WorldChunk::BLOCK_SIZE = 1.0f;

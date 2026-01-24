@@ -12,11 +12,11 @@
 #include <queue>
 #include <chrono>
 
-#include "../../include/game/PlayerManager.hpp"
-#include "../../include/scripting/PythonScripting.hpp"
-#include "../../include/network/ConnectionManager.hpp"
-#include "../../include/network/BinaryProtocol.hpp"
-#include "../../include/game/RAIIThread.hpp"
+#include "game/PlayerManager.hpp"
+#include "scripting/PythonScripting.hpp"
+#include "network/ConnectionManager.hpp"
+#include "network/BinaryProtocol.hpp"
+#include "game/RAIIThread.hpp"
 
 class LogicCore {
 public:

@@ -1,8 +1,8 @@
-#include "../../include/config/ConfigManager.hpp"
-#include "../../include/logging/Logger.hpp"
-#include "../../include/network/BinaryProtocol.hpp"
-#include "../../include/network/ConnectionManager.hpp"
-#include "../../include/game/LogicEntity.hpp"
+#include "config/ConfigManager.hpp"
+#include "logging/Logger.hpp"
+#include "network/BinaryProtocol.hpp"
+#include "network/ConnectionManager.hpp"
+#include "game/LogicEntity.hpp"
 
 LogicEntity::LogicEntity()
     : mobSystem_(MobSystem::GetInstance()),

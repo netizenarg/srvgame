@@ -3,9 +3,9 @@
 #include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
 
-#include "../../include/game/LogicCore.hpp"
-#include "../../include/game/LogicWorld.hpp"
-#include "../../include/game/LogicEntity.hpp"
+#include "game/LogicCore.hpp"
+#include "game/LogicWorld.hpp"
+#include "game/LogicEntity.hpp"
 
 class GameLogic : public LogicCore {
 public:

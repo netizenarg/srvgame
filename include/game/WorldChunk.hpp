@@ -7,7 +7,7 @@
 #include <unordered_set>
 #include <nlohmann/json.hpp>
 
-#include "../../include/game/ChunkLOD.hpp"
+#include "game/ChunkLOD.hpp"
 
 enum class BiomeType {
     PLAINS = 0,

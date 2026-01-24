@@ -2,12 +2,12 @@
 #include <random>
 #include <chrono>
 
-#include "../../include/config/ConfigManager.hpp"
-#include "../../include/logging/Logger.hpp"
-#include "../../include/database/CitusClient.hpp"
-#include "../../include/scripting/PythonScripting.hpp"
-#include "../../include/network/ConnectionManager.hpp"
-#include "../../include/game/LogicCore.hpp"
+#include "config/ConfigManager.hpp"
+#include "logging/Logger.hpp"
+#include "database/CitusClient.hpp"
+#include "scripting/PythonScripting.hpp"
+#include "network/ConnectionManager.hpp"
+#include "game/LogicCore.hpp"
 
 // =============== Static Members ===============
 std::mutex LogicCore::instanceMutex_;

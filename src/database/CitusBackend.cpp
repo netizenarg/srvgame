@@ -6,9 +6,9 @@
 #include <random>
 #include <future>
 
-#include "../../include/database/CitusBackend.hpp"
-#include "../../include/config/ConfigManager.hpp"
-#include "../../include/logging/Logger.hpp"
+#include "database/CitusBackend.hpp"
+#include "config/ConfigManager.hpp"
+#include "logging/Logger.hpp"
 
 // =============== CitusBackend Implementation ===============
 

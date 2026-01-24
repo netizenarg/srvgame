@@ -2,7 +2,7 @@
 #include <chrono>
 #include <thread>
 
-#include "../../include/scripting/PythonScripting.hpp"
+#include "scripting/PythonScripting.hpp"
 
 namespace fs = std::filesystem;
 

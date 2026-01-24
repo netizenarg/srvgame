@@ -7,8 +7,8 @@
 #include <chrono>
 #include <algorithm>
 
-#include "../../include/game/ChunkCache.hpp"
-#include "../../include/game/RAIIThread.hpp"
+#include "game/ChunkCache.hpp"
+#include "game/RAIIThread.hpp"
 
 ChunkCache::ChunkCache(const CacheConfig& config) 
     : config_(config) {
@@ -528,7 +528,7 @@ void ChunkCache::LRUEviction() {
                 try {
                     SaveToDiskInternal(key, temp_entry);
                 } catch (...) {
-                    // Log error but continue eviction
+                    Logger::Error("Failed ChunkCache::LRUEviction -> SaveToDiskInternal");
                 }
                 cache_mutex_.lock();
             }
@@ -588,7 +588,7 @@ void ChunkCache::LFUEviction() {
                 try {
                     SaveToDiskInternal(key, temp_entry);
                 } catch (...) {
-                    // Log error but continue eviction
+                    Logger::Error("Failed ChunkCache::LFUEviction -> SaveToDiskInternal");
                 }
                 cache_mutex_.lock();
             }
@@ -649,7 +649,7 @@ void ChunkCache::FIFOEviction() {
                 try {
                     SaveToDiskInternal(key, temp_entry);
                 } catch (...) {
-                    // Log error but continue eviction
+                    Logger::Error("Failed ChunkCache::FIFOEviction -> SaveToDiskInternal");
                 }
                 cache_mutex_.lock();
             }

@@ -3,9 +3,9 @@
 #include <algorithm>
 #include <chrono>
 
-#include "../../include/logging/Logger.hpp"
-#include "../../include/config/ConfigManager.hpp"
-#include "../../include/network/GameSession.hpp"
+#include "logging/Logger.hpp"
+#include "config/ConfigManager.hpp"
+#include "network/GameSession.hpp"
 
 // Static member initialization
 std::atomic<uint64_t> GameSession::nextSessionId_{1};

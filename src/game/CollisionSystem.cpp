@@ -4,7 +4,7 @@
 #include <cfloat>
 #include <limits>
 
-#include "../../include/game/CollisionSystem.hpp"
+#include "game/CollisionSystem.hpp"
 
 // Constants
 static constexpr float EPSILON = 1e-6f;

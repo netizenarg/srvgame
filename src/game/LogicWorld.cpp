@@ -1,9 +1,9 @@
 #include <cmath>
 
-#include "../../include/config/ConfigManager.hpp"
-#include "../../include/logging/Logger.hpp"
-#include "../../include/database/CitusClient.hpp"
-#include "../../include/game/LogicWorld.hpp"
+#include "config/ConfigManager.hpp"
+#include "logging/Logger.hpp"
+#include "database/CitusClient.hpp"
+#include "game/LogicWorld.hpp"
 
 LogicWorld::LogicWorld() {
     Logger::Debug("LogicWorld created");

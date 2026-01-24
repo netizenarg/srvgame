@@ -5,7 +5,7 @@
 #include <string>
 #include <functional>
 
-#include "../../include/config/ConfigManager.hpp"
+#include "config/ConfigManager.hpp"
 
 class GameServer {
 public:

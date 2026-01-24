@@ -5,7 +5,7 @@
 #include <vector>
 #include <memory>
 
-#include "../include/database/DatabaseBackend.hpp"
+#include "database/Backend.hpp"
 
 // Compatibility wrapper for existing code
 class CitusClient {

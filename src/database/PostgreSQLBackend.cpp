@@ -6,9 +6,9 @@
 #include <random>
 #include <algorithm>
 
-#include "../../include/database/PostgreSQLBackend.hpp"
-#include "../../include/config/ConfigManager.hpp"
-#include "../../include/logging/Logger.hpp"
+#include "database/PostgreSQLBackend.hpp"
+#include "config/ConfigManager.hpp"
+#include "logging/Logger.hpp"
 
 // =============== PostgreSQLBackend Implementation ===============
 

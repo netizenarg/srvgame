@@ -1,8 +1,8 @@
 #include <algorithm>
 #include <chrono>
 
-#include "../../include/network/ConnectionManager.hpp"
-#include "../../include/logging/Logger.hpp"
+#include "network/ConnectionManager.hpp"
+#include "logging/Logger.hpp"
 
 // =============== ConnectionManager Implementation ===============
 

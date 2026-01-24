@@ -1,9 +1,9 @@
 #include <memory>
 
-#include "../../include/database/CitusClient.hpp"
-#include "../../include/database/DatabaseBackend.hpp"
-#include "../../include/config/ConfigManager.hpp"
-#include "../../include/logging/Logger.hpp"
+#include "database/CitusClient.hpp"
+#include "database/Backend.hpp"
+#include "config/ConfigManager.hpp"
+#include "logging/Logger.hpp"
 
 // =============== Static Members ===============
 std::mutex CitusClient::instanceMutex_;

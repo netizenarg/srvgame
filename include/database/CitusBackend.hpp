@@ -1,12 +1,13 @@
 #pragma once
 
-#include "DatabaseBackend.hpp"
-#include "DatabasePool.hpp"
 #include <string>
 #include <vector>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+
+#include "database/Backend.hpp"
+#include "database/Pool.hpp"
 
 struct ShardInfo {
     int shard_id;

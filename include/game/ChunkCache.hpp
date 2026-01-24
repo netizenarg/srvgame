@@ -15,9 +15,10 @@
 #include <sstream>
 #include <iomanip>
 
-#include "../../include/game/WorldChunk.hpp"
-#include "../../include/game/ChunkLOD.hpp"
-#include "../../include/game/RAIIThread.hpp"
+#include "logging/Logger.hpp"
+#include "game/WorldChunk.hpp"
+#include "game/ChunkLOD.hpp"
+#include "game/RAIIThread.hpp"
 
 class ChunkCache {
 public:

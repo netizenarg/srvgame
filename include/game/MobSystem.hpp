@@ -7,8 +7,8 @@
 #include <chrono>
 #include <random>
 
-#include "../../include/game/WorldChunk.hpp"
-#include "../../include/game/LootTable.hpp"
+#include "game/WorldChunk.hpp"
+#include "game/LootTable.hpp"
 
 // Mob spawn zone
 struct MobSpawnZone {
