@@ -52,6 +52,7 @@ set(NETWORK_SOURCES
     src/network/GameSession.cpp
     src/network/NetworkQualityMonitor.cpp
     src/network/PredictionSystem.cpp
+    src/network/WebSocketProtocol.cpp
 )
 
 # Core logic system
