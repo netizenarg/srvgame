@@ -549,23 +549,33 @@ void WebSocketConnection::ReadFramePayload(bool fin, uint8_t opcode, bool masked
 }
 
 void WebSocketConnection::ProcessFrameData(bool fin, uint8_t opcode, bool masked,
-                                          uint64_t payload_length, size_t header_size) {
-    // Extract frame data from buffer
-    std::vector<uint8_t> frame_data(header_size + payload_length);
-    auto buffers = read_buffer_.data();
-    size_t offset = 0;
-    
-    for (const auto& buffer : buffers) {
-        size_t size = asio::buffer_size(buffer);
-        if (offset + size > frame_data.size()) {
-            break;
-        }
-        std::memcpy(frame_data.data() + offset, asio::buffer_cast<const void*>(buffer), size);
-        offset += size;
+                                           uint64_t payload_length, size_t header_size) {
+    // Allocate destination buffer
+    size_t total_frame_size = header_size + payload_length;
+
+    // Validate size before allocation
+    constexpr size_t MAX_FRAME_SIZE = 16 * 1024 * 1024; // 16MB limit
+    if (total_frame_size > MAX_FRAME_SIZE) {
+        throw std::runtime_error("Frame too large");
     }
-    
-    read_buffer_.consume(frame_data.size());
-    
+
+    std::vector<uint8_t> frame_data(total_frame_size);
+    auto buffers = read_buffer_.data();
+
+    // Use Asio's safe buffer_copy
+    size_t bytes_copied = asio::buffer_copy(
+        asio::buffer(frame_data),  // destination
+        buffers,                   // source buffer sequence
+        total_frame_size           // maximum bytes to copy
+    );
+
+    if (bytes_copied != total_frame_size) {
+        throw std::runtime_error("Incomplete frame data in buffer");
+    }
+
+    // Consume the data from the read buffer
+    read_buffer_.consume(bytes_copied);
+
     try {
         WebSocketFrame frame = WebSocketFrame::Deserialize(frame_data);
         HandleFrame(frame);
@@ -574,7 +584,7 @@ void WebSocketConnection::ProcessFrameData(bool fin, uint8_t opcode, bool masked
         Close(1002, "Protocol error");
         return;
     }
-    
+
     // Continue reading next frame
     if (state_ == State::OPEN || state_ == State::CLOSING) {
         ReadFrame();
