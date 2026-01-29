@@ -2,6 +2,8 @@
 #include <sstream>
 #include <stdexcept>
 #include <algorithm>
+#include <filesystem>
+#include <map>
 
 #include "config/ConfigManager.hpp"
 #include "logging/Logger.hpp"
@@ -12,6 +14,7 @@ ConfigManager& ConfigManager::GetInstance() {
 }
 
 bool ConfigManager::LoadConfig(const std::string& configPath) {
+    std::lock_guard<std::mutex> lock(configMutex_);
     configPath_ = configPath;
 
     try {
@@ -92,14 +95,14 @@ bool ConfigManager::ValidateConfig() const {
         if (!game.contains("max_players_per_session") ||
             !game["max_players_per_session"].is_number_unsigned()) {
             throw std::runtime_error("Invalid or missing 'game.max_players_per_session'");
-            }
+        }
 
-            // Validate logging section
-            if (!config_.contains("logging")) {
-                throw std::runtime_error("Missing 'logging' section");
-            }
+        // Validate logging section
+        if (!config_.contains("logging")) {
+            throw std::runtime_error("Missing 'logging' section");
+        }
 
-            const auto& logging = config_["logging"];
+        const auto& logging = config_["logging"];
         if (!logging.contains("level") || !logging["level"].is_string()) {
             throw std::runtime_error("Invalid or missing 'logging.level'");
         }
@@ -110,7 +113,10 @@ bool ConfigManager::ValidateConfig() const {
             "trace", "debug", "info", "warn", "error", "critical", "off"
         };
 
-        if (std::find(validLevels.begin(), validLevels.end(), logLevel) == validLevels.end()) {
+        std::string lowerLevel = logLevel;
+        std::transform(lowerLevel.begin(), lowerLevel.end(), lowerLevel.begin(), ::tolower);
+        
+        if (std::find(validLevels.begin(), validLevels.end(), lowerLevel) == validLevels.end()) {
             throw std::runtime_error("Invalid log level: " + logLevel);
         }
 
@@ -125,6 +131,7 @@ bool ConfigManager::ValidateConfig() const {
 
 // Server configuration getters
 std::string ConfigManager::GetServerHost() const {
+    std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_["server"]["host"].get<std::string>();
     } catch (const std::exception& e) {
@@ -134,6 +141,7 @@ std::string ConfigManager::GetServerHost() const {
 }
 
 uint16_t ConfigManager::GetServerPort() const {
+    std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_["server"]["port"].get<uint16_t>();
     } catch (const std::exception& e) {
@@ -143,6 +151,7 @@ uint16_t ConfigManager::GetServerPort() const {
 }
 
 int ConfigManager::GetMaxConnections() const {
+    std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_["server"]["max_connections"].get<int>();
     } catch (const std::exception& e) {
@@ -152,6 +161,7 @@ int ConfigManager::GetMaxConnections() const {
 }
 
 int ConfigManager::GetIoThreads() const {
+    std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_["server"]["io_threads"].get<int>();
     } catch (const std::exception& e) {
@@ -161,6 +171,7 @@ int ConfigManager::GetIoThreads() const {
 }
 
 bool ConfigManager::GetReusePort() const {
+    std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_["server"]["reuse_port"].get<bool>();
     } catch (const std::exception& e) {
@@ -170,6 +181,7 @@ bool ConfigManager::GetReusePort() const {
 }
 
 int ConfigManager::GetProcessCount() const {
+    std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_["server"]["process_count"].get<int>();
     } catch (const std::exception& e) {
@@ -180,6 +192,7 @@ int ConfigManager::GetProcessCount() const {
 
 // Database configuration getters
 std::string ConfigManager::GetDatabaseHost() const {
+    std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_["database"]["host"].get<std::string>();
     } catch (const std::exception& e) {
@@ -189,6 +202,7 @@ std::string ConfigManager::GetDatabaseHost() const {
 }
 
 uint16_t ConfigManager::GetDatabasePort() const {
+    std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_["database"]["port"].get<uint16_t>();
     } catch (const std::exception& e) {
@@ -198,6 +212,7 @@ uint16_t ConfigManager::GetDatabasePort() const {
 }
 
 std::string ConfigManager::GetDatabaseName() const {
+    std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_["database"]["database_name"].get<std::string>();
     } catch (const std::exception& e) {
@@ -207,6 +222,7 @@ std::string ConfigManager::GetDatabaseName() const {
 }
 
 std::string ConfigManager::GetDatabaseUser() const {
+    std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_["database"]["username"].get<std::string>();
     } catch (const std::exception& e) {
@@ -216,6 +232,7 @@ std::string ConfigManager::GetDatabaseUser() const {
 }
 
 std::string ConfigManager::GetDatabasePassword() const {
+    std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_["database"]["password"].get<std::string>();
     } catch (const std::exception& e) {
@@ -224,7 +241,18 @@ std::string ConfigManager::GetDatabasePassword() const {
     }
 }
 
+std::string ConfigManager::GetDatabaseBackend() const {
+    std::lock_guard<std::mutex> lock(configMutex_);
+    try {
+        return config_["database"]["backend"].get<std::string>();
+    } catch (const std::exception& e) {
+        Logger::Warn("Failed to get database backend, using default: postgresql");
+        return "postgresql";
+    }
+}
+
 int ConfigManager::GetDatabasePoolSize() const {
+    std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_["database"]["pool_size"].get<int>();
     } catch (const std::exception& e) {
@@ -234,6 +262,7 @@ int ConfigManager::GetDatabasePoolSize() const {
 }
 
 std::vector<std::string> ConfigManager::GetCitusWorkerNodes() const {
+    std::lock_guard<std::mutex> lock(configMutex_);
     std::vector<std::string> nodes;
     try {
         if (config_["database"].contains("citus_worker_nodes") &&
@@ -244,7 +273,7 @@ std::vector<std::string> ConfigManager::GetCitusWorkerNodes() const {
                     nodes.push_back(node.get<std::string>());
                 }
             }
-            }
+        }
     } catch (const std::exception& e) {
         Logger::Warn("Failed to get Citus worker nodes, using empty list");
     }
@@ -263,6 +292,7 @@ std::vector<std::string> ConfigManager::GetCitusWorkerNodes() const {
 }
 
 int ConfigManager::GetShardCount() const {
+    std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_["database"]["shard_count"].get<int>();
     } catch (const std::exception& e) {
@@ -273,6 +303,7 @@ int ConfigManager::GetShardCount() const {
 
 // Game configuration getters
 int ConfigManager::GetMaxPlayersPerSession() const {
+    std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_["game"]["max_players_per_session"].get<int>();
     } catch (const std::exception& e) {
@@ -282,6 +313,7 @@ int ConfigManager::GetMaxPlayersPerSession() const {
 }
 
 int ConfigManager::GetHeartbeatInterval() const {
+    std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_["game"]["heartbeat_interval_seconds"].get<int>();
     } catch (const std::exception& e) {
@@ -291,6 +323,7 @@ int ConfigManager::GetHeartbeatInterval() const {
 }
 
 int ConfigManager::GetSessionTimeout() const {
+    std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_["game"]["session_timeout_seconds"].get<int>();
     } catch (const std::exception& e) {
@@ -299,37 +332,100 @@ int ConfigManager::GetSessionTimeout() const {
     }
 }
 
-std::map<std::string, float> ConfigManager::GetWorldSize() const {
-    std::map<std::string, float> worldSize;
+// 3D World configuration getters
+int ConfigManager::GetWorldSeed() const {
+    std::lock_guard<std::mutex> lock(configMutex_);
     try {
-        if (config_["game"].contains("world_size") &&
-            config_["game"]["world_size"].is_object()) {
-
-            const auto& world = config_["game"]["world_size"];
-        if (world.contains("x") && world["x"].is_number()) {
-            worldSize["x"] = world["x"].get<float>();
-        }
-        if (world.contains("y") && world["y"].is_number()) {
-            worldSize["y"] = world["y"].get<float>();
-        }
-        if (world.contains("z") && world["z"].is_number()) {
-            worldSize["z"] = world["z"].get<float>();
-        }
-            }
+        return config_["world"]["seed"].get<int>();
     } catch (const std::exception& e) {
-        Logger::Warn("Failed to get world size, using defaults");
+        Logger::Warn("Failed to get world seed, using default: 12345");
+        return 12345;
     }
+}
 
-    // Set defaults if not specified
-    if (worldSize.find("x") == worldSize.end()) worldSize["x"] = 1000.0f;
-    if (worldSize.find("y") == worldSize.end()) worldSize["y"] = 1000.0f;
-    if (worldSize.find("z") == worldSize.end()) worldSize["z"] = 100.0f;
+int ConfigManager::GetViewDistance() const {
+    std::lock_guard<std::mutex> lock(configMutex_);
+    try {
+        return config_["world"]["view_distance"].get<int>();
+    } catch (const std::exception& e) {
+        Logger::Warn("Failed to get view distance, using default: 1000");
+        return 1000;
+    }
+}
 
-    return worldSize;
+int ConfigManager::GetChunkSize() const {
+    std::lock_guard<std::mutex> lock(configMutex_);
+    try {
+        return config_["world"]["chunk_size"].get<int>();
+    } catch (const std::exception& e) {
+        Logger::Warn("Failed to get chunk size, using default: 32");
+        return 32;
+    }
+}
+
+int ConfigManager::GetMaxActiveChunks() const {
+    std::lock_guard<std::mutex> lock(configMutex_);
+    try {
+        return config_["world"]["max_active_chunks"].get<int>();
+    } catch (const std::exception& e) {
+        Logger::Warn("Failed to get max active chunks, using default: 1000");
+        return 1000;
+    }
+}
+
+float ConfigManager::GetTerrainScale() const {
+    std::lock_guard<std::mutex> lock(configMutex_);
+    try {
+        return config_["world"]["terrain_scale"].get<float>();
+    } catch (const std::exception& e) {
+        Logger::Warn("Failed to get terrain scale, using default: 1.0");
+        return 1.0f;
+    }
+}
+
+float ConfigManager::GetMaxTerrainHeight() const {
+    std::lock_guard<std::mutex> lock(configMutex_);
+    try {
+        return config_["world"]["max_terrain_height"].get<float>();
+    } catch (const std::exception& e) {
+        Logger::Warn("Failed to get max terrain height, using default: 100.0");
+        return 100.0f;
+    }
+}
+
+float ConfigManager::GetWaterLevel() const {
+    std::lock_guard<std::mutex> lock(configMutex_);
+    try {
+        return config_["world"]["water_level"].get<float>();
+    } catch (const std::exception& e) {
+        Logger::Warn("Failed to get water level, using default: 10.0");
+        return 10.0f;
+    }
+}
+
+bool ConfigManager::ShouldPreloadWorld() const {
+    std::lock_guard<std::mutex> lock(configMutex_);
+    try {
+        return config_["world"]["preload_world"].get<bool>();
+    } catch (const std::exception& e) {
+        Logger::Warn("Failed to get preload world setting, using default: false");
+        return false;
+    }
+}
+
+int ConfigManager::GetWorldPreloadRadius() const {
+    std::lock_guard<std::mutex> lock(configMutex_);
+    try {
+        return config_["world"]["preload_radius"].get<int>();
+    } catch (const std::exception& e) {
+        Logger::Warn("Failed to get world preload radius, using default: 500");
+        return 500;
+    }
 }
 
 // Logging configuration getters
 std::string ConfigManager::GetLogLevel() const {
+    std::lock_guard<std::mutex> lock(configMutex_);
     try {
         std::string level = config_["logging"]["level"].get<std::string>();
         std::transform(level.begin(), level.end(), level.begin(), ::tolower);
@@ -341,6 +437,7 @@ std::string ConfigManager::GetLogLevel() const {
 }
 
 std::string ConfigManager::GetLogFilePath() const {
+    std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_["logging"]["file_path"].get<std::string>();
     } catch (const std::exception& e) {
@@ -350,6 +447,7 @@ std::string ConfigManager::GetLogFilePath() const {
 }
 
 int ConfigManager::GetMaxLogFileSize() const {
+    std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_["logging"]["max_file_size_mb"].get<int>();
     } catch (const std::exception& e) {
@@ -359,6 +457,7 @@ int ConfigManager::GetMaxLogFileSize() const {
 }
 
 int ConfigManager::GetMaxLogFiles() const {
+    std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_["logging"]["max_files"].get<int>();
     } catch (const std::exception& e) {
@@ -368,6 +467,7 @@ int ConfigManager::GetMaxLogFiles() const {
 }
 
 bool ConfigManager::GetConsoleOutput() const {
+    std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_["logging"]["console_output"].get<bool>();
     } catch (const std::exception& e) {
@@ -376,179 +476,11 @@ bool ConfigManager::GetConsoleOutput() const {
     }
 }
 
-// Additional utility methods (not declared in header but useful)
-nlohmann::json ConfigManager::GetRawConfig() const {
-    return config_;
-}
-
-bool ConfigManager::HasKey(const std::string& keyPath) const {
-    try {
-        nlohmann::json::json_pointer ptr("/" + keyPath);
-        return config_.contains(ptr);
-    } catch (const std::exception& e) {
-        return false;
-    }
-}
-
-std::string ConfigManager::GetString(const std::string& keyPath, const std::string& defaultValue) const {
-    try {
-        nlohmann::json::json_pointer ptr("/" + keyPath);
-        return config_.at(ptr).get<std::string>();
-    } catch (const std::exception& e) {
-        return defaultValue;
-    }
-}
-
-int ConfigManager::GetInt(const std::string& keyPath, int defaultValue) const {
-    try {
-        nlohmann::json::json_pointer ptr("/" + keyPath);
-        return config_.at(ptr).get<int>();
-    } catch (const std::exception& e) {
-        return defaultValue;
-    }
-}
-
-bool ConfigManager::GetBool(const std::string& keyPath, bool defaultValue) const {
-    try {
-        nlohmann::json::json_pointer ptr("/" + keyPath);
-        return config_.at(ptr).get<bool>();
-    } catch (const std::exception& e) {
-        return defaultValue;
-    }
-}
-
-float ConfigManager::GetFloat(const std::string& keyPath, float defaultValue) const {
-    try {
-        nlohmann::json::json_pointer ptr("/" + keyPath);
-        return config_.at(ptr).get<float>();
-    } catch (const std::exception& e) {
-        return defaultValue;
-    }
-}
-
-std::vector<std::string> ConfigManager::GetStringArray(const std::string& keyPath) const {
-    std::vector<std::string> result;
-    try {
-        nlohmann::json::json_pointer ptr("/" + keyPath);
-        if (config_.at(ptr).is_array()) {
-            for (const auto& item : config_.at(ptr)) {
-                if (item.is_string()) {
-                    result.push_back(item.get<std::string>());
-                }
-            }
-        }
-    } catch (const std::exception& e) {
-        // Return empty vector on error
-    }
-    return result;
-}
-
-// Method to dump configuration (useful for debugging)
-void ConfigManager::DumpConfig() const {
-    try {
-        Logger::Info("=== Configuration Dump ===");
-        Logger::Info("Server Configuration:");
-        Logger::Info("  Host: {}", GetServerHost());
-        Logger::Info("  Port: {}", GetServerPort());
-        Logger::Info("  Max Connections: {}", GetMaxConnections());
-        Logger::Info("  IO Threads: {}", GetIoThreads());
-        Logger::Info("  Reuse Port: {}", GetReusePort());
-        Logger::Info("  Process Count: {}", GetProcessCount());
-
-        Logger::Info("\nDatabase Configuration:");
-        Logger::Info("  Host: {}", GetDatabaseHost());
-        Logger::Info("  Port: {}", GetDatabasePort());
-        Logger::Info("  Database: {}", GetDatabaseName());
-        Logger::Info("  User: {}", GetDatabaseUser());
-        Logger::Info("  Pool Size: {}", GetDatabasePoolSize());
-        Logger::Info("  Shard Count: {}", GetShardCount());
-
-        auto workerNodes = GetCitusWorkerNodes();
-        Logger::Info("  Citus Worker Nodes: {}", workerNodes.size());
-        for (size_t i = 0; i < workerNodes.size(); ++i) {
-            Logger::Info("    {}: {}", i, workerNodes[i]);
-        }
-
-        Logger::Info("\nGame Configuration:");
-        Logger::Info("  Max Players Per Session: {}", GetMaxPlayersPerSession());
-        Logger::Info("  Heartbeat Interval: {}s", GetHeartbeatInterval());
-        Logger::Info("  Session Timeout: {}s", GetSessionTimeout());
-
-        auto worldSize = GetWorldSize();
-        Logger::Info("  World Size: X={}, Y={}, Z={}",
-                     worldSize["x"], worldSize["y"], worldSize["z"]);
-
-        Logger::Info("\nLogging Configuration:");
-        Logger::Info("  Level: {}", GetLogLevel());
-        Logger::Info("  File Path: {}", GetLogFilePath());
-        Logger::Info("  Max File Size: {}MB", GetMaxLogFileSize());
-        Logger::Info("  Max Files: {}", GetMaxLogFiles());
-        Logger::Info("  Console Output: {}", GetConsoleOutput());
-        Logger::Info("=== End Configuration ===");
-    } catch (const std::exception& e) {
-        Logger::Error("Failed to dump configuration: {}", e.what());
-    }
-}
-
-// Hot-reload configuration (useful for production)
-bool ConfigManager::WatchForChanges(int checkIntervalSeconds) {
-    static std::atomic<bool> watching(false);
-    static std::thread watcherThread;
-
-    if (watching) {
-        Logger::Warn("Configuration watcher is already running");
-        return false;
-    }
-
-    if (configPath_.empty()) {
-        Logger::Error("No config file path set for watching");
-        return false;
-    }
-
-    auto lastWriteTime = std::filesystem::last_write_time(configPath_);
-
-    watcherThread = std::thread([this, checkIntervalSeconds, lastWriteTime]() mutable {
-        watching = true;
-        Logger::Info("Started configuration file watcher");
-
-        while (watching) {
-            std::this_thread::sleep_for(std::chrono::seconds(checkIntervalSeconds));
-
-            try {
-                auto currentWriteTime = std::filesystem::last_write_time(configPath_);
-
-                if (currentWriteTime != lastWriteTime) {
-                    Logger::Info("Configuration file changed, reloading...");
-                    lastWriteTime = currentWriteTime;
-
-                    if (ReloadConfig()) {
-                        Logger::Info("Configuration reloaded successfully");
-                        DumpConfig();
-                    } else {
-                        Logger::Error("Failed to reload configuration");
-                    }
-                }
-            } catch (const std::exception& e) {
-                Logger::Error("Error watching config file: {}", e.what());
-            }
-        }
-
-        Logger::Info("Configuration file watcher stopped");
-    });
-
-    watcherThread.detach();
-    return true;
-}
-
-void ConfigManager::StopWatching() {
-    // This is a simplified implementation
-    // In a real implementation, you'd need a way to signal the watcher thread
-    Logger::Info("Configuration watching stopped");
-}
-
 // Generic config accessors
 int ConfigManager::GetInt(const std::string& key, int defaultValue) const {
+    std::lock_guard<std::mutex> lock(configMutex_);
     try {
+        // Convert dots to forward slashes for JSON pointer
         std::string keyPath = key;
         std::replace(keyPath.begin(), keyPath.end(), '.', '/');
         nlohmann::json::json_pointer ptr("/" + keyPath);
@@ -559,6 +491,7 @@ int ConfigManager::GetInt(const std::string& key, int defaultValue) const {
 }
 
 float ConfigManager::GetFloat(const std::string& key, float defaultValue) const {
+    std::lock_guard<std::mutex> lock(configMutex_);
     try {
         std::string keyPath = key;
         std::replace(keyPath.begin(), keyPath.end(), '.', '/');
@@ -570,6 +503,7 @@ float ConfigManager::GetFloat(const std::string& key, float defaultValue) const 
 }
 
 bool ConfigManager::GetBool(const std::string& key, bool defaultValue) const {
+    std::lock_guard<std::mutex> lock(configMutex_);
     try {
         std::string keyPath = key;
         std::replace(keyPath.begin(), keyPath.end(), '.', '/');
@@ -581,6 +515,7 @@ bool ConfigManager::GetBool(const std::string& key, bool defaultValue) const {
 }
 
 std::string ConfigManager::GetString(const std::string& key, const std::string& defaultValue) const {
+    std::lock_guard<std::mutex> lock(configMutex_);
     try {
         std::string keyPath = key;
         std::replace(keyPath.begin(), keyPath.end(), '.', '/');
@@ -592,6 +527,7 @@ std::string ConfigManager::GetString(const std::string& key, const std::string& 
 }
 
 nlohmann::json ConfigManager::GetJson(const std::string& key) const {
+    std::lock_guard<std::mutex> lock(configMutex_);
     try {
         std::string keyPath = key;
         std::replace(keyPath.begin(), keyPath.end(), '.', '/');
@@ -603,6 +539,7 @@ nlohmann::json ConfigManager::GetJson(const std::string& key) const {
 }
 
 bool ConfigManager::HasKey(const std::string& key) const {
+    std::lock_guard<std::mutex> lock(configMutex_);
     try {
         std::string keyPath = key;
         std::replace(keyPath.begin(), keyPath.end(), '.', '/');
@@ -610,5 +547,39 @@ bool ConfigManager::HasKey(const std::string& key) const {
         return config_.contains(ptr);
     } catch (const std::exception& e) {
         return false;
+    }
+}
+
+// Utility methods (not declared in header but useful for implementation)
+namespace {
+    // Helper function to safely get world size
+    std::map<std::string, float> GetWorldSizeFromConfig(const nlohmann::json& config) {
+        std::map<std::string, float> worldSize;
+        try {
+            if (config.contains("world") && 
+                config["world"].contains("size") &&
+                config["world"]["size"].is_object()) {
+
+                const auto& world = config["world"]["size"];
+                if (world.contains("x") && world["x"].is_number()) {
+                    worldSize["x"] = world["x"].get<float>();
+                }
+                if (world.contains("y") && world["y"].is_number()) {
+                    worldSize["y"] = world["y"].get<float>();
+                }
+                if (world.contains("z") && world["z"].is_number()) {
+                    worldSize["z"] = world["z"].get<float>();
+                }
+            }
+        } catch (const std::exception& e) {
+            // Use defaults
+        }
+
+        // Set defaults if not specified
+        if (worldSize.find("x") == worldSize.end()) worldSize["x"] = 1000.0f;
+        if (worldSize.find("y") == worldSize.end()) worldSize["y"] = 1000.0f;
+        if (worldSize.find("z") == worldSize.end()) worldSize["z"] = 100.0f;
+
+        return worldSize;
     }
 }
