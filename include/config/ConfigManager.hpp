@@ -3,6 +3,9 @@
 #include <nlohmann/json.hpp>
 #include <string>
 #include <memory>
+#include <vector>
+#include <cstdint>
+#include <mutex>
 
 class ConfigManager {
 public:
@@ -25,6 +28,7 @@ public:
     std::string GetDatabaseName() const;
     std::string GetDatabaseUser() const;
     std::string GetDatabasePassword() const;
+    std::string GetDatabaseBackend() const;
     int GetDatabasePoolSize() const;
     std::vector<std::string> GetCitusWorkerNodes() const;
     int GetShardCount() const;
@@ -33,6 +37,17 @@ public:
     int GetMaxPlayersPerSession() const;
     int GetHeartbeatInterval() const;
     int GetSessionTimeout() const;
+    
+    // 3D World configuration
+    int GetWorldSeed() const;
+    int GetViewDistance() const;
+    int GetChunkSize() const;
+    int GetMaxActiveChunks() const;
+    float GetTerrainScale() const;
+    float GetMaxTerrainHeight() const;
+    float GetWaterLevel() const;
+    bool ShouldPreloadWorld() const;
+    int GetWorldPreloadRadius() const;
 
     // Logging configuration
     std::string GetLogLevel() const;
@@ -53,7 +68,10 @@ private:
     ConfigManager() = default;
     ConfigManager(const ConfigManager&) = delete;
     ConfigManager& operator=(const ConfigManager&) = delete;
-
+    
+    bool ValidateConfig() const;
+    
+    mutable std::mutex configMutex_;  // For thread safety
     nlohmann::json config_;
     std::string configPath_;
 };

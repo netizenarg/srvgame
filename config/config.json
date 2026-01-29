@@ -1,4 +1,8 @@
 {
+  "process": {
+    "max_message_size": 1048576,
+    "receive_timeout_ms": 1000
+  },
   "server": {
     "port": 8080,
     "maxConnections": 1000,
