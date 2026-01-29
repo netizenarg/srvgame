@@ -37,13 +37,19 @@ public:
     // Callback for worker process
     void SetWorkerMain(std::function<void(int workerId)> workerMain);
 
-    // Inter-process communication
+    // Inter-process communication with message length prefix
     bool SendToWorker(int workerId, const std::string& message);
     std::string ReceiveFromMaster();
 
     // Process health monitoring
     bool IsWorkerAlive(int workerId) const;
     void RestartWorker(int workerId);
+
+    // Configuration methods
+    void SetMaxMessageSize(uint32_t maxSize) { maxMessageSize_ = maxSize; }
+    uint32_t GetMaxMessageSize() const { return maxMessageSize_; }
+    void SetReceiveTimeout(uint32_t timeoutMs) { receiveTimeoutMs_ = timeoutMs; }
+    uint32_t GetReceiveTimeout() const { return receiveTimeoutMs_; }
 
 private:
     void MasterProcess();
@@ -52,6 +58,11 @@ private:
     void CleanupDeadWorkers();
     void CloseAllPipes();
     void CreateWorkerPipe(int workerId);
+    
+    // Helper functions for message protocol
+    bool WriteAll(int fd, const void* buffer, size_t count);
+    bool ReadAll(int fd, void* buffer, size_t count, bool nonBlocking = false);
+    bool DrainPipe(int fd, size_t bytesToDrain);
 
     int numProcesses_;
     ProcessRole role_{ProcessRole::MASTER};
@@ -71,4 +82,8 @@ private:
     // Health monitoring
     mutable std::mutex healthMutex_;
     std::unordered_map<int, std::pair<pid_t, time_t>> workerHealth_;
+    
+    // Message protocol configuration
+    uint32_t maxMessageSize_{1024 * 1024};  // 1MB default
+    uint32_t receiveTimeoutMs_{1000};       // 1 second default
 };

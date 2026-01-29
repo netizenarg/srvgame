@@ -1,4 +1,4 @@
-// main.cpp - Updated version
+// main.cpp - Updated with ProcessPool message protocol configuration
 
 #include <iostream>
 #include <csignal>
@@ -27,12 +27,16 @@ class PlayerManager;
 
 std::atomic<bool> g_shutdown(false);
 
+// Global ProcessPool instance (or you can make it a singleton)
+// For this example, we'll modify WorkerMain to accept ProcessPool as parameter
+// Since we can't easily pass it, we'll use an alternative approach
+
 void SignalHandler(int signal) {
     Logger::Info("Received signal {}, initiating shutdown...", signal);
     g_shutdown.store(true);
 }
 
-void WorkerMain(int workerId) {
+void WorkerMain(int workerId, ProcessPool* processPool = nullptr) {
     // Initialize logging with worker-specific configuration
     auto& config = ConfigManager::GetInstance();
     
@@ -44,6 +48,21 @@ void WorkerMain(int workerId) {
     if (!config.LoadConfig("config/server_config.json")) {
         Logger::Critical("Worker {} failed to load configuration", workerId);
         return;
+    }
+
+    // Configure ProcessPool message protocol if processPool is provided
+    if (processPool) {
+        // Set message protocol configuration from config
+        uint32_t maxMessageSize = config.GetUInt32("process.max_message_size", 1048576); // 1MB default
+        uint32_t receiveTimeout = config.GetUInt32("process.receive_timeout_ms", 1000); // 1 second default
+        
+        processPool->SetMaxMessageSize(maxMessageSize);
+        processPool->SetReceiveTimeout(receiveTimeout);
+        
+        Logger::Info("Worker {} using max message size: {} bytes, timeout: {}ms", 
+                    workerId, maxMessageSize, receiveTimeout);
+    } else {
+        Logger::Warn("Worker {}: ProcessPool not available for configuration", workerId);
     }
 
     // Initialize database backend based on configuration
@@ -130,20 +149,38 @@ void WorkerMain(int workerId) {
     GameServer server(config);
 
     // Set session factory - using lambda with necessary captures
-    server.SetSessionFactory([workerId](asio::ip::tcp::socket socket) {
+    server.SetSessionFactory([workerId, processPool](asio::ip::tcp::socket socket) {
         auto session = std::make_shared<GameSession>(std::move(socket));
 
         Logger::Debug("Worker {} created new game session {}",
                      workerId, session->GetSessionId());
 
         // Message handler - simplified for demonstration
-        session->SetMessageHandler([session, workerId](const nlohmann::json& msg) {
+        session->SetMessageHandler([session, workerId, processPool](const nlohmann::json& msg) {
             try {
                 std::string msgType = msg.value("type", "");
                 Logger::Debug("Worker {} processing message type: {}", workerId, msgType);
                 
-                // Delegate to game logic
-                GameLogic::GetInstance().HandleMessage(session->GetSessionId(), msg);
+                // Check if message is for inter-process communication
+                if (msgType == "ipc_message" && processPool) {
+                    // Extract IPC message details
+                    if (msg.contains("target_worker") && msg.contains("payload")) {
+                        int targetWorker = msg["target_worker"];
+                        std::string payload = msg["payload"].dump();
+                        
+                        // Send to another worker via master using new protocol
+                        if (processPool->SendToWorker(targetWorker, payload)) {
+                            Logger::Debug("Worker {} sent IPC message to worker {}", 
+                                         workerId, targetWorker);
+                        } else {
+                            Logger::Error("Worker {} failed to send IPC message to worker {}", 
+                                         workerId, targetWorker);
+                        }
+                    }
+                } else {
+                    // Regular game message - delegate to game logic
+                    GameLogic::GetInstance().HandleMessage(session->GetSessionId(), msg);
+                }
             } catch (const std::exception& e) {
                 Logger::Error("Worker {} error processing message: {}", workerId, e.what());
                 session->SendError("Internal server error", 500);
@@ -168,22 +205,48 @@ void WorkerMain(int workerId) {
 
         // Start background world maintenance thread
         std::atomic<bool> worldMaintenanceRunning{true};
-        std::thread worldMaintenanceThread([&gameLogic, &worldMaintenanceRunning, workerId]() {
+        std::thread worldMaintenanceThread([&gameLogic, &worldMaintenanceRunning, workerId, processPool]() {
             Logger::Info("Worker {} starting world maintenance thread", workerId);
 
             auto lastCleanupTime = std::chrono::steady_clock::now();
+            auto lastIPCCheckTime = std::chrono::steady_clock::now();
 
             while (worldMaintenanceRunning && !g_shutdown.load()) {
                 auto currentTime = std::chrono::steady_clock::now();
-                auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(currentTime - lastCleanupTime);
-
-                if (elapsed.count() >= 30) {
+                
+                // World maintenance every 30 seconds
+                auto elapsedWorld = std::chrono::duration_cast<std::chrono::seconds>(
+                    currentTime - lastCleanupTime);
+                    
+                if (elapsedWorld.count() >= 30) {
                     Logger::Debug("Worker {} performing periodic world maintenance", workerId);
                     gameLogic.PerformMaintenance();
                     lastCleanupTime = currentTime;
                 }
+                
+                // Check for IPC messages from master every 100ms
+                auto elapsedIPC = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    currentTime - lastIPCCheckTime);
+                    
+                if (elapsedIPC.count() >= 100 && processPool) {
+                    // Use new ReceiveFromMaster with message length protocol
+                    std::string message = processPool->ReceiveFromMaster();
+                    if (!message.empty()) {
+                        try {
+                            // Parse JSON message
+                            auto jsonMsg = nlohmann::json::parse(message);
+                            Logger::Debug("Worker {} received IPC message: {}", workerId, jsonMsg.dump());
+                            
+                            // Handle IPC message in game logic
+                            gameLogic.HandleIPCMessage(jsonMsg);
+                        } catch (const std::exception& e) {
+                            Logger::Error("Worker {} failed to parse IPC message: {}", workerId, e.what());
+                        }
+                    }
+                    lastIPCCheckTime = currentTime;
+                }
 
-                std::this_thread::sleep_for(std::chrono::seconds(5));
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
             }
 
             Logger::Info("Worker {} world maintenance thread stopped", workerId);
@@ -234,16 +297,88 @@ int main(int argc, char* argv[]) {
     int processCount = config.GetProcessCount();
     ProcessPool processPool(processCount);
 
-    processPool.SetWorkerMain(WorkerMain);
+    // Configure process pool message protocol from config
+    uint32_t maxMessageSize = config.GetUInt32("process.max_message_size", 1048576); // 1MB default
+    uint32_t receiveTimeout = config.GetUInt32("process.receive_timeout_ms", 1000); // 1 second default
+    
+    processPool.SetMaxMessageSize(maxMessageSize);
+    processPool.SetReceiveTimeout(receiveTimeout);
+    
+    Logger::Info("Process pool configured: max message size = {} bytes, timeout = {}ms",
+                maxMessageSize, receiveTimeout);
+
+    // Create a lambda to capture processPool pointer for WorkerMain
+    // Note: This is a workaround since WorkerMain signature can't be changed easily
+    // A better approach would be to redesign ProcessPool to pass context to workers
+    auto workerMainWithPool = [&processPool](int workerId) {
+        WorkerMain(workerId, &processPool);
+    };
+
+    // Set worker main function with process pool context
+    processPool.SetWorkerMain(workerMainWithPool);
 
     // Initialize as master process
     Logger::Info("Starting {} worker processes for 3D world", processCount);
     processPool.Run();
 
+    // Example: Send test messages to workers using new protocol
+    std::thread masterMessagingThread([&processPool, processCount]() {
+        std::this_thread::sleep_for(std::chrono::seconds(3)); // Wait for workers to start
+        
+        Logger::Info("Master process starting IPC message test");
+        
+        // Send a test message to each worker
+        for (int i = 0; i < processCount; i++) {
+            nlohmann::json testMsg;
+            testMsg["type"] = "welcome";
+            testMsg["from"] = "master";
+            testMsg["timestamp"] = std::chrono::system_clock::now().time_since_epoch().count();
+            testMsg["worker_id"] = i;
+            testMsg["message"] = "Welcome to the 3D game server!";
+            
+            std::string serialized = testMsg.dump();
+            
+            if (processPool.SendToWorker(i, serialized)) {
+                Logger::Info("Master sent welcome message to worker {}", i);
+            } else {
+                Logger::Error("Master failed to send welcome message to worker {}", i);
+            }
+            
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        
+        Logger::Info("Master process IPC message test complete");
+    });
+
     // Wait for shutdown signal
     Logger::Info("Master process waiting for shutdown signal...");
     while (!g_shutdown.load()) {
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        // Example: Periodically check worker health
+        for (int i = 0; i < processCount; i++) {
+            if (!processPool.IsWorkerAlive(i)) {
+                Logger::Warn("Master detected worker {} is not alive", i);
+            }
+        }
+        
+        std::this_thread::sleep_for(std::chrono::seconds(5));
+        
+        // Send periodic heartbeat to all workers
+        static int heartbeatCount = 0;
+        heartbeatCount++;
+        
+        for (int i = 0; i < processCount; i++) {
+            nlohmann::json heartbeat;
+            heartbeat["type"] = "heartbeat";
+            heartbeat["count"] = heartbeatCount;
+            heartbeat["timestamp"] = std::chrono::system_clock::now().time_since_epoch().count();
+            
+            processPool.SendToWorker(i, heartbeat.dump());
+        }
+    }
+
+    // Stop messaging thread
+    if (masterMessagingThread.joinable()) {
+        masterMessagingThread.join();
     }
 
     // Shutdown process pool gracefully
