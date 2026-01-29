@@ -9,6 +9,7 @@
 class Logger {
 public:
     static void Initialize(const std::string& configPath = "");
+    static void InitializeWithWorkerId(int workerId);
     static std::shared_ptr<spdlog::logger> GetLogger(const std::string& name = "GameServer");
 
     template<typename... Args>
@@ -44,4 +45,6 @@ public:
 private:
     static std::shared_ptr<spdlog::logger> logger_;
     static std::string configPath_;
+    
+    static void SetupLogger(const std::string& loggerName = "GameServer");
 };
