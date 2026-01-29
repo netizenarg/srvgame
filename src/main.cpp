@@ -1,3 +1,5 @@
+// main.cpp - Updated version
+
 #include <iostream>
 #include <csignal>
 #include <thread>
@@ -9,7 +11,14 @@
 #include "network/GameServer.hpp"
 #include "process/ProcessPool.hpp"
 #include "game/GameLogic.hpp"
+
+// Conditional include for database backend
+#include "database/Backend.hpp"
+#include "database/PostgreSQLBackend.hpp"
+
+#ifdef USE_CITUS
 #include "database/CitusClient.hpp"
+#endif
 
 // Forward declarations for missing dependencies
 class GameSession;
@@ -37,23 +46,59 @@ void WorkerMain(int workerId) {
         return;
     }
 
-    // Initialize database client
-    auto& dbClient = CitusClient::GetInstance();
+    // Initialize database backend based on configuration
+    std::unique_ptr<DatabaseBackend> databaseBackend;
     
-    // Build connection string
-    std::string connInfo =
-        "host=" + config.GetDatabaseHost() +
-        " port=" + std::to_string(config.GetDatabasePort()) +
-        " dbname=" + config.GetDatabaseName() +
-        " user=" + config.GetDatabaseUser() +
-        " password=" + config.GetDatabasePassword();
+    std::string backendType = config.GetDatabaseBackend();
+    Logger::Info("Worker {} using database backend: {}", workerId, backendType);
     
-    // Get worker nodes for Citus (empty for PostgreSQL)
-    std::vector<std::string> workerNodes = config.GetCitusWorkerNodes();
-    
-    if (!dbClient.Initialize(connInfo, workerNodes)) {
-        Logger::Error("Worker {} failed to initialize database", workerId);
-        return;
+    if (backendType == "citus") {
+#ifdef USE_CITUS
+        // Initialize Citus client
+        auto& dbClient = CitusClient::GetInstance();
+        
+        // Build connection string
+        std::string connInfo =
+            "host=" + config.GetDatabaseHost() +
+            " port=" + std::to_string(config.GetDatabasePort()) +
+            " dbname=" + config.GetDatabaseName() +
+            " user=" + config.GetDatabaseUser() +
+            " password=" + config.GetDatabasePassword();
+        
+        // Get worker nodes for Citus
+        std::vector<std::string> workerNodes = config.GetCitusWorkerNodes();
+        
+        if (!dbClient.Initialize(connInfo, workerNodes)) {
+            Logger::Error("Worker {} failed to initialize Citus database", workerId);
+            return;
+        }
+        
+        // Store backend for later use
+        databaseBackend = DatabaseBackend::CreateBackend("citus");
+#else
+        Logger::Error("Citus backend requested but not compiled with Citus support");
+        Logger::Error("Falling back to PostgreSQL backend");
+        databaseBackend = DatabaseBackend::CreateBackend("postgresql");
+#endif
+    } else {
+        // Use PostgreSQL backend
+        databaseBackend = DatabaseBackend::CreateBackend("postgresql");
+        
+        // Build connection string
+        std::string connInfo =
+            "host=" + config.GetDatabaseHost() +
+            " port=" + std::to_string(config.GetDatabasePort()) +
+            " dbname=" + config.GetDatabaseName() +
+            " user=" + config.GetDatabaseUser() +
+            " password=" + config.GetDatabasePassword();
+        
+        // Empty worker nodes for PostgreSQL
+        std::vector<std::string> workerNodes;
+        
+        if (!databaseBackend->Initialize(connInfo, workerNodes)) {
+            Logger::Error("Worker {} failed to initialize PostgreSQL database", workerId);
+            return;
+        }
     }
 
     // Initialize game logic with 3D world system
@@ -70,6 +115,9 @@ void WorkerMain(int workerId) {
     worldConfig.waterLevel = config.GetWaterLevel();
 
     gameLogic.SetWorldConfig(worldConfig);
+    
+    // Pass database backend to game logic
+    gameLogic.SetDatabaseBackend(std::move(databaseBackend));
     gameLogic.Initialize();
 
     // Preload world data if configured
@@ -106,10 +154,6 @@ void WorkerMain(int workerId) {
         session->SetCloseHandler([session, workerId]() {
             Logger::Info("Worker {} session {} closing", workerId, session->GetSessionId());
             
-            // These would need to be properly defined
-            // ConnectionManager::GetInstance().Stop(session);
-            // PlayerManager::GetInstance().PlayerDisconnected(sessionId);
-            
             GameLogic::GetInstance().OnPlayerDisconnected(session->GetSessionId());
             Logger::Debug("Worker {} session {} cleanup complete", workerId, session->GetSessionId());
         });
@@ -135,7 +179,7 @@ void WorkerMain(int workerId) {
 
                 if (elapsed.count() >= 30) {
                     Logger::Debug("Worker {} performing periodic world maintenance", workerId);
-                    gameLogic.PerformMaintenance();  // Assuming this method exists
+                    gameLogic.PerformMaintenance();
                     lastCleanupTime = currentTime;
                 }
 
