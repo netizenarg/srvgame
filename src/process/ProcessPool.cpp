@@ -369,13 +369,30 @@ bool ProcessPool::ReadAll(int fd, void* buffer, size_t count, bool nonBlocking) 
 // Helper function: Drain excess data from pipe
 bool ProcessPool::DrainPipe(int fd, size_t bytesToDrain) {
     const size_t BUFFER_SIZE = 4096;
+    const size_t MAX_DRAIN_LIMIT = 1024 * 1024 * 100; // 100MB limit
     std::vector<char> buffer(BUFFER_SIZE);
     size_t drained = 0;
-    
+
+    if (bytesToDrain > MAX_DRAIN_LIMIT) {
+        Logger::Error("Drain request too large: {} bytes (max: {})",
+                      bytesToDrain, MAX_DRAIN_LIMIT);
+        return false;
+    }
+
+    const size_t MAX_ITERATIONS = bytesToDrain / BUFFER_SIZE + 1000;
+    size_t iteration = 0;
+
     while (drained < bytesToDrain) {
-        size_t toRead = std::min(BUFFER_SIZE, bytesToDrain - drained);
+        if (iteration++ > MAX_ITERATIONS) {
+            Logger::Error("DrainPipe: Exceeded maximum iterations ({})", MAX_ITERATIONS);
+            return false;
+        }
+
+        size_t remaining = bytesToDrain - drained;
+        size_t toRead = std::min(BUFFER_SIZE, remaining);
+
         ssize_t bytes_read = read(fd, buffer.data(), toRead);
-        
+
         if (bytes_read > 0) {
             drained += bytes_read;
         } else if (bytes_read == 0) {
@@ -387,10 +404,14 @@ bool ProcessPool::DrainPipe(int fd, size_t bytesToDrain) {
             Logger::Error("Drain error: {}", strerror(errno));
             return false;
         }
+
+        if (bytes_read < static_cast<ssize_t>(toRead)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
     }
-    
-    Logger::Warn("Drained {} excess bytes from pipe", drained);
-    return true;
+
+    Logger::Warn("Drained {} of {} requested bytes from pipe", drained, bytesToDrain);
+    return drained > 0;
 }
 
 // Send message with length prefix protocol
