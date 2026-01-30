@@ -100,15 +100,75 @@ class LootHandler:
     def generate_loot(self, table_name: str, player_level: int, 
                      luck_multiplier: float = 1.0) -> List[tuple]:
         """Generate loot from a specific table"""
-        # Get loot table from database
-        table_data = self.server.query_database(
-            f"SELECT table_data FROM loot_tables WHERE table_id = '{table_name}'"
-        )
-        
-        if not table_data:
+        # Get loot table from database using parameterized query
+        try:
+            # Use parameterized query to prevent SQL injection
+            query = "SELECT table_data FROM loot_tables WHERE table_id = ?"
+            result = self.server.query_database(query, (table_name,))
+            
+            if not result or not result.get('success', False):
+                # Fall back to cached loot tables or default
+                return self.get_cached_loot_table(table_name, player_level, luck_multiplier)
+            
+            loot_table = result['data'][0]['table_data']
+            results = []
+            
+            # Process guaranteed drops
+            for entry in loot_table.get('guaranteed_entries', []):
+                if self.meets_requirements(entry, player_level):
+                    quantity = random.randint(
+                        entry.get('minQuantity', 1),
+                        entry.get('maxQuantity', 1)
+                    )
+                    results.append((entry['itemId'], quantity))
+            
+            # Process random drops
+            max_drops = loot_table.get('maxDrops', 5)
+            random_entries = loot_table.get('random_entries', [])
+            
+            for entry in random_entries:
+                if len(results) >= max_drops:
+                    break
+                
+                if not self.meets_requirements(entry, player_level):
+                    continue
+                
+                drop_chance = entry.get('dropChance', 0.0) * luck_multiplier
+                if random.random() <= drop_chance:
+                    quantity = random.randint(
+                        entry.get('minQuantity', 1),
+                        entry.get('maxQuantity', 1)
+                    )
+                    results.append((entry['itemId'], quantity))
+            
+            return results
+            
+        except Exception as e:
+            self.server.log_error(f"Error generating loot: {str(e)}")
             return []
+    
+    def get_cached_loot_table(self, table_name: str, player_level: int, 
+                             luck_multiplier: float) -> List[tuple]:
+        """Fallback method using cached loot tables"""
+        # Try to load from cache first
+        if table_name in self.loot_tables:
+            return self.generate_loot_from_cache(table_name, player_level, luck_multiplier)
         
-        loot_table = table_data[0]['table_data']
+        # Load from file as last resort
+        try:
+            import json
+            with open(f'data/loot_tables/{table_name}.json', 'r') as f:
+                loot_table = json.load(f)
+                self.loot_tables[table_name] = loot_table
+                return self.generate_loot_from_cache(table_name, player_level, luck_multiplier)
+        except Exception as e:
+            self.server.log_error(f"Failed to load loot table {table_name}: {str(e)}")
+            return []
+    
+    def generate_loot_from_cache(self, table_name: str, player_level: int,
+                                luck_multiplier: float) -> List[tuple]:
+        """Generate loot from cached table data"""
+        loot_table = self.loot_tables[table_name]
         results = []
         
         # Process guaranteed drops
@@ -152,7 +212,10 @@ class LootHandler:
         # Check quest requirements
         required_quest = entry.get('requiredQuest')
         if required_quest:
-            if not self.server.has_player_completed_quest(player_id, required_quest):
+            # Use parameterized query
+            query = "SELECT 1 FROM player_quests WHERE player_id = ? AND quest_id = ? AND completed = true"
+            result = self.server.query_database(query, (player_id, required_quest))
+            if not result or not result.get('success', False) or not result.get('data'):
                 return False
         
         return True
@@ -200,16 +263,34 @@ class LootHandler:
     
     def is_chest_on_cooldown(self, chest_id: str) -> bool:
         """Check if chest is on respawn cooldown"""
-        # Implement chest cooldown logic
-        # Could use Redis or database for cooldown tracking
+        # Use parameterized query
+        query = "SELECT loot_time FROM chest_cooldowns WHERE chest_id = ?"
+        result = self.server.query_database(query, (chest_id,))
+        
+        if not result or not result.get('success', False):
+            return False
+            
+        if result.get('data'):
+            loot_time = result['data'][0]['loot_time']
+            current_time = int(time.time())
+            respawn_time = 300  # 5 minutes default
+            
+            return (current_time - loot_time) < respawn_time
+        
         return False
     
     def mark_chest_looted(self, chest_id: str):
         """Mark chest as looted with timestamp"""
-        # Store loot time for respawn cooldown
         current_time = int(time.time())
-        # Store in database or cache
-        pass
+        
+        # Use parameterized query
+        query = """
+            INSERT INTO chest_cooldowns (chest_id, loot_time) 
+            VALUES (?, ?) 
+            ON CONFLICT (chest_id) 
+            DO UPDATE SET loot_time = ?
+        """
+        self.server.execute_database(query, (chest_id, current_time, current_time))
 
 def register_event_handlers(server):
     """Main registration function called by server"""
