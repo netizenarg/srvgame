@@ -644,6 +644,31 @@ static PyObject* py_get_config(PyObject* self, PyObject* args) {
     return JsonToPython(value);
 }
 
+static PyObject* py_take_player_item(PyObject* self, PyObject* args) {
+    long player_id;
+    const char* item_id;
+    int count;
+
+    if (!PyArg_ParseTuple(args, "lsi", &player_id, &item_id, &count)) {
+        return nullptr;
+    }
+
+    // Implementation would go here
+    Py_RETURN_FALSE;
+}
+
+static PyObject* py_set_player_health(PyObject* self, PyObject* args) {
+    long player_id;
+    int health;
+
+    if (!PyArg_ParseTuple(args, "li", &player_id, &health)) {
+        return nullptr;
+    }
+
+    // Implementation would go here
+    Py_RETURN_FALSE;
+}
+
 // Method definitions
 static PyMethodDef GameServerMethods[] = {
     // Logging
@@ -660,6 +685,8 @@ static PyMethodDef GameServerMethods[] = {
     {"add_player_experience", py_add_player_experience, METH_VARARGS, "Add experience to player"},
     {"send_message_to_player", py_send_message_to_player, METH_VARARGS, "Send message to player"},
     {"broadcast_to_nearby", py_broadcast_to_nearby, METH_VARARGS, "Broadcast message to nearby players"},
+    {"take_player_item", py_take_player_item, METH_VARARGS, "Take item from player"},
+    {"set_player_health", py_set_player_health, METH_VARARGS, "Set player health"},
 
     // Database functions - UPDATED with parameter support
     {"query_database", py_query_database, METH_VARARGS, "Execute database query with optional parameters"},
