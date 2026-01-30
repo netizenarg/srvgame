@@ -1,5 +1,9 @@
 #pragma once
 
+#include <queue>
+#include <condition_variable>
+#include <thread>
+#include <atomic>
 #include <string>
 #include <vector>
 #include <functional>

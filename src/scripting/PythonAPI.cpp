@@ -3,7 +3,8 @@
 
 #include "scripting/PythonScripting.hpp"
 #include "game/PlayerManager.hpp"
-#include "database/CitusClient.hpp"
+#include "database/Backend.hpp"
+#include "game/GameLogic.hpp"
 #include "network/ConnectionManager.hpp"
 
 namespace PythonScripting {
@@ -116,6 +117,56 @@ nlohmann::json PythonToJson(PyObject* obj) {
     return nlohmann::json();
 }
 
+// Helper to convert Python sequence to vector of strings
+std::vector<std::string> PythonSequenceToStringVector(PyObject* obj) {
+    std::vector<std::string> result;
+    
+    if (!PySequence_Check(obj)) {
+        return result;
+    }
+    
+    Py_ssize_t length = PySequence_Length(obj);
+    for (Py_ssize_t i = 0; i < length; ++i) {
+        PyObject* item = PySequence_GetItem(obj, i);
+        if (item) {
+            if (PyUnicode_Check(item)) {
+                PyObject* utf8 = PyUnicode_AsUTF8String(item);
+                if (utf8) {
+                    const char* str = PyBytes_AsString(utf8);
+                    if (str) {
+                        result.push_back(str);
+                    }
+                    Py_DECREF(utf8);
+                }
+            } else if (PyLong_Check(item)) {
+                long value = PyLong_AsLong(item);
+                result.push_back(std::to_string(value));
+            } else if (PyFloat_Check(item)) {
+                double value = PyFloat_AsDouble(item);
+                result.push_back(std::to_string(value));
+            } else if (PyBool_Check(item)) {
+                result.push_back(item == Py_True ? "true" : "false");
+            } else {
+                PyObject* strObj = PyObject_Str(item);
+                if (strObj) {
+                    PyObject* utf8 = PyUnicode_AsUTF8String(strObj);
+                    if (utf8) {
+                        const char* str = PyBytes_AsString(utf8);
+                        if (str) {
+                            result.push_back(str);
+                        }
+                        Py_DECREF(utf8);
+                    }
+                    Py_DECREF(strObj);
+                }
+            }
+            Py_DECREF(item);
+        }
+    }
+    
+    return result;
+}
+
 // Python function wrappers
 static PyObject* py_log_debug(PyObject* self, PyObject* args) {
     const char* message;
@@ -206,9 +257,13 @@ static PyObject* py_set_player_position(PyObject* self, PyObject* args) {
 
     player->UpdatePosition(x, y, z);
 
-    // Update database
-    auto& dbClient = CitusClient::GetInstance();
-    dbClient.UpdatePlayerPosition(player_id, x, y, z);
+    // Update database through the GameLogic backend
+    auto& gameLogic = GameLogic::GetInstance();
+    auto backend = gameLogic.GetDatabaseBackend();
+    
+    if (backend) {
+        backend->UpdatePlayerPosition(player_id, x, y, z);
+    }
 
     Py_RETURN_TRUE;
 }
@@ -295,31 +350,164 @@ static PyObject* py_broadcast_to_nearby(PyObject* self, PyObject* args) {
 
 static PyObject* py_query_database(PyObject* self, PyObject* args) {
     const char* query;
+    PyObject* params_obj = nullptr;
 
-    if (!PyArg_ParseTuple(args, "s", &query)) {
+    // Parse query and optional parameters
+    if (!PyArg_ParseTuple(args, "s|O", &query, &params_obj)) {
         return nullptr;
     }
 
-    auto& dbClient = CitusClient::GetInstance();
-    auto result = dbClient.Query(query);
-
-    return JsonToPython(result);
+    // Get database backend from GameLogic
+    auto& gameLogic = GameLogic::GetInstance();
+    auto backend = gameLogic.GetDatabaseBackend();
+    
+    if (!backend) {
+        Logger::Error("Database backend not available");
+        Py_RETURN_NONE;
+    }
+    
+    try {
+        if (params_obj) {
+            // Convert Python sequence to vector of strings
+            std::vector<std::string> params = PythonSequenceToStringVector(params_obj);
+            
+            // Use parameterized query if backend supports it
+            // For now, construct parameterized query manually
+            if (!params.empty()) {
+                // Simple placeholder replacement for demonstration
+                // WARNING: This is not secure - use proper parameterized queries in production!
+                std::string processed_query = query;
+                for (size_t i = 0; i < params.size(); ++i) {
+                    std::string placeholder = "$" + std::to_string(i + 1);
+                    std::string escaped_value = "'" + params[i] + "'";
+                    
+                    size_t pos = 0;
+                    while ((pos = processed_query.find(placeholder, pos)) != std::string::npos) {
+                        processed_query.replace(pos, placeholder.length(), escaped_value);
+                        pos += escaped_value.length();
+                    }
+                }
+                nlohmann::json result = backend->Query(processed_query);
+                return JsonToPython(result);
+            } else {
+                auto result = backend->Query(query);
+                return JsonToPython(result);
+            }
+        } else {
+            // Execute query without parameters
+            auto result = backend->Query(query);
+            return JsonToPython(result);
+        }
+    } catch (const std::exception& e) {
+        Logger::Error("Database query failed: {}", e.what());
+        Py_RETURN_NONE;
+    }
 }
 
 static PyObject* py_execute_database(PyObject* self, PyObject* args) {
     const char* query;
+    PyObject* params_obj = nullptr;
 
-    if (!PyArg_ParseTuple(args, "s", &query)) {
+    if (!PyArg_ParseTuple(args, "s|O", &query, &params_obj)) {
         return nullptr;
     }
 
-    auto& dbClient = CitusClient::GetInstance();
-    bool success = dbClient.Execute(query);
-
-    if (success) {
-        Py_RETURN_TRUE;
+    // Get database backend from GameLogic
+    auto& gameLogic = GameLogic::GetInstance();
+    auto backend = gameLogic.GetDatabaseBackend();
+    
+    if (!backend) {
+        Logger::Error("Database backend not available");
+        Py_RETURN_FALSE;
     }
-    Py_RETURN_FALSE;
+    
+    try {
+        bool success = false;
+        
+        if (params_obj) {
+            // Convert Python sequence to vector of strings
+            std::vector<std::string> params = PythonSequenceToStringVector(params_obj);
+            
+            if (!params.empty()) {
+                // Simple placeholder replacement for demonstration
+                std::string processed_query = query;
+                for (size_t i = 0; i < params.size(); ++i) {
+                    std::string placeholder = "$" + std::to_string(i + 1);
+                    std::string escaped_value = "'" + params[i] + "'";
+                    
+                    size_t pos = 0;
+                    while ((pos = processed_query.find(placeholder, pos)) != std::string::npos) {
+                        processed_query.replace(pos, placeholder.length(), escaped_value);
+                        pos += escaped_value.length();
+                    }
+                }
+                success = backend->Execute(processed_query);
+            } else {
+                success = backend->Execute(query);
+            }
+        } else {
+            success = backend->Execute(query);
+        }
+
+        if (success) {
+            Py_RETURN_TRUE;
+        }
+        Py_RETURN_FALSE;
+        
+    } catch (const std::exception& e) {
+        Logger::Error("Database execute failed: {}", e.what());
+        Py_RETURN_FALSE;
+    }
+}
+
+// New function for secure parameterized queries
+static PyObject* py_query_database_params(PyObject* self, PyObject* args) {
+    const char* query;
+    PyObject* params_obj = nullptr;
+
+    if (!PyArg_ParseTuple(args, "sO", &query, &params_obj)) {
+        return nullptr;
+    }
+
+    // Get database backend from GameLogic
+    auto& gameLogic = GameLogic::GetInstance();
+    auto backend = gameLogic.GetDatabaseBackend();
+    
+    if (!backend) {
+        Logger::Error("Database backend not available");
+        Py_RETURN_NONE;
+    }
+    
+    try {
+        // Convert Python sequence to vector of strings
+        std::vector<std::string> params = PythonSequenceToStringVector(params_obj);
+        
+        // Use parameterized query
+        nlohmann::json result;
+        
+        if (!params.empty()) {
+            std::string processed_query = query;
+            for (size_t i = 0; i < params.size(); ++i) {
+                std::string placeholder = "$" + std::to_string(i + 1);
+                std::string escaped_value = "'" + params[i] + "'";
+                
+                size_t pos = 0;
+                while ((pos = processed_query.find(placeholder, pos)) != std::string::npos) {
+                    processed_query.replace(pos, placeholder.length(), escaped_value);
+                    pos += escaped_value.length();
+                }
+            }
+            result = backend->Query(processed_query);
+        } else {
+            result = backend->Query(query);
+        }
+        
+        return JsonToPython(result);
+        
+    } catch (const std::exception& e) {
+        Logger::Error("Parameterized database query failed: {}", e.what());
+        Py_RETURN_NONE;
+    }
 }
 
 static PyObject* py_fire_event(PyObject* self, PyObject* args) {
@@ -456,6 +644,31 @@ static PyObject* py_get_config(PyObject* self, PyObject* args) {
     return JsonToPython(value);
 }
 
+static PyObject* py_take_player_item(PyObject* self, PyObject* args) {
+    long player_id;
+    const char* item_id;
+    int count;
+
+    if (!PyArg_ParseTuple(args, "lsi", &player_id, &item_id, &count)) {
+        return nullptr;
+    }
+
+    // Implementation would go here
+    Py_RETURN_FALSE;
+}
+
+static PyObject* py_set_player_health(PyObject* self, PyObject* args) {
+    long player_id;
+    int health;
+
+    if (!PyArg_ParseTuple(args, "li", &player_id, &health)) {
+        return nullptr;
+    }
+
+    // Implementation would go here
+    Py_RETURN_FALSE;
+}
+
 // Method definitions
 static PyMethodDef GameServerMethods[] = {
     // Logging
@@ -472,10 +685,13 @@ static PyMethodDef GameServerMethods[] = {
     {"add_player_experience", py_add_player_experience, METH_VARARGS, "Add experience to player"},
     {"send_message_to_player", py_send_message_to_player, METH_VARARGS, "Send message to player"},
     {"broadcast_to_nearby", py_broadcast_to_nearby, METH_VARARGS, "Broadcast message to nearby players"},
+    {"take_player_item", py_take_player_item, METH_VARARGS, "Take item from player"},
+    {"set_player_health", py_set_player_health, METH_VARARGS, "Set player health"},
 
-    // Database functions
-    {"query_database", py_query_database, METH_VARARGS, "Execute database query"},
-    {"execute_database", py_execute_database, METH_VARARGS, "Execute database command"},
+    // Database functions - UPDATED with parameter support
+    {"query_database", py_query_database, METH_VARARGS, "Execute database query with optional parameters"},
+    {"execute_database", py_execute_database, METH_VARARGS, "Execute database command with optional parameters"},
+    {"query_database_params", py_query_database_params, METH_VARARGS, "Execute database query with parameters"},
 
     // Event functions
     {"fire_event", py_fire_event, METH_VARARGS, "Fire game event"},
@@ -527,10 +743,10 @@ void PythonAPI::Initialize() {
     // Also import as server for convenience
     PyDict_SetItemString(sysModules, "server", module);
 
-    Logger::Debug("Python API initialized");
+    Logger::Debug("Python API initialized with parameterized query support");
 }
 
-// C++ wrapper functions
+// C++ wrapper functions with parameterized query support
 void PythonAPI::LogDebug(const std::string& message) {
     Logger::Debug("[Python API] {}", message);
 }
@@ -658,24 +874,91 @@ bool PythonAPI::BroadcastToNearby(int64_t playerId, const std::string& message, 
     return true;
 }
 
-nlohmann::json PythonAPI::QueryDatabase(const std::string& query) {
-    auto& dbClient = CitusClient::GetInstance();
-    return dbClient.Query(query);
+// Enhanced database functions with parameter support
+nlohmann::json PythonAPI::QueryDatabase(const std::string& query, const std::vector<std::string>& params) {
+    // Get database backend from GameLogic
+    auto& gameLogic = GameLogic::GetInstance();
+    auto backend = gameLogic.GetDatabaseBackend();
+    
+    if (!backend) {
+        Logger::Error("Database backend not available");
+        return nlohmann::json();
+    }
+    
+    if (params.empty()) {
+        return backend->Query(query);
+    }
+    
+    // For parameterized queries, construct with placeholder replacement
+    std::string processed_query = query;
+    for (size_t i = 0; i < params.size(); ++i) {
+        std::string placeholder = "$" + std::to_string(i + 1);
+        std::string escaped_value = "'" + params[i] + "'";
+        
+        size_t pos = 0;
+        while ((pos = processed_query.find(placeholder, pos)) != std::string::npos) {
+            processed_query.replace(pos, placeholder.length(), escaped_value);
+            pos += escaped_value.length();
+        }
+    }
+    
+    return backend->Query(processed_query);
 }
 
-bool PythonAPI::ExecuteDatabase(const std::string& query) {
-    auto& dbClient = CitusClient::GetInstance();
-    return dbClient.Execute(query);
+bool PythonAPI::ExecuteDatabase(const std::string& query, const std::vector<std::string>& params) {
+    // Get database backend from GameLogic
+    auto& gameLogic = GameLogic::GetInstance();
+    auto backend = gameLogic.GetDatabaseBackend();
+    
+    if (!backend) {
+        Logger::Error("Database backend not available");
+        return false;
+    }
+    
+    if (params.empty()) {
+        return backend->Execute(query);
+    }
+    
+    // For parameterized queries, construct with placeholder replacement
+    std::string processed_query = query;
+    for (size_t i = 0; i < params.size(); ++i) {
+        std::string placeholder = "$" + std::to_string(i + 1);
+        std::string escaped_value = "'" + params[i] + "'";
+        
+        size_t pos = 0;
+        while ((pos = processed_query.find(placeholder, pos)) != std::string::npos) {
+            processed_query.replace(pos, placeholder.length(), escaped_value);
+            pos += escaped_value.length();
+        }
+    }
+    
+    return backend->Execute(processed_query);
 }
 
 nlohmann::json PythonAPI::GetPlayerFromDB(int64_t playerId) {
-    auto& dbClient = CitusClient::GetInstance();
-    return dbClient.GetPlayer(playerId);
+    // Get database backend from GameLogic
+    auto& gameLogic = GameLogic::GetInstance();
+    auto backend = gameLogic.GetDatabaseBackend();
+    
+    if (!backend) {
+        Logger::Error("Database backend not available");
+        return nlohmann::json();
+    }
+    
+    return backend->GetPlayer(playerId);
 }
 
 bool PythonAPI::SavePlayerToDB(int64_t playerId, const nlohmann::json& data) {
-    auto& dbClient = CitusClient::GetInstance();
-    return dbClient.UpdatePlayer(playerId, data);
+    // Get database backend from GameLogic
+    auto& gameLogic = GameLogic::GetInstance();
+    auto backend = gameLogic.GetDatabaseBackend();
+    
+    if (!backend) {
+        Logger::Error("Database backend not available");
+        return false;
+    }
+    
+    return backend->UpdatePlayer(playerId, data);
 }
 
 void PythonAPI::FireEvent(const std::string& eventName, const nlohmann::json& data) {

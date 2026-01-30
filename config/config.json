@@ -84,14 +84,14 @@
   },
 
   "database": {
-    "backend": "postgresql",  // "postgresql" or "citus"
+    "backend": "postgresql",
     "host": "localhost",
     "port": 5432,
     "name": "gameserver",
     "user": "gameserver",
     "password": "password",
-    "workerNodes": [],  // Only used for citus backend
-    "useCitusEmulation": true,  // Use citus emulation layer
+    "workerNodes": [],
+    "useCitusEmulation": true,
     "poolSize": 10,
     "reconnectAttempts": 3
   },
