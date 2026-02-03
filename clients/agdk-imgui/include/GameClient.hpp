@@ -6,6 +6,8 @@
 #include <atomic>
 #include <mutex>
 #include <queue>
+#include <vector>
+#include <unordered_map>
 #include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
 
@@ -14,6 +16,18 @@
 #include "InputHandler.hpp"
 #include "UIManager.hpp"
 #include "GameState.hpp"
+#include "WorldData.hpp"
+#include "ClientEntityManager.hpp"
+#include "EntityState.hpp"
+#include "WorldChunk.hpp"
+#include "BinaryProtocol.hpp"
+#include "WebSocketProtocol.hpp"
+
+enum class ConnectionProtocol {
+    JSON_TEXT,      // Newline-delimited JSON (current)
+    BINARY,         // Binary protocol
+    WEBSOCKET       // WebSocket protocol
+};
 
 class GameClient {
 public:
@@ -27,9 +41,10 @@ public:
     void Render();
     
     // Server communication
-    void ConnectToServer(const std::string& host, int port);
+    void ConnectToServer(const std::string& host, int port, ConnectionProtocol protocol = ConnectionProtocol::BINARY);
     void Disconnect();
     void SendMessage(const nlohmann::json& msg);
+    void SendBinaryMessage(const BinaryProtocol::BinaryMessage& msg);
     
     // Game actions
     void Login(const std::string& username, const std::string& password);
@@ -52,14 +67,19 @@ public:
     void OnNPCInteraction(uint64_t npcId);
     void OnTradeRequest(uint64_t playerId);
     
+    // Protocol selection
+    void SetProtocol(ConnectionProtocol protocol) { currentProtocol_ = protocol; }
+    ConnectionProtocol GetProtocol() const { return currentProtocol_; }
+    
 private:
     void NetworkThread();
     void ProcessReceivedMessages();
     void HandleServerMessage(const nlohmann::json& msg);
+    void HandleBinaryMessage(const BinaryProtocol::BinaryMessage& msg);
     void UpdateCamera();
     void ProcessInput();
     
-    // Message handlers
+    // JSON Message handlers
     void HandleLoginResponse(const nlohmann::json& data);
     void HandleWorldUpdate(const nlohmann::json& data);
     void HandleEntitySpawn(const nlohmann::json& data);
@@ -70,6 +90,16 @@ private:
     void HandleCombatUpdate(const nlohmann::json& data);
     void HandleChatMessage(const nlohmann::json& data);
     void HandleError(const nlohmann::json& data);
+    
+    // Binary Message handlers
+    void HandleBinaryLoginResponse(const std::vector<uint8_t>& data);
+    void HandleBinaryWorldUpdate(const std::vector<uint8_t>& data);
+    void HandleBinaryEntityUpdate(const std::vector<uint8_t>& data);
+    void HandleBinaryCombatEvent(const std::vector<uint8_t>& data);
+    
+    // Protocol conversion
+    nlohmann::json BinaryToJson(const BinaryProtocol::BinaryMessage& msg) const;
+    BinaryProtocol::BinaryMessage JsonToBinary(const nlohmann::json& json, uint16_t messageType) const;
     
     // Client state
     GameState gameState_;
@@ -82,15 +112,23 @@ private:
     std::thread networkThread_;
     std::atomic<bool> running_{false};
     std::mutex stateMutex_;
-    std::queue<nlohmann::json> messageQueue_;
-    mutable std::mutex queueMutex_;
+    std::queue<nlohmann::json> jsonMessageQueue_;
+    std::queue<BinaryProtocol::BinaryMessage> binaryMessageQueue_;
+    mutable std::mutex jsonQueueMutex_;
+    mutable std::mutex binaryQueueMutex_;
     
     // Connection
+    ConnectionProtocol currentProtocol_{ConnectionProtocol::BINARY};
     std::string serverHost_;
     int serverPort_;
     std::atomic<bool> connected_{false};
     std::atomic<bool> authenticated_{false};
     uint64_t playerId_{0};
+    
+    // Protocol state
+    BinaryProtocol::ProtocolCapabilities serverCapabilities_;
+    uint32_t sequenceNumber_{0};
+    std::unordered_map<uint32_t, std::function<void(const BinaryProtocol::BinaryMessage&)>> pendingResponses_;
     
     // Performance
     float deltaTime_{0.016f};
