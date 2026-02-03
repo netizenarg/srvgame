@@ -1,3 +1,4 @@
+// NetworkClient.cpp - MODIFIED AND ADDED LINES
 #include "NetworkClient.hpp"
 #include <android/log.h>
 
@@ -39,7 +40,12 @@ bool NetworkClient::Connect(const std::string& host, int port) {
         
         if (connected_) {
             LOGI("Connected to %s:%d", host.c_str(), port);
-            DoRead(); // Start reading
+            
+            // Initialize WebSocket if needed
+            if (protocol_ == NetworkProtocol::WEBSOCKET) {
+                InitializeWebSocket();
+            }
+            
             return true;
         } else {
             LOGE("Connection timeout");
@@ -62,6 +68,10 @@ void NetworkClient::Disconnect() {
         });
     }
     
+    if (webSocketClient_) {
+        webSocketClient_->Close(1000, "Client disconnect");
+    }
+    
     ioContext_.stop();
     if (ioThread_.joinable()) {
         ioThread_.join();
@@ -69,51 +79,105 @@ void NetworkClient::Disconnect() {
     
     // Clear queues
     {
-        std::lock_guard<std::mutex> lock(sendMutex_);
+        std::lock_guard<std::mutex> lock(jsonSendMutex_);
         std::queue<std::string> empty;
-        sendQueue_.swap(empty);
+        jsonSendQueue_.swap(empty);
     }
     {
-        std::lock_guard<std::mutex> lock(receiveMutex_);
+        std::lock_guard<std::mutex> lock(jsonReceiveMutex_);
         std::queue<nlohmann::json> empty;
-        receiveQueue_.swap(empty);
+        jsonReceiveQueue_.swap(empty);
+    }
+    {
+        std::lock_guard<std::mutex> lock(binarySendMutex_);
+        std::queue<BinaryProtocol::BinaryMessage> empty;
+        binarySendQueue_.swap(empty);
+    }
+    {
+        std::lock_guard<std::mutex> lock(binaryReceiveMutex_);
+        std::queue<BinaryProtocol::BinaryMessage> empty;
+        binaryReceiveQueue_.swap(empty);
     }
 }
 
-void NetworkClient::Send(const nlohmann::json& message) {
+void NetworkClient::SetProtocol(NetworkProtocol protocol) {
+    protocol_ = protocol;
+}
+
+void NetworkClient::SendJson(const nlohmann::json& message) {
     if (!connected_) return;
     
     std::string data = message.dump() + "\n";
     
-    std::lock_guard<std::mutex> lock(sendMutex_);
-    sendQueue_.push(data);
+    std::lock_guard<std::mutex> lock(jsonSendMutex_);
+    jsonSendQueue_.push(data);
     
     // Trigger write if queue was empty
-    if (sendQueue_.size() == 1) {
+    if (jsonSendQueue_.size() == 1) {
         asio::post(ioContext_, [this]() {
-            DoWrite(sendQueue_.front());
+            DoWriteJson(jsonSendQueue_.front());
         });
     }
 }
 
-std::vector<nlohmann::json> NetworkClient::Receive() {
+void NetworkClient::SendBinary(const BinaryProtocol::BinaryMessage& message) {
+    if (!connected_) return;
+    
+    std::lock_guard<std::mutex> lock(binarySendMutex_);
+    binarySendQueue_.push(message);
+    
+    if (binarySendQueue_.size() == 1) {
+        asio::post(ioContext_, [this]() {
+            DoWriteBinary(binarySendQueue_.front());
+        });
+    }
+}
+
+void NetworkClient::SendWebSocket(const nlohmann::json& message) {
+    if (!connected_ || !webSocketClient_) return;
+    
+    webSocketClient_->SendJson(message);
+}
+
+std::vector<nlohmann::json> NetworkClient::ReceiveJson() {
     std::vector<nlohmann::json> messages;
     
-    std::lock_guard<std::mutex> lock(receiveMutex_);
-    while (!receiveQueue_.empty()) {
-        messages.push_back(std::move(receiveQueue_.front()));
-        receiveQueue_.pop();
+    std::lock_guard<std::mutex> lock(jsonReceiveMutex_);
+    while (!jsonReceiveQueue_.empty()) {
+        messages.push_back(std::move(jsonReceiveQueue_.front()));
+        jsonReceiveQueue_.pop();
     }
     
     return messages;
 }
 
-void NetworkClient::SetTimeout(int milliseconds) {
-    timeoutMs_ = milliseconds;
+std::vector<BinaryProtocol::BinaryMessage> NetworkClient::ReceiveBinary() {
+    std::vector<BinaryProtocol::BinaryMessage> messages;
+    
+    std::lock_guard<std::mutex> lock(binaryReceiveMutex_);
+    while (!binaryReceiveQueue_.empty()) {
+        messages.push_back(std::move(binaryReceiveQueue_.front()));
+        binaryReceiveQueue_.pop();
+    }
+    
+    return messages;
 }
 
-void NetworkClient::SetCompression(bool enabled) {
-    compressionEnabled_ = enabled;
+std::vector<nlohmann::json> NetworkClient::ReceiveWebSocket() {
+    std::vector<nlohmann::json> messages;
+    
+    if (webSocketClient_) {
+        auto rawMessages = webSocketClient_->Receive();
+        for (const auto& msg : rawMessages) {
+            try {
+                messages.push_back(nlohmann::json::parse(msg.GetText()));
+            } catch (...) {
+                LOGE("Failed to parse WebSocket message as JSON");
+            }
+        }
+    }
+    
+    return messages;
 }
 
 void NetworkClient::RunIOContext() {
@@ -132,6 +196,19 @@ void NetworkClient::DoConnect(const asio::ip::tcp::resolver::results_type& endpo
                 if (!ec) {
                     connected_ = true;
                     LOGI("Async connection successful");
+                    
+                    // Start reading based on protocol
+                    switch (protocol_) {
+                        case NetworkProtocol::JSON_TEXT:
+                            DoReadJson();
+                            break;
+                        case NetworkProtocol::BINARY:
+                            DoReadBinary();
+                            break;
+                        case NetworkProtocol::WEBSOCKET:
+                            // WebSocket handshake will be handled by WebSocketClient
+                            break;
+                    }
                 } else {
                     LOGE("Async connection failed: %s", ec.message().c_str());
                 }
@@ -142,7 +219,7 @@ void NetworkClient::DoConnect(const asio::ip::tcp::resolver::results_type& endpo
     }
 }
 
-void NetworkClient::DoRead() {
+void NetworkClient::DoReadJson() {
     if (!connected_) return;
     
     asio::async_read_until(socket_, readBuffer_, '\n',
@@ -155,15 +232,15 @@ void NetworkClient::DoRead() {
                 try {
                     auto json = nlohmann::json::parse(line);
                     
-                    std::lock_guard<std::mutex> lock(receiveMutex_);
-                    receiveQueue_.push(json);
+                    std::lock_guard<std::mutex> lock(jsonReceiveMutex_);
+                    jsonReceiveQueue_.push(json);
                 }
                 catch (const std::exception& e) {
                     LOGE("JSON parse error: %s", e.what());
                 }
                 
                 // Continue reading
-                DoRead();
+                DoReadJson();
             }
             else {
                 if (ec != asio::error::operation_aborted) {
@@ -174,18 +251,18 @@ void NetworkClient::DoRead() {
         });
 }
 
-void NetworkClient::DoWrite(const std::string& message) {
+void NetworkClient::DoWriteJson(const std::string& message) {
     if (!connected_) return;
     
     asio::async_write(socket_, asio::buffer(message),
         [this](std::error_code ec, size_t /*length*/) {
             if (!ec) {
-                std::lock_guard<std::mutex> lock(sendMutex_);
-                sendQueue_.pop();
+                std::lock_guard<std::mutex> lock(jsonSendMutex_);
+                jsonSendQueue_.pop();
                 
                 // Write next message if available
-                if (!sendQueue_.empty()) {
-                    DoWrite(sendQueue_.front());
+                if (!jsonSendQueue_.empty()) {
+                    DoWriteJson(jsonSendQueue_.front());
                 }
             }
             else {
@@ -193,4 +270,95 @@ void NetworkClient::DoWrite(const std::string& message) {
                 Disconnect();
             }
         });
+}
+
+void NetworkClient::DoReadBinary() {
+    if (!connected_) return;
+    
+    // Read header first (32 bytes)
+    asio::async_read(socket_, asio::buffer(readBuffer_.prepare(32)),
+        [this](std::error_code ec, size_t bytes_transferred) {
+            if (!ec && bytes_transferred == 32) {
+                readBuffer_.commit(bytes_transferred);
+                
+                // Parse header
+                std::istream is(&readBuffer_);
+                BinaryProtocol::NetworkHeader header;
+                is.read(reinterpret_cast<char*>(&header), sizeof(header));
+                
+                // Read payload
+                asio::async_read(socket_, asio::buffer(readBuffer_.prepare(header.length)),
+                    [this, header](std::error_code ec, size_t payload_length) {
+                        if (!ec) {
+                            readBuffer_.commit(payload_length);
+                            
+                            std::istream is(&readBuffer_);
+                            std::vector<uint8_t> data(payload_length);
+                            is.read(reinterpret_cast<char*>(data.data()), payload_length);
+                            
+                            BinaryProtocol::BinaryMessage msg;
+                            msg.header = header;
+                            msg.data = std::move(data);
+                            
+                            std::lock_guard<std::mutex> lock(binaryReceiveMutex_);
+                            binaryReceiveQueue_.push(msg);
+                            
+                            // Continue reading
+                            DoReadBinary();
+                        }
+                        else {
+                            LOGE("Binary payload read error: %s", ec.message().c_str());
+                            Disconnect();
+                        }
+                    });
+            }
+            else {
+                if (ec != asio::error::operation_aborted) {
+                    LOGE("Binary header read error: %s", ec.message().c_str());
+                    Disconnect();
+                }
+            }
+        });
+}
+
+void NetworkClient::DoWriteBinary(const BinaryProtocol::BinaryMessage& message) {
+    if (!connected_) return;
+    
+    // Serialize message
+    auto serialized = message.Serialize();
+    
+    asio::async_write(socket_, asio::buffer(serialized),
+        [this](std::error_code ec, size_t /*length*/) {
+            if (!ec) {
+                std::lock_guard<std::mutex> lock(binarySendMutex_);
+                binarySendQueue_.pop();
+                
+                // Write next message if available
+                if (!binarySendQueue_.empty()) {
+                    DoWriteBinary(binarySendQueue_.front());
+                }
+            }
+            else {
+                LOGE("Binary write error: %s", ec.message().c_str());
+                Disconnect();
+            }
+        });
+}
+
+void NetworkClient::InitializeWebSocket() {
+    webSocketClient_ = std::make_unique<WebSocketProtocol::WebSocketClient>(ioContext_);
+    
+    // Set up handlers
+    webSocketClient_->SetMessageHandler([this](const WebSocketProtocol::WebSocketMessage& msg) {
+        std::lock_guard<std::mutex> lock(jsonReceiveMutex_);
+        try {
+            jsonReceiveQueue_.push(msg.ToJson());
+        } catch (...) {
+            LOGE("Failed to parse WebSocket message");
+        }
+    });
+    
+    // Connect WebSocket
+    // Note: WebSocket handshake requires upgrade from HTTP
+    // This is simplified - in reality need proper WebSocket handshake
 }
