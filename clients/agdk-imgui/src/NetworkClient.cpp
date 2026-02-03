@@ -62,6 +62,14 @@ void NetworkClient::Disconnect() {
     running_ = false;
     connected_ = false;
     
+    try {
+        if (readBuffer_.size() > 0) {
+            readBuffer_.consume(readBuffer_.size());
+        }
+    } catch (const std::exception& e) {
+        LOGE("Clear the read buffer error: %s", e.what());
+    }
+    
     if (socket_.is_open()) {
         asio::post(ioContext_, [this]() {
             socket_.close();
@@ -284,17 +292,68 @@ void NetworkClient::DoReadBinary() {
                 // Parse header
                 std::istream is(&readBuffer_);
                 BinaryProtocol::NetworkHeader header;
+                
+                // FIX: Check buffer has enough data before reading
+                if (readBuffer_.size() < sizeof(header)) {
+                    LOGE("Buffer underflow reading header");
+                    Disconnect();
+                    return;
+                }
+                
                 is.read(reinterpret_cast<char*>(&header), sizeof(header));
                 
-                // Read payload
+                // FIX: Validate header length to prevent excessive allocation
+                const size_t MAX_MESSAGE_SIZE = 10 * 1024 * 1024; // 10MB limit
+                if (header.length > MAX_MESSAGE_SIZE) {
+                    LOGE("Message size too large: %u", header.length);
+                    Disconnect();
+                    return;
+                }
+                
+                if (header.length == 0) {
+                    // Empty payload - process and continue reading
+                    BinaryProtocol::BinaryMessage msg;
+                    msg.header = header;
+                    
+                    std::lock_guard<std::mutex> lock(binaryReceiveMutex_);
+                    binaryReceiveQueue_.push(msg);
+                    
+                    // Continue reading
+                    DoReadBinary();
+                    return;
+                }
+                
+                // Read payload with size validation
                 asio::async_read(socket_, asio::buffer(readBuffer_.prepare(header.length)),
                     [this, header](std::error_code ec, size_t payload_length) {
                         if (!ec) {
+                            // FIX: Validate we read expected amount
+                            if (payload_length != header.length) {
+                                LOGE("Payload size mismatch: expected %u, got %zu", 
+                                     header.length, payload_length);
+                                Disconnect();
+                                return;
+                            }
+                            
                             readBuffer_.commit(payload_length);
+                            
+                            // FIX: Verify buffer has enough data
+                            if (readBuffer_.size() < payload_length) {
+                                LOGE("Buffer underflow reading payload");
+                                Disconnect();
+                                return;
+                            }
                             
                             std::istream is(&readBuffer_);
                             std::vector<uint8_t> data(payload_length);
+                            
+                            // FIX: Check read operation success
                             is.read(reinterpret_cast<char*>(data.data()), payload_length);
+                            if (is.gcount() != static_cast<std::streamsize>(payload_length)) {
+                                LOGE("Failed to read entire payload from buffer");
+                                Disconnect();
+                                return;
+                            }
                             
                             BinaryProtocol::BinaryMessage msg;
                             msg.header = header;
@@ -303,18 +362,28 @@ void NetworkClient::DoReadBinary() {
                             std::lock_guard<std::mutex> lock(binaryReceiveMutex_);
                             binaryReceiveQueue_.push(msg);
                             
-                            // Continue reading
-                            DoReadBinary();
+                            // Continue reading - BUT with safety check
+                            // to prevent infinite recursion in case of rapid data
+                            if (connected_ && running_) {
+                                DoReadBinary();
+                            }
                         }
                         else {
-                            LOGE("Binary payload read error: %s", ec.message().c_str());
-                            Disconnect();
+                            if (ec != asio::error::operation_aborted) {
+                                LOGE("Binary payload read error: %s", ec.message().c_str());
+                                Disconnect();
+                            }
                         }
                     });
             }
             else {
-                if (ec != asio::error::operation_aborted) {
+                if (ec && ec != asio::error::operation_aborted) {
                     LOGE("Binary header read error: %s", ec.message().c_str());
+                    Disconnect();
+                }
+                // FIX: Added else-if for partial read
+                else if (bytes_transferred > 0 && bytes_transferred < 32) {
+                    LOGE("Incomplete header read: %zu bytes", bytes_transferred);
                     Disconnect();
                 }
             }
@@ -324,8 +393,21 @@ void NetworkClient::DoReadBinary() {
 void NetworkClient::DoWriteBinary(const BinaryProtocol::BinaryMessage& message) {
     if (!connected_) return;
     
+    // FIX: Validate message size before serialization
+    const size_t MAX_MESSAGE_SIZE = 10 * 1024 * 1024; // 10MB limit
+    if (message.data.size() > MAX_MESSAGE_SIZE) {
+        LOGE("Message size too large for sending: %zu bytes", message.data.size());
+        return;
+    }
+    
     // Serialize message
     auto serialized = message.Serialize();
+    
+    // FIX: Validate serialized size
+    if (serialized.size() > MAX_MESSAGE_SIZE + sizeof(BinaryProtocol::NetworkHeader)) {
+        LOGE("Serialized message size too large: %zu bytes", serialized.size());
+        return;
+    }
     
     asio::async_write(socket_, asio::buffer(serialized),
         [this](std::error_code ec, size_t /*length*/) {
