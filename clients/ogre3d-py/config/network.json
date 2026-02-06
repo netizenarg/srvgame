@@ -1,0 +1,50 @@
+{
+    "network": {
+        "protocol": "websocket",
+        "binary_protocol": {
+            "enabled": false,
+            "compression_level": 6,
+            "encryption_enabled": false,
+            "max_message_size": 10485760,
+            "reliable_messages": true
+        },
+        "websocket": {
+            "enabled": true,
+            "url": "ws://127.0.0.1:8080/ws",
+            "auto_reconnect": true,
+            "reconnect_delay": 5,
+            "max_reconnect_attempts": 10,
+            "ping_interval": 30,
+            "ping_timeout": 10,
+            "use_ssl": false,
+            "verify_ssl": true,
+            "protocols": ["game-protocol-v1"],
+            "compression_enabled": true,
+            "max_frame_size": 16384,
+            "rate_limit_messages_per_second": 100,
+            "rate_limit_burst_size": 1000
+        },
+        "tcp_udp": {
+            "enabled": false,
+            "host": "127.0.0.1",
+            "port": 8080,
+            "use_udp": false,
+            "timeout": 5,
+            "buffer_size": 4096,
+            "keepalive": true,
+            "no_delay": true
+        },
+        "performance": {
+            "max_outgoing_queue": 1000,
+            "max_incoming_queue": 1000,
+            "worker_threads": 2,
+            "process_messages_per_frame": 10
+        },
+        "debug": {
+            "log_network_traffic": false,
+            "log_messages": false,
+            "log_errors": true,
+            "log_latency": true
+        }
+    }
+}
