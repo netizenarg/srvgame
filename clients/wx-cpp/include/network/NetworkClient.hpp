@@ -12,13 +12,20 @@
 #include <asio.hpp>
 
 #include "../include/client/ConnectionState.hpp"
+#include "../include/client/WebSocketClient.hpp"
 
 class NetworkClient {
 public:
+    enum class Protocol {
+        TCP,
+        WebSocket,
+        AutoDetect  // Try WebSocket first, fallback to TCP
+    };
+    
     using MessageHandler = std::function<void(const nlohmann::json&)>;
     using ConnectionCallback = std::function<void(bool, ConnectionError)>;
 
-    NetworkClient();
+    NetworkClient(Protocol protocol = Protocol::AutoDetect);
     ~NetworkClient();
 
     // Connection management
@@ -64,11 +71,18 @@ public:
         std::chrono::milliseconds averageLatency{0};
         float packetLoss{0.0f};
         float bandwidthUsage{0.0f};
+        Protocol activeProtocol{Protocol::TCP};
     };
 
     NetworkStats GetStats() const;
     ConnectionState GetConnectionState() const;
     ConnectionMetrics GetConnectionMetrics() const;
+    
+    // Protocol management
+    Protocol GetActiveProtocol() const { return activeProtocol_; }
+    void SetPreferredProtocol(Protocol protocol) { preferredProtocol_ = protocol; }
+    bool SwitchProtocol(Protocol newProtocol);
+    bool IsWebSocketAvailable() const { return wsClient_ != nullptr; }
 
     // Message builders (unchanged from original)
     static nlohmann::json BuildLoginMessage(const std::string& username, const std::string& password);
@@ -93,12 +107,19 @@ private:
         uint32_t sequence{0};
     };
 
-    // Core networking methods
+    // Core networking methods for TCP
     void RunIOContext();
     void StartAsyncOperations();
     void DoConnect();
     void DoRead();
     void DoWrite();
+    
+    // WebSocket methods
+    bool ConnectWebSocket(const std::string& host, uint16_t port);
+    void SetupWebSocketHandlers();
+    void OnWebSocketMessage(const nlohmann::json& message);
+    void OnWebSocketConnected(bool success, ConnectionError error);
+    void OnWebSocketDisconnected();
 
     // Resilience features
     void StartHeartbeat();
@@ -112,12 +133,16 @@ private:
     void HandleMessage(const std::string& message);
     void HandleHeartbeat(const nlohmann::json& message);
     void HandleAck(uint32_t sequence);
+    
+    // Protocol-agnostic message handling
+    void ProcessIncomingMessage(const nlohmann::json& message);
+    void ForwardToHandlers(const nlohmann::json& message);
 
     // Priority queue management
     void EnqueueMessage(const QueuedMessage& message);
     bool DequeueMessage(QueuedMessage& message);
 
-    // ASIO components
+    // ASIO components (for TCP)
     asio::io_context ioContext_;
     asio::ip::tcp::socket socket_;
     asio::steady_timer heartbeatTimer_;
@@ -161,13 +186,22 @@ private:
         uint32_t maxQueueSize{1000};
         bool enableCompression{false};
         bool enableEncryption{false};
+        Protocol preferredProtocol{Protocol::AutoDetect};
     } config_;
 
+    // Protocol management
+    Protocol preferredProtocol_{Protocol::AutoDetect};
+    Protocol activeProtocol_{Protocol::TCP};
+    std::unique_ptr<WebSocketClient> wsClient_;
+    std::atomic<bool> protocolNegotiating_{false};
+    
     // Helper functions
     bool SetupSocketOptions();
     void UpdateStats(const QueuedMessage& msg, bool sent);
     void CleanupPendingMessages();
     std::string CompressData(const std::string& data);
     std::string DecompressData(const std::string& data);
-    void HandleConnectionResult(bool success);
+    void HandleConnectionResult(bool success, ConnectionError error = ConnectionError::None);
+    bool TryProtocolFallback();
+    void InitializeWebSocketClient();
 };

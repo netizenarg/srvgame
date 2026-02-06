@@ -1,4 +1,7 @@
 // GameClient.cpp
+#include "core/GameClient.hpp"
+
+
 bool GameClient::Initialize(const std::string& serverAddress, uint16_t port) {
     // Initialize input system
     inputManager_ = std::make_shared<InputManager>();
@@ -7,7 +10,7 @@ bool GameClient::Initialize(const std::string& serverAddress, uint16_t port) {
     }
 
     // Initialize network with resilience
-    networkClient_ = std::make_unique<NetworkClient>();
+    networkClient_ = std::make_unique<NetworkClient>(config_.networkProtocol);
 
     // Configure network resilience
     networkClient_->EnableHeartbeat(true, 5000);
