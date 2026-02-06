@@ -3,20 +3,23 @@ gameserver-client/
 ├── README.md
 ├── src/
 │   ├── main.cpp
-│   ├── ClientApp.h
-│   ├── ClientApp.cpp
-│   ├── ClientFrame.h
-│   ├── ClientFrame.cpp
-│   ├── GLCanvas.h
-│   ├── GLCanvas.cpp
-│   ├── NetworkClient.h
-│   ├── NetworkClient.cpp
-│   ├── GameWorld.h
-│   ├── GameWorld.cpp
-│   ├── PythonScriptManager.h
-│   └── PythonScriptManager.cpp
+│   ├── core/
+│   │   ├── ClientApp.h
+│   │   ├── ClientApp.cpp
+│   │   ├── ClientFrame.h
+│   │   ├── ClientFrame.cpp
+│   │   ├── GLCanvas.h
+│   │   ├── GLCanvas.cpp
+│   │   ├── GameWorld.h
+│   │   └── GameWorld.cpp
+│   ├── network/
+│   │   ├── NetworkClient.h
+│   │   └── NetworkClient.cpp
+│   └── scripting/
+│       ├── PythonScriptManager.h
+│       └── PythonScriptManager.cpp
 ├── include/
-│   ├── client/
+│   ├── core/
 │   │   ├── GameClient.h
 │   │   ├── Player.h
 │   │   ├── Camera.h
@@ -24,9 +27,11 @@ gameserver-client/
 │   │   ├── RenderSystem.h
 │   │   ├── UIComponents.h
 │   │   └── ScriptBindings.h
-│   └── python/
+│   ├── network/
+│   │   ├── NetworkClient.h
+│   │   └── NetworkClient.cpp
+│   └── scripting/
 │       ├── PythonWrapper.h
-│       ├── GameModule.h
 │       └── ScriptEvents.h
 ├── resources/
 │   ├── shaders/

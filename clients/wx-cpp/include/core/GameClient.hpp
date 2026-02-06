@@ -7,10 +7,10 @@
 #include <glm/glm.hpp>
 #include <wx/wx.h>
 
-#include "NetworkClient.h"
-#include "Camera.h"
-#include "InputManager.h"
-#include "RenderSystem.h"
+#include "network/NetworkClient.hpp"
+#include "core/Camera.hpp"
+#include "core/InputManager.hpp"
+#include "core/RenderSystem.hpp"
 
 class GameClient {
 public:
@@ -88,5 +88,6 @@ private:
         bool fullscreen{false};
         int windowWidth{1280};
         int windowHeight{720};
+        NetworkClient::Protocol networkProtocol{NetworkClient::Protocol::TCP};
     } config_;
 };
