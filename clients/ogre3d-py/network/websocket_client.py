@@ -308,9 +308,9 @@ class WebSocketGameClient:
                 try:
                     decompressed = zlib.decompress(binary_data)
                     binary_data = decompressed
-                except:
-                    pass  # Not compressed
-            
+                except Exception as e:
+                    logger.error(f'{e}')
+
             # Parse binary message
             from .protocol import GameMessage
             message = GameMessage.deserialize(binary_data)

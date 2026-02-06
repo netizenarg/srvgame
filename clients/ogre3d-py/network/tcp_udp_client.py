@@ -107,9 +107,13 @@ class TcpUdpClient:
         if self.socket:
             try:
                 self.send_logout()
-                self.socket.close()
-            except:
-                pass
+            except Exception as e:
+                logger.error(f'{e}')
+            else:
+                try:
+                    self.socket.close()
+                except Exception as e:
+                    logger.error(f'{e}')
 
         if self.receive_thread:
             self.receive_thread.join(timeout=1.0)
