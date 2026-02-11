@@ -6,7 +6,6 @@
 
 namespace fs = std::filesystem;
 
-namespace PythonScripting {
 
 ScriptHotReloader::ScriptHotReloader(const std::string& scriptDir, int checkIntervalMs)
     : scriptDir_(scriptDir), checkIntervalMs_(checkIntervalMs), running_(false) {
@@ -116,5 +115,3 @@ void ScriptHotReloader::WatchLoop() {
         }
     }
 }
-
-} // namespace PythonScripting

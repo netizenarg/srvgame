@@ -1,92 +1,86 @@
-#pragma once
-
-#include <nlohmann/json.hpp>
-#include <string>
-#include <vector>
-#include <memory>
-
+/**
+ * @brief Abstract Database Backend Interface
+ *
+ * Provides a unified interface for database operations with support for
+ * both PostgreSQL and Citus (distributed PostgreSQL) backends.
+ */
 class DatabaseBackend {
 public:
     virtual ~DatabaseBackend() = default;
 
-    // Initialization
-    virtual bool Initialize(const std::string& connInfo,
-                           const std::vector<std::string>& workerNodes = {}) = 0;
-    
-    virtual bool TestConnection() = 0;
-    virtual void ReconnectAll() = 0;
+    // Connection Management
+    virtual bool Connect() = 0;
+    virtual bool Reconnect() = 0;
+    virtual void Disconnect() = 0;
+    virtual bool IsConnected() const = 0;
     virtual bool CheckHealth() = 0;
+    virtual void ReconnectAll() = 0;
 
-    // Table management
-    virtual bool CreateTable(const std::string& tableName,
-                            const std::string& schema) = 0;
-    
-    virtual bool CreateDistributedTable(const std::string& tableName,
-                                       const std::string& distributionColumn,
-                                       const std::string& distributionType = "hash") = 0;
-    
-    virtual bool CreateReferenceTable(const std::string& tableName) = 0;
-    
-    virtual bool TableExists(const std::string& tableName) = 0;
+    // Player Data Operations
+    virtual bool SavePlayerData(uint64_t playerId, const nlohmann::json& data) = 0;
+    virtual nlohmann::json LoadPlayerData(uint64_t playerId) = 0;
+    virtual bool UpdatePlayer(uint64_t playerId, const nlohmann::json& updates) = 0;
+    virtual bool DeletePlayer(uint64_t playerId) = 0;
+    virtual bool UpdatePlayerPosition(uint64_t playerId, float x, float y, float z) = 0;
+    virtual bool PlayerExists(uint64_t playerId) = 0;
+    virtual nlohmann::json GetPlayerStats(uint64_t playerId) = 0;
+    virtual bool UpdatePlayerStats(uint64_t playerId, const nlohmann::json& stats) = 0;
+    virtual nlohmann::json GetPlayer(uint64_t playerId) = 0;
 
-    // Query execution
-    virtual nlohmann::json Query(const std::string& query) = 0;
-    virtual bool Execute(const std::string& query) = 0;
-    
-    virtual nlohmann::json QueryShard(int shardId, const std::string& query) = 0;
-    virtual nlohmann::json QueryAllShards(const std::string& query) = 0;
+    // Game State Operations
+    virtual bool SaveGameState(const std::string& key, const nlohmann::json& state) = 0;
+    virtual nlohmann::json LoadGameState(const std::string& key) = 0;
+    virtual bool DeleteGameState(const std::string& key) = 0;
+    virtual std::vector<std::string> ListGameStates() = 0;
 
-    // Player data management
-    virtual bool CreatePlayer(const nlohmann::json& playerData) = 0;
-    virtual nlohmann::json GetPlayer(int64_t playerId) = 0;
-    virtual bool UpdatePlayer(int64_t playerId, const nlohmann::json& updates) = 0;
-    virtual bool DeletePlayer(int64_t playerId) = 0;
+    // World Data Operations
+    virtual bool SaveChunkData(int chunkX, int chunkZ, const nlohmann::json& chunkData) = 0;
+    virtual nlohmann::json LoadChunkData(int chunkX, int chunkZ) = 0;
+    virtual bool DeleteChunkData(int chunkX, int chunkZ) = 0;
+    virtual std::vector<std::pair<int, int>> ListChunksInRange(int centerX, int centerZ, int radius) = 0;
 
-    // Game state management
-    virtual bool SaveGameState(int64_t gameId, const nlohmann::json& gameState) = 0;
-    virtual nlohmann::json LoadGameState(int64_t gameId) = 0;
+    // Inventory Operations
+    virtual bool SaveInventory(uint64_t playerId, const nlohmann::json& inventory) = 0;
+    virtual nlohmann::json LoadInventory(uint64_t playerId) = 0;
 
-    // Player session management
-    virtual bool SetOnlineStatus(int64_t playerId, bool online,
-                                const std::string& sessionId = "",
-                                const std::string& ipAddress = "") = 0;
-    
-    virtual bool UpdateHeartbeat(int64_t playerId) = 0;
-    virtual bool UpdatePlayerPosition(int64_t playerId, float x, float y, float z) = 0;
-    
-    virtual nlohmann::json GetOnlinePlayers() = 0;
-    virtual nlohmann::json GetNearbyPlayers(int64_t playerId, float radius) = 0;
+    // Quest Operations
+    virtual bool SaveQuestProgress(uint64_t playerId, const std::string& questId, const nlohmann::json& progress) = 0;
+    virtual nlohmann::json LoadQuestProgress(uint64_t playerId, const std::string& questId) = 0;
+    virtual std::vector<std::string> ListActiveQuests(uint64_t playerId) = 0;
 
-    // Inventory management
-    virtual bool AddPlayerItem(int64_t playerId, int itemDefId,
-                              int quantity, const nlohmann::json& attributes) = 0;
-    
-    virtual nlohmann::json GetPlayerItems(int64_t playerId) = 0;
+    // Transaction Operations
+    virtual bool BeginTransaction() = 0;
+    virtual bool CommitTransaction() = 0;
+    virtual bool RollbackTransaction() = 0;
+    virtual bool ExecuteTransaction(const std::function<bool()>& operation) = 0;
 
-    // Game events
-    virtual bool LogGameEvent(int64_t playerId, int64_t gameId,
-                             const std::string& eventType,
-                             const nlohmann::json& eventData) = 0;
+    // Query Operations
+    virtual nlohmann::json Query(const std::string& sql) = 0;
+    virtual nlohmann::json QueryWithParams(const std::string& sql, const std::vector<std::string>& params) = 0;
+    virtual bool Execute(const std::string& sql) = 0;
+    virtual bool ExecuteWithParams(const std::string& sql, const std::vector<std::string>& params) = 0;
 
-    // Analytics
-    virtual nlohmann::json GetPlayerStats(int64_t playerId) = 0;
-    virtual nlohmann::json GetGameAnalytics(int64_t gameId) = 0;
+    // Shard Operations (for distributed databases)
+    virtual nlohmann::json QueryShard(int shardId, const std::string& sql) = 0;
+    virtual nlohmann::json QueryShardWithParams(int shardId, const std::string& sql, const std::vector<std::string>& params) = 0;
+    virtual bool ExecuteShard(int shardId, const std::string& sql) = 0;
+    virtual bool ExecuteShardWithParams(int shardId, const std::string& sql, const std::vector<std::string>& params) = 0;
 
-    // Maintenance
-    virtual bool VacuumTables() = 0;
-    virtual bool RebalanceShards() = 0;
-    virtual nlohmann::json GetClusterStatus() = 0;
-    virtual nlohmann::json GetPerformanceMetrics() = 0;
-
-    // Utility
+    // Utility Methods
     virtual std::string EscapeString(const std::string& str) = 0;
-    virtual nlohmann::json PGResultToJson(PGresult* res) = 0;
+    virtual int GetShardId(uint64_t entityId) const = 0;
+    virtual int GetTotalShards() const = 0;
+    virtual std::string GetConnectionInfo() const = 0;
+    virtual int64_t GetLastInsertId() = 0;
+    virtual int GetAffectedRows() = 0;
 
-    // Factory method
-    static std::unique_ptr<DatabaseBackend> CreateBackend(const std::string& type);
+    // Statistics
+    virtual nlohmann::json GetDatabaseStats() = 0;
+    virtual void ResetStats() = 0;
+
+    // Connection Pool Management
+    virtual bool InitializeConnectionPool(size_t minConnections, size_t maxConnections) = 0;
+    virtual void ReleaseConnectionPool() = 0;
+    virtual size_t GetActiveConnections() const = 0;
+    virtual size_t GetIdleConnections() const = 0;
 };
-
-// Factory function
-inline std::unique_ptr<DatabaseBackend> CreateDatabaseBackend(const std::string& type) {
-    return DatabaseBackend::CreateBackend(type);
-}

@@ -1,16 +1,25 @@
 #pragma once
 
+#include <algorithm>
+#include <cmath>
+#include <chrono>
 #include <memory>
 #include <unordered_map>
 #include <shared_mutex>
+
 #include <nlohmann/json.hpp>
 
-#include "database/CitusClient.hpp"
+#include "logging/Logger.hpp"
+#include "database/DbManager.hpp"
 #include "game/RAIIThread.hpp"
+#include "game/PlayerEntity.hpp"
 
-class Player {
+class Player : public PlayerEntity {
 public:
     Player(int64_t id, const std::string& username);
+
+    nlohmann::json ToJson() const;
+    void AddExperience(int64_t amount);
 
     int64_t GetId() const { return id_; }
     const std::string& GetUsername() const { return username_; }
@@ -24,6 +33,9 @@ public:
 
     void SetAttribute(const std::string& key, const nlohmann::json& value);
     nlohmann::json GetAttributes() const;
+
+    void SetHealth(int health);
+    void SetMana(int mana);
 
     void SaveToDatabase();
     bool LoadFromDatabase();
@@ -40,6 +52,20 @@ private:
     nlohmann::json attributes_;
 
     mutable std::shared_mutex mutex_;
+};
+
+struct GlobalPlayerStats {
+    int total_players = 0;
+    int online_players = 0;
+    int total_connections = 0;
+    int total_playtime = 0;
+    int average_playtime = 0;
+    int level_1_10 = 0;
+    int level_11_20 = 0;
+    int level_21_30 = 0;
+    int level_31_40 = 0;
+    int level_41_50 = 0;
+    int level_50_plus = 0;
 };
 
 class PlayerManager {
@@ -61,6 +87,33 @@ public:
     // Periodic tasks
     void SaveAllPlayers();
     void CleanupInactivePlayers();
+
+    void SendToPlayer(int64_t playerId, const nlohmann::json& message);
+    void SendToPlayers(const std::vector<int64_t>& playerIds, const nlohmann::json& message);
+    void BanPlayer(int64_t playerId, const std::string& reason, int64_t durationSeconds);
+    void UnbanPlayer(int64_t playerId);
+    void TeleportPlayer(int64_t playerId, float x, float y, float z);
+    bool GiveItemToPlayer(int64_t playerId, const std::string& itemId, int count);
+    bool TakeItemFromPlayer(int64_t playerId, const std::string& itemId, int count);
+    void AddAchievementToPlayer(int64_t playerId, const std::string& achievementId);
+
+    std::vector<std::shared_ptr<Player>> GetAllPlayers() const;
+    std::vector<std::shared_ptr<Player>> GetOnlinePlayers() const;
+    size_t GetPlayerCount() const;
+    size_t GetOnlinePlayerCount() const;
+    bool PlayerExists(const std::string& username) const;
+    std::shared_ptr<Player> LoadPlayer(int64_t playerId);
+    std::shared_ptr<Player> LoadPlayerByUsername(const std::string& username);
+    PlayerStats GetPlayerStats(int64_t playerId) const;
+    GlobalPlayerStats GetGlobalPlayerStats() const;
+    void PrintStats();
+    std::vector<int64_t> SearchPlayers(const std::string& query, int limit);
+    std::vector<int64_t> GetPlayersByLevelRange(int minLevel, int maxLevel);
+    void CreateParty(int64_t leaderId, const std::string& partyName);
+    void AddPlayerToParty(int64_t partyId, int64_t playerId);
+    void RemovePlayerFromParty(int64_t partyId, int64_t playerId);
+    std::vector<int64_t> GetPartyMembers(int64_t partyId) const;
+    int64_t GeneratePartyId();
 
 private:
     PlayerManager();

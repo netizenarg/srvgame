@@ -1,13 +1,5 @@
-#include <random>
-#include <uuid/uuid.h>
+#include "scripting/PythonAPI.hpp"
 
-#include "scripting/PythonScripting.hpp"
-#include "game/PlayerManager.hpp"
-#include "database/Backend.hpp"
-#include "game/GameLogic.hpp"
-#include "network/ConnectionManager.hpp"
-
-namespace PythonScripting {
 
 // =============== Python C API Functions ===============
 
@@ -237,6 +229,7 @@ static PyObject* py_get_player(PyObject* self, PyObject* args) {
         Py_RETURN_NONE;
     }
 
+    //return JsonToPython(((Player)player)->ToJson());
     return JsonToPython(player->ToJson());
 }
 
@@ -797,10 +790,7 @@ bool PythonAPI::GivePlayerItem(int64_t playerId, const std::string& itemId, int 
 
 bool PythonAPI::TakePlayerItem(int64_t playerId, const std::string& itemId, int count) {
     auto& playerMgr = PlayerManager::GetInstance();
-
-    // This function would need to be added to PlayerManager
-    // For now, return false
-    return false;
+    return playerMgr.TakeItemFromPlayer(playerId, itemId, count);
 }
 
 bool PythonAPI::AddPlayerExperience(int64_t playerId, int64_t amount) {
@@ -1052,5 +1042,3 @@ bool PythonAPI::SetConfig(const std::string& key, const nlohmann::json& value) {
     // For now, return false
     return false;
 }
-
-} // namespace PythonScripting

@@ -1,12 +1,5 @@
-#include <spdlog/sinks/basic_file_sink.h>
-#include <spdlog/sinks/daily_file_sink.h>
-#include <spdlog/sinks/stdout_color_sinks.h>
-#include <spdlog/sinks/rotating_file_sink.h>
-#include <memory>
-#include <string>
-
-#include "logging/Logger.hpp"
 #include "config/ConfigManager.hpp"
+#include "logging/Logger.hpp"
 
 // Static member initialization (no longer inline in header)
 std::shared_ptr<spdlog::logger> Logger::logger_;

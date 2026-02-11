@@ -1,10 +1,3 @@
-#include <cmath>
-#include <glm/glm.hpp>
-
-#include "config/ConfigManager.hpp"
-#include "logging/Logger.hpp"
-#include "database/CitusClient.hpp"
-#include "network/ConnectionManager.hpp"
 #include "game/GameLogic.hpp"
 
 // =============== Static Members ===============
@@ -679,4 +672,162 @@ void GameLogic::SaveChunkData() {
 void GameLogic::CleanupOldData() {
     LogicCore::CleanupOldData();
     Logger::Debug("Cleaning up 3D game data");
+}
+
+// =============== World maintenance ===============
+void GameLogic::PerformMaintenance() {
+    Logger::Info("Performing game world maintenance");
+
+    // Clean up old data
+    CleanupOldData();
+
+    // Save chunk data
+    SaveChunkData();
+
+    // Check database health
+    if (databaseBackend_) {
+        bool healthy = databaseBackend_->CheckHealth();
+        if (!healthy) {
+            Logger::Warn("Database health check failed, attempting to reconnect");
+            databaseBackend_->ReconnectAll();
+        }
+    }
+
+    Logger::Info("Game world maintenance complete");
+}
+
+// =============== IPC message handling ===============
+void GameLogic::HandleIPCMessage(const nlohmann::json& message) {
+    try {
+        std::string msgType = message.value("type", "");
+        Logger::Debug("GameLogic handling IPC message type: {}", msgType);
+
+        if (msgType == "welcome") {
+            Logger::Info("Received welcome message from master: {}", message.value("message", ""));
+        } else if (msgType == "heartbeat") {
+            // Handle heartbeat from master
+            int count = message.value("count", 0);
+            Logger::Debug("Received heartbeat #{} from master", count);
+        } else if (msgType == "broadcast") {
+            // Broadcast message to all players
+            if (message.contains("data")) {
+                BroadcastToAllPlayers(message["data"]);
+            }
+        } else if (msgType == "shutdown") {
+            Logger::Info("Received shutdown command from master");
+            Shutdown();
+        } else if (msgType == "reload_config") {
+            Logger::Info("Received config reload command from master");
+            // Reload configuration if needed
+        }
+    } catch (const std::exception& e) {
+        Logger::Error("Error handling IPC message: {}", e.what());
+    }
+}
+
+// =============== Helper broadcast methods ===============
+void GameLogic::BroadcastToAllPlayers(const nlohmann::json& message) {
+    if (!connectionManager_) {
+        Logger::Warn("Cannot broadcast: ConnectionManager not available");
+        return;
+    }
+
+    try {
+        // Serialize the message to string
+        std::string serialized = message.dump();
+
+        // Get all active sessions
+        auto sessions = connectionManager_->GetAllSessions();
+
+        if (sessions.empty()) {
+            Logger::Debug("No active sessions to broadcast to");
+            return;
+        }
+
+        Logger::Debug("Broadcasting to {} player(s): {}", sessions.size(), message.dump());
+
+        // Send message to each session
+        for (auto& session : sessions) {
+            if (session && session->IsConnected()) {
+                try {
+                    session->SendRaw(serialized);
+                } catch (const std::exception& e) {
+                    Logger::Error("Failed to send broadcast to session {}: {}",
+                                  session->GetSessionId(), e.what());
+                }
+            }
+        }
+
+        Logger::Info("Successfully broadcasted to {} player(s)", sessions.size());
+
+    } catch (const std::exception& e) {
+        Logger::Error("Error broadcasting to all players: {}", e.what());
+    }
+}
+
+void GameLogic::BroadcastToAllPlayersBinary(uint16_t messageType, const std::vector<uint8_t>& data) {
+    if (!connectionManager_) {
+        Logger::Warn("Cannot broadcast binary: ConnectionManager not available");
+        return;
+    }
+
+    try {
+        // Get all active sessions
+        auto sessions = connectionManager_->GetAllSessions();
+
+        if (sessions.empty()) {
+            Logger::Debug("No active sessions to broadcast binary to");
+            return;
+        }
+
+        Logger::Debug("Broadcasting binary message type {} to {} player(s)",
+                      messageType, sessions.size());
+
+        // Send binary message to each session
+        for (auto& session : sessions) {
+            if (session && session->IsConnected()) {
+                try {
+                    session->SendBinary(messageType, data);
+                } catch (const std::exception& e) {
+                    Logger::Error("Failed to send binary broadcast to session {}: {}",
+                                  session->GetSessionId(), e.what());
+                }
+            }
+        }
+
+    } catch (const std::exception& e) {
+        Logger::Error("Error broadcasting binary to all players: {}", e.what());
+    }
+}
+
+void GameLogic::BroadcastToPlayers(const std::vector<uint64_t>& sessionIds, const nlohmann::json& message) {
+    if (!connectionManager_) {
+        Logger::Warn("Cannot broadcast: ConnectionManager not available");
+        return;
+    }
+
+    try {
+        std::string serialized = message.dump();
+        int sentCount = 0;
+
+        for (uint64_t sessionId : sessionIds) {
+            auto session = connectionManager_->GetSession(sessionId);
+            if (session && session->IsConnected()) {
+                try {
+                    session->SendRaw(serialized);
+                    sentCount++;
+                } catch (const std::exception& e) {
+                    Logger::Error("Failed to send message to session {}: {}",
+                                  sessionId, e.what());
+                }
+            }
+        }
+
+        if (sentCount > 0) {
+            Logger::Debug("Broadcasted to {} specific player(s)", sentCount);
+        }
+
+    } catch (const std::exception& e) {
+        Logger::Error("Error broadcasting to specific players: {}", e.what());
+    }
 }

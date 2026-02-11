@@ -97,7 +97,7 @@ private:
     
     // Current states
     ServerState last_confirmed_state_;
-    ServerState latest_predicted_state_;
+    mutable ServerState latest_predicted_state_;
     
     // Statistics
     PredictionStats stats_;

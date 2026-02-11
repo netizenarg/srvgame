@@ -1,29 +1,17 @@
 #pragma once
 
-#include <glm/glm.hpp>
+#include <algorithm>
+#include <cmath>
 #include <memory>
+#include <mutex>
 #include <vector>
 #include <unordered_map>
-#include "GameEntity.hpp"
 
-enum class NPCType {
-    // Hostile mobs
-    GOBLIN,
-    ORC,
-    DRAGON,
-    SLIME,
+#include <glm/glm.hpp>
 
-    // Friendly NPCs
-    VILLAGER,
-    MERCHANT,
-    QUEST_GIVER,
-    BLACKSMITH,
+#include "game/NPCEntity.hpp"
+#include "logging/Logger.hpp"
 
-    // Familiars (player companions)
-    WOLF_FAMILIAR,
-    OWL_FAMILIAR,
-    CAT_FAMILIAR
-};
 
 enum class NPCBehaviorState {
     IDLE,
@@ -35,79 +23,16 @@ enum class NPCBehaviorState {
     INTERACT
 };
 
-struct NPCStats {
-    float health = 100.0f;
-    float maxHealth = 100.0f;
-    float attackDamage = 10.0f;
-    float defense = 5.0f;
-    float speed = 5.0f;
-    float attackRange = 2.0f;
-    float detectionRange = 20.0f;
-    float followRange = 30.0f;
-};
-
-class NPCEntity : public GameEntity {
-public:
-    NPCEntity(NPCType type, const glm::vec3& position, uint64_t ownerId = 0);
-
-    //NPCType GetType() const { return type_; }
-    NPCBehaviorState GetBehaviorState() const { return behaviorState_; }
-    const NPCStats& GetStats() const { return stats_; }
-    NPCStats& GetStats() { return stats_; }
-    void SetStats(const NPCStats& stats) { stats_ = stats; }
-
-    void InitializeStatsForType(NPCType type);
-
-    void Update(float deltaTime);
-    void SetTarget(uint64_t targetId);
-    void TakeDamage(float damage, uint64_t attackerId);
-    void Heal(float amount);
-
-    // Behavior methods
-    void Patrol();
-    void ChaseTarget();
-    void Attack();
-    void FollowOwner();
-    void Flee();
-
-    // AI decision making
-    void MakeDecision();
-    float CalculateThreatLevel() const;
-
-    // Getters/Setters
-    uint64_t GetOwnerId() const { return ownerId_; }
-    void SetOwnerId(uint64_t ownerId) { ownerId_ = ownerId; }
-    uint64_t GetTargetId() const { return targetId_; }
-    void SetBehaviorState(NPCBehaviorState state) { behaviorState_ = state; }
-    void SetPatrolCenter(const glm::vec3& center) { patrolCenter_ = center; }
-    void SetPatrolRadius(float radius) { patrolRadius_ = radius; }
-    NPCStats& GetStats() { return stats_; }
-    void SetStats(const NPCStats& stats) { stats_ = stats; }
-
-    // Health check
-    bool IsAlive() const { return stats_.health > 0.0f; }
-    bool IsDead() const { return stats_.health <= 0.0f; }
-
-    // Serialization
-    nlohmann::json Serialize() const override;
-    void Deserialize(const nlohmann::json& data) override;
-
-private:
-    //NPCType type_;
-    NPCBehaviorState behaviorState_ = NPCBehaviorState::IDLE;
-    NPCStats stats_;
-
-    uint64_t ownerId_ = 0; // For familiars
-    uint64_t targetId_ = 0;
-
-    glm::vec3 patrolCenter_;
-    float patrolRadius_ = 10.0f;
-    float idleTime_ = 0.0f;
-    float attackCooldown_ = 0.0f;
-
-    // AI memory
-    std::unordered_map<uint64_t, float> threatMemory_; // entityId -> threat level
-};
+// struct NPCStats {
+//     float health = 100.0f;
+//     float maxHealth = 100.0f;
+//     float attackDamage = 10.0f;
+//     float defense = 5.0f;
+//     float speed = 5.0f;
+//     float attackRange = 2.0f;
+//     float detectionRange = 20.0f;
+//     float followRange = 30.0f;
+// };
 
 class NPCManager {
 public:

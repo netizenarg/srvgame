@@ -7,10 +7,20 @@
 #include <mutex>
 #include <unordered_map>
 #include <string>
-#include <sys/types.h>
 #include <unistd.h>
 #include <cstdint>
 #include <thread>
+#include <fcntl.h>
+#include <cstring>
+#include <csignal>
+#include <cerrno>
+#include <chrono>
+#include <array>
+#include <arpa/inet.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <sys/prctl.h>
+#include <sys/socket.h>
 
 class ProcessPool {
 public:

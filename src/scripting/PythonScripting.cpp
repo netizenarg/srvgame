@@ -1,12 +1,7 @@
-#include <filesystem>
-#include <chrono>
-#include <thread>
-
 #include "scripting/PythonScripting.hpp"
 
 namespace fs = std::filesystem;
 
-namespace PythonScripting {
 
 // =============== PythonModule Implementation ===============
 
@@ -14,16 +9,17 @@ PythonModule::PythonModule(const std::string& moduleName, const std::string& fil
     : moduleName_(moduleName), filePath_(filePath), module_(nullptr) {
 }
 
-PythonModule::~PythonModule() {
-    Unload();
+// Move constructor implementation
+PythonModule::PythonModule(PythonModule&& other) noexcept
+: moduleName_(std::move(other.moduleName_)),
+filePath_(std::move(other.filePath_)),
+module_(other.module_),
+lastError_(std::move(other.lastError_)) {
+    other.module_ = nullptr;
 }
 
-PythonModule::PythonModule(PythonModule&& other) noexcept
-    : moduleName_(std::move(other.moduleName_)),
-      filePath_(std::move(other.filePath_)),
-      module_(other.module_),
-      lastError_(std::move(other.lastError_)) {
-    other.module_ = nullptr;
+PythonModule::~PythonModule() {
+    Unload();
 }
 
 PythonModule& PythonModule::operator=(PythonModule&& other) noexcept {
@@ -33,6 +29,7 @@ PythonModule& PythonModule::operator=(PythonModule&& other) noexcept {
         filePath_ = std::move(other.filePath_);
         module_ = other.module_;
         lastError_ = std::move(other.lastError_);
+        lastError_.clear();
         other.module_ = nullptr;
     }
     return *this;
@@ -633,20 +630,27 @@ void PythonScripting::Shutdown() {
 
 bool PythonScripting::InitializePython() {
     try {
+        PyConfig config;
+        PyConfig_InitPythonConfig(&config);
+
         // Set Python home if specified
         if (!pythonHome_.empty()) {
-            Py_SetPythonHome(Py_DecodeLocale(pythonHome_.c_str(), nullptr));
+            //Py_SetPythonHome(Py_DecodeLocale(pythonHome_.c_str(), nullptr));
+            config.home = Py_DecodeLocale(pythonHome_.c_str(), nullptr);
         }
 
         // Initialize Python
-        Py_Initialize();
+        //Py_Initialize();
+        Py_InitializeFromConfig(&config);
+        PyConfig_Clear(&config);
+
         if (!Py_IsInitialized()) {
             Logger::Error("Failed to initialize Python interpreter");
             return false;
         }
 
         // Initialize threads
-        PyEval_InitThreads();
+        //PyEval_InitThreads(); //Py_DEPRECATED(3.9) PyAPI_FUNC(void)
 
         // Release GIL - we'll acquire it when needed
         PyThreadState* mainThread = PyEval_SaveThread();
@@ -993,5 +997,3 @@ std::vector<std::string> PythonScripting::GetRegisteredCallbacks() const {
 
     return result;
 }
-
-} // namespace PythonScripting

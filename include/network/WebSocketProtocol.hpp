@@ -1,13 +1,26 @@
 #pragma once
 
-#include <vector>
+#include <algorithm>
 #include <cstdint>
-#include <string>
 #include <functional>
+#include <iomanip>
 #include <memory>
+#include <random>
+#include <string>
+#include <sstream>
+#include <vector>
+
+#include <zlib.h>
 #include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
 #include <asio.hpp>
+#include <asio/buffers_iterator.hpp>
+#include <asio/ssl.hpp>
+#include <openssl/ssl.h>
+#include <openssl/sha.h>
+#include <openssl/evp.h>
+
+#include "logging/Logger.hpp"
 
 namespace WebSocketProtocol {
 
@@ -115,15 +128,16 @@ namespace WebSocketProtocol {
         uint16_t status_code{101};
         std::string status_text{"Switching Protocols"};
         std::unordered_map<std::string, std::string> headers;
-        
+
         std::string Serialize() const;
         static HandshakeResponse Parse(const std::string& response);
-        
+
         // Generate response from request
         static HandshakeResponse GenerateResponse(const HandshakeRequest& request,
                                                  const std::string& protocol = "",
                                                  const std::string& extensions = "");
-        
+        std::string GetHeader(const std::string& name) const;
+        void SetHeader(const std::string& name, const std::string& value);
         // Validate response
         bool Validate(const HandshakeRequest& request) const;
     };
@@ -178,7 +192,10 @@ namespace WebSocketProtocol {
         };
         
         Statistics GetStatistics() const;
-        
+
+        void ReadFramePayload(bool fin, uint8_t opcode, bool masked, uint64_t payload_length, size_t header_size);
+        void ProcessFrameData(bool fin, uint8_t opcode, bool masked, uint64_t payload_length, size_t header_size);
+
     protected:
         enum class State {
             HANDSHAKE,

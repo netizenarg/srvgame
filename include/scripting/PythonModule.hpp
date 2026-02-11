@@ -5,7 +5,6 @@
 #include <nlohmann/json.hpp>
 #include <mutex>
 
-namespace PythonScripting {
 
 class PythonModule {
 public:
@@ -63,5 +62,3 @@ private:
     void AcquireModule();
     void ReleaseModule();
 };
-
-} // namespace PythonScripting

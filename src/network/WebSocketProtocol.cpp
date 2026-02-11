@@ -1,13 +1,4 @@
-#include <openssl/sha.h>
-#include <openssl/evp.h>
-#include <zlib.h>
-#include <iomanip>
-#include <sstream>
-#include <algorithm>
-#include <random>
-
 #include "network/WebSocketProtocol.hpp"
-#include "logging/Logger.hpp"
 
 namespace WebSocketProtocol {
 
@@ -484,10 +475,18 @@ void WebSocketConnection::ReadFrame() {
             }
             
             // Parse basic header
-            const uint8_t* data = asio::buffer_cast<const uint8_t*>(self->read_buffer_.data());
-            uint8_t first_byte = data[0];
-            uint8_t second_byte = data[1];
-            
+            auto buffers = self->read_buffer_.data();
+            auto it = asio::buffers_begin(buffers);
+
+            // Check we have at least 2 bytes
+            if (std::distance(it, asio::buffers_end(buffers)) < 2) {
+                Logger::Error("Insufficient data for frame header");
+                throw std::runtime_error("Insufficient data for frame header");
+            }
+
+            uint8_t first_byte = *it;
+            uint8_t second_byte = *(++it);
+
             bool fin = (first_byte & 0x80) != 0;
             uint8_t opcode = first_byte & 0x0F;
             bool masked = (second_byte & 0x80) != 0;

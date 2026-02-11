@@ -1,14 +1,16 @@
 #pragma once
 
-#include <glm/glm.hpp>
 #include <vector>
+#include <cmath>
+#include <limits>
 #include <memory>
+#include <mutex>
 #include <unordered_set>
 #include <unordered_map>
-#include <mutex>
 #include <string>
 #include <cstdint>
-#include <limits>
+
+#include <glm/glm.hpp>
 
 #include "game/WorldChunk.hpp"
 
@@ -45,7 +47,10 @@ struct BoundingSphere {
     glm::vec3 center;
     float radius;
 
-    bool IsValid() const { return radius >= 0.0f && glm::all(glm::isfinite(center)); }
+    bool IsValid() const {
+        return radius >= 0.0f &&
+        std::isfinite(center.x) && std::isfinite(center.y) && std::isfinite(center.z);
+    }
     bool Intersects(const BoundingSphere& other) const;
     bool IntersectsRay(const glm::vec3& origin, const glm::vec3& direction, float& distance) const;
 };
@@ -54,9 +59,10 @@ struct BoundingBox {
     glm::vec3 min;
     glm::vec3 max;
 
-    bool IsValid() const { 
-        return glm::all(glm::isfinite(min)) && glm::all(glm::isfinite(max)) &&
-               glm::all(glm::lessThanEqual(min, max));
+    bool IsValid() const {
+        return std::isfinite(min.x) && std::isfinite(min.y) && std::isfinite(min.z) &&
+        std::isfinite(max.x) && std::isfinite(max.y) && std::isfinite(max.z) &&
+        glm::all(glm::lessThanEqual(min, max));
     }
     bool Intersects(const BoundingBox& other) const;
     bool IntersectsSphere(const glm::vec3& center, float radius) const;

@@ -1,10 +1,8 @@
-// main.cpp - Updated with ProcessPool message protocol configuration
-
-#include <iostream>
-#include <csignal>
-#include <thread>
-#include <chrono>
 #include <atomic>
+#include <chrono>
+#include <csignal>
+#include <iostream>
+#include <thread>
 
 #include "config/ConfigManager.hpp"
 #include "logging/Logger.hpp"
@@ -12,24 +10,13 @@
 #include "process/ProcessPool.hpp"
 #include "game/GameLogic.hpp"
 
-// Conditional include for database backend
-#include "database/Backend.hpp"
-#include "database/PostgreSQLBackend.hpp"
+#include "database/DbManager.hpp"
 
-#ifdef USE_CITUS
-#include "database/CitusClient.hpp"
-#endif
-
-// Forward declarations for missing dependencies
 class GameSession;
 class ConnectionManager;
 class PlayerManager;
 
 std::atomic<bool> g_shutdown(false);
-
-// Global ProcessPool instance (or you can make it a singleton)
-// For this example, we'll modify WorkerMain to accept ProcessPool as parameter
-// Since we can't easily pass it, we'll use an alternative approach
 
 void SignalHandler(int signal) {
     Logger::Info("Received signal {}, initiating shutdown...", signal);
@@ -42,7 +29,7 @@ void WorkerMain(int workerId, ProcessPool* processPool = nullptr) {
     
     // Use worker-specific logger initialization
     Logger::Initialize("Worker" + std::to_string(workerId));
-    Logger::Info("Worker {} starting 3D game world system", workerId);
+    Logger::Info("Worker {} starting game world system", workerId);
 
     // Initialize configuration
     if (!config.LoadConfig("config/server_config.json")) {
@@ -53,8 +40,8 @@ void WorkerMain(int workerId, ProcessPool* processPool = nullptr) {
     // Configure ProcessPool message protocol if processPool is provided
     if (processPool) {
         // Set message protocol configuration from config
-        uint32_t maxMessageSize = config.GetUInt32("process.max_message_size", 1048576); // 1MB default
-        uint32_t receiveTimeout = config.GetUInt32("process.receive_timeout_ms", 1000); // 1 second default
+        uint32_t maxMessageSize = config.GetInt("process.max_message_size", 1048576); // 1MB default
+        uint32_t receiveTimeout = config.GetInt("process.receive_timeout_ms", 1000); // 1 second default
         
         processPool->SetMaxMessageSize(maxMessageSize);
         processPool->SetReceiveTimeout(receiveTimeout);
@@ -65,60 +52,68 @@ void WorkerMain(int workerId, ProcessPool* processPool = nullptr) {
         Logger::Warn("Worker {}: ProcessPool not available for configuration", workerId);
     }
 
-    // Initialize database backend based on configuration
-    std::unique_ptr<DatabaseBackend> databaseBackend;
+    // Initialize database using the new DbManager interface
+    auto& dbManager = DbManager::GetInstance();
     
     std::string backendType = config.GetDatabaseBackend();
     Logger::Info("Worker {} using database backend: {}", workerId, backendType);
     
+    // Create configuration JSON object
+    nlohmann::json dbConfig;
+    dbConfig["host"] = config.GetDatabaseHost();
+    dbConfig["port"] = config.GetDatabasePort();
+    dbConfig["database"] = config.GetDatabaseName();
+    dbConfig["user"] = config.GetDatabaseUser();
+    dbConfig["password"] = config.GetDatabasePassword();
+    
+    // Add connection pool settings
+    dbConfig["max_connections"] = config.GetInt("database.max_connections", 20);
+    dbConfig["min_connections"] = config.GetInt("database.min_connections", 5);
+    dbConfig["connection_timeout_ms"] = config.GetInt("database.connection_timeout_ms", 5000);
+    
+    // Set backend type
     if (backendType == "citus") {
-#ifdef USE_CITUS
-        // Initialize Citus client
-        auto& dbClient = CitusClient::GetInstance();
+        // Set backend type
+        DbManager::DatabaseType dbType = DbManager::CITUS;
         
-        // Build connection string
-        std::string connInfo =
-            "host=" + config.GetDatabaseHost() +
-            " port=" + std::to_string(config.GetDatabasePort()) +
-            " dbname=" + config.GetDatabaseName() +
-            " user=" + config.GetDatabaseUser() +
-            " password=" + config.GetDatabasePassword();
-        
-        // Get worker nodes for Citus
+        // Add Citus worker nodes if configured
         std::vector<std::string> workerNodes = config.GetCitusWorkerNodes();
-        
-        if (!dbClient.Initialize(connInfo, workerNodes)) {
-            Logger::Error("Worker {} failed to initialize Citus database", workerId);
-            return;
+        if (!workerNodes.empty()) {
+            nlohmann::json nodesArray = nlohmann::json::array();
+            for (const auto& node : workerNodes) {
+                nodesArray.push_back(node);
+            }
+            dbConfig["worker_nodes"] = nodesArray;
         }
         
-        // Store backend for later use
-        databaseBackend = DatabaseBackend::CreateBackend("citus");
-#else
-        Logger::Error("Citus backend requested but not compiled with Citus support");
-        Logger::Error("Falling back to PostgreSQL backend");
-        databaseBackend = DatabaseBackend::CreateBackend("postgresql");
-#endif
+        // Set backend configuration
+        if (!dbManager.SetBackend(dbType, dbConfig)) {
+            Logger::Error("Worker {} failed to set Citus database backend", workerId);
+            return;
+        }
     } else {
         // Use PostgreSQL backend
-        databaseBackend = DatabaseBackend::CreateBackend("postgresql");
+        DbManager::DatabaseType dbType = DbManager::POSTGRESQL;
         
-        // Build connection string
-        std::string connInfo =
-            "host=" + config.GetDatabaseHost() +
-            " port=" + std::to_string(config.GetDatabasePort()) +
-            " dbname=" + config.GetDatabaseName() +
-            " user=" + config.GetDatabaseUser() +
-            " password=" + config.GetDatabasePassword();
-        
-        // Empty worker nodes for PostgreSQL
-        std::vector<std::string> workerNodes;
-        
-        if (!databaseBackend->Initialize(connInfo, workerNodes)) {
-            Logger::Error("Worker {} failed to initialize PostgreSQL database", workerId);
+        if (!dbManager.SetBackend(dbType, dbConfig)) {
+            Logger::Error("Worker {} failed to set PostgreSQL database backend", workerId);
             return;
         }
     }
+    
+    // Initialize the database manager
+    if (!dbManager.Initialize()) {
+        Logger::Error("Worker {} failed to initialize database", workerId);
+        return;
+    }
+    
+    // Connect to the database
+    if (!dbManager.Connect()) {
+        Logger::Error("Worker {} failed to connect to database", workerId);
+        return;
+    }
+    
+    Logger::Info("Worker {} database connection established successfully", workerId);
 
     // Initialize game logic with 3D world system
     auto& gameLogic = GameLogic::GetInstance();
@@ -135,17 +130,9 @@ void WorkerMain(int workerId, ProcessPool* processPool = nullptr) {
 
     gameLogic.SetWorldConfig(worldConfig);
     
-    // Pass database backend to game logic
-    gameLogic.SetDatabaseBackend(std::move(databaseBackend));
-    gameLogic.Initialize();
+    // Game logic will now use DbManager singleton directly instead of being passed a backend
 
-    // Preload world data if configured
-    if (config.ShouldPreloadWorld()) {
-        Logger::Info("Worker {} preloading world data...", workerId);
-        gameLogic.PreloadWorldData(config.GetWorldPreloadRadius());
-    }
-
-    // Create game server
+    // Initialize and run server
     GameServer server(config);
 
     // Set session factory - using lambda with necessary captures
@@ -198,9 +185,19 @@ void WorkerMain(int workerId, ProcessPool* processPool = nullptr) {
         return session;
     });
 
+    // Pass connection manager to game logic before initialization
+    gameLogic.SetConnectionManager(ConnectionManager::GetInstancePtr());
+    gameLogic.Initialize();
+
+    // Preload world data if configured
+    if (config.ShouldPreloadWorld()) {
+        Logger::Info("Worker {} preloading world data...", workerId);
+        gameLogic.PreloadWorldData(config.GetWorldPreloadRadius());
+    }
+
     // Initialize and run server
     if (server.Initialize()) {
-        Logger::Info("Worker {} 3D game server initialized on port {}", 
+        Logger::Info("Worker {} game server initialized on port {}",
                     workerId, config.GetServerPort());
 
         // Start background world maintenance thread
@@ -269,6 +266,11 @@ void WorkerMain(int workerId, ProcessPool* processPool = nullptr) {
     // Cleanup
     Logger::Info("Worker {} beginning cleanup...", workerId);
     gameLogic.Shutdown();
+    
+    // Disconnect and shutdown database connections
+    dbManager.Disconnect();
+    dbManager.Shutdown();
+    
     Logger::Info("Worker {} shutdown complete", workerId);
 }
 
@@ -287,7 +289,7 @@ int main(int argc, char* argv[]) {
     // Initialize logging
     Logger::Initialize();
 
-    Logger::Info("Starting 3D Game Server v2.0.0 with LogicCore System");
+    Logger::Info("Starting Game Server v0.0.1 with LogicCore System");
     Logger::Info("Database Backend: {}", config.GetDatabaseBackend());
     Logger::Info("World Seed: {}", config.GetWorldSeed());
     Logger::Info("View Distance: {} chunks", config.GetViewDistance());
@@ -298,8 +300,8 @@ int main(int argc, char* argv[]) {
     ProcessPool processPool(processCount);
 
     // Configure process pool message protocol from config
-    uint32_t maxMessageSize = config.GetUInt32("process.max_message_size", 1048576); // 1MB default
-    uint32_t receiveTimeout = config.GetUInt32("process.receive_timeout_ms", 1000); // 1 second default
+    uint32_t maxMessageSize = config.GetInt("process.max_message_size", 1048576); // 1MB default
+    uint32_t receiveTimeout = config.GetInt("process.receive_timeout_ms", 1000); // 1 second default
     
     processPool.SetMaxMessageSize(maxMessageSize);
     processPool.SetReceiveTimeout(receiveTimeout);
@@ -318,7 +320,7 @@ int main(int argc, char* argv[]) {
     processPool.SetWorkerMain(workerMainWithPool);
 
     // Initialize as master process
-    Logger::Info("Starting {} worker processes for 3D world", processCount);
+    Logger::Info("Starting {} worker processes for world", processCount);
     processPool.Run();
 
     // Example: Send test messages to workers using new protocol
@@ -334,7 +336,7 @@ int main(int argc, char* argv[]) {
             testMsg["from"] = "master";
             testMsg["timestamp"] = std::chrono::system_clock::now().time_since_epoch().count();
             testMsg["worker_id"] = i;
-            testMsg["message"] = "Welcome to the 3D game server!";
+            testMsg["message"] = "Welcome to the game server!";
             
             std::string serialized = testMsg.dump();
             
@@ -374,6 +376,29 @@ int main(int argc, char* argv[]) {
             
             processPool.SendToWorker(i, heartbeat.dump());
         }
+        
+        // Example: Broadcast server status to all players via workers
+        static int statusUpdateCount = 0;
+        statusUpdateCount++;
+        
+        if (statusUpdateCount % 10 == 0) { // Every 50 seconds
+            nlohmann::json serverStatus;
+            serverStatus["type"] = "server_status";
+            serverStatus["online_workers"] = processCount;
+            serverStatus["timestamp"] = std::chrono::system_clock::now().time_since_epoch().count();
+            
+            // Send broadcast command to all workers
+            nlohmann::json broadcastMsg;
+            broadcastMsg["type"] = "broadcast";
+            broadcastMsg["data"] = serverStatus;
+            
+            std::string broadcastSerialized = broadcastMsg.dump();
+            for (int i = 0; i < processCount; i++) {
+                processPool.SendToWorker(i, broadcastSerialized);
+            }
+            
+            Logger::Info("Master broadcasted server status to all workers");
+        }
     }
 
     // Stop messaging thread
@@ -385,6 +410,6 @@ int main(int argc, char* argv[]) {
     Logger::Info("Initiating graceful shutdown...");
     processPool.Shutdown();
 
-    Logger::Info("3D Game Server shutdown complete");
+    Logger::Info("Game Server shutdown complete");
     return 0;
 }

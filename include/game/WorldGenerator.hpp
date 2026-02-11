@@ -1,28 +1,30 @@
 #pragma once
 
-#include <glm/glm.hpp>
 #include <vector>
 #include <memory>
 #include <random>
 
+#include <glm/glm.hpp>
+
 #include "game/WorldChunk.hpp"
+
+struct GenerationConfig {
+    float terrainScale = 100.0f;
+    float terrainHeight = 50.0f;
+    int octaves = 4;
+    float persistence = 0.5f;
+    float lacunarity = 2.0f;
+    float waterLevel = 10.0f;
+    int seed = 12345;
+
+    // Biome settings
+    float forestThreshold = 0.6f;
+    float mountainThreshold = 0.8f;
+    float desertThreshold = -0.3f;
+};
 
 class WorldGenerator {
 public:
-    struct GenerationConfig {
-        float terrainScale = 100.0f;
-        float terrainHeight = 50.0f;
-        int octaves = 4;
-        float persistence = 0.5f;
-        float lacunarity = 2.0f;
-        float waterLevel = 10.0f;
-        int seed = 12345;
-
-        // Biome settings
-        float forestThreshold = 0.6f;
-        float mountainThreshold = 0.8f;
-        float desertThreshold = -0.3f;
-    };
 
     WorldGenerator(const GenerationConfig& config = GenerationConfig());
 

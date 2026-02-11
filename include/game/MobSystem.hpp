@@ -1,14 +1,19 @@
 // MobSystem.hpp
 #pragma once
 
-#include <glm/glm.hpp>
 #include <vector>
 #include <unordered_map>
 #include <chrono>
 #include <random>
 
+#include <glm/glm.hpp>
+
 #include "game/WorldChunk.hpp"
 #include "game/LootTable.hpp"
+
+//#include "game/NPCEntity.hpp"
+enum class NPCType;
+class NPCEntity;
 
 // Mob spawn zone
 struct MobSpawnZone {

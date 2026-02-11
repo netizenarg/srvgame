@@ -1,7 +1,6 @@
 #include <filesystem>
 #include "scripting/PythonModule.hpp"
 
-namespace PythonScripting {
 
 PythonModule::PythonModule(const std::string& moduleName, const std::string& filePath)
     : moduleName_(moduleName), filePath_(filePath), module_(nullptr) {
@@ -418,5 +417,3 @@ bool PythonModule::CheckPythonError() {
     
     return false;
 }
-
-} // namespace PythonScripting

@@ -1,15 +1,3 @@
-#include <sys/wait.h>
-#include <sys/prctl.h>
-#include <sys/socket.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <cstring>
-#include <csignal>
-#include <cerrno>
-#include <chrono>
-#include <array>
-#include <vector>
-
 #include "process/ProcessPool.hpp"
 #include "logging/Logger.hpp"
 
@@ -161,7 +149,7 @@ void ProcessPool::MasterProcess() {
 }
 
 void ProcessPool::CloseAllPipes() {
-    for (int i = 0; i < workerPipes_.size(); ++i) {
+    for (long unsigned int i = 0; i < workerPipes_.size(); ++i) {
         if (workerPipes_[i] != -1) {
             close(workerPipes_[i]);
             workerPipes_[i] = -1;
