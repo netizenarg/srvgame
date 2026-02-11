@@ -526,6 +526,22 @@ std::string ConfigManager::GetString(const std::string& key, const std::string& 
     }
 }
 
+std::vector<std::string> ConfigManager::GetStringArray(const std::string& key) const {
+    nlohmann::json j = nlohmann::json::parse(key);
+    std::vector<std::string> stringArray;
+    if (j.is_array()) {
+        for (const auto& item : j) {
+            if (item.is_string()) {
+                stringArray.push_back(item.get<std::string>());
+            } else {
+                // Convert non-strings to their string representation
+                stringArray.push_back(item.dump());
+            }
+        }
+    }
+    return stringArray;
+}
+
 nlohmann::json ConfigManager::GetJson(const std::string& key) const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
@@ -573,6 +589,7 @@ namespace {
             }
         } catch (const std::exception& e) {
             // Use defaults
+            Logger::Error("{}", e.what());
         }
 
         // Set defaults if not specified

@@ -1,10 +1,3 @@
-#include <iomanip>
-#include <openssl/err.h>
-#include <algorithm>
-#include <chrono>
-
-#include "logging/Logger.hpp"
-#include "config/ConfigManager.hpp"
 #include "network/GameSession.hpp"
 
 // Static member initialization
@@ -124,21 +117,35 @@ void GameSession::Stop() {
     if (closing_.exchange(true)) {
         return; // Already closing
     }
-    
+
     Logger::Debug("Stopping GameSession {}", sessionId_);
-    
+
     connected_ = false;
-    
+
     // Cancel all timers
+    try {
+        heartbeat_timer_.cancel();
+    } catch (const std::exception& e) {
+        Logger::Debug("Error cancelling heartbeat timer: {}", e.what());
+    }
+
+    try {
+        shutdown_timer_.cancel();
+    } catch (const std::exception& e) {
+        Logger::Debug("Error cancelling shutdown timer: {}", e.what());
+    }
+
+    try {
+        network_adaptation_timer_.cancel();
+    } catch (const std::exception& e) {
+        Logger::Debug("Error cancelling network adaptation timer: {}", e.what());
+    }
+
     std::error_code ec;
-    heartbeat_timer_.cancel(ec);
-    shutdown_timer_.cancel(ec);
-    network_adaptation_timer_.cancel(ec);
-    
     if (ec) {
         Logger::Debug("Error cancelling timers: {}", ec.message());
     }
-    
+
     // Close socket
     if (GetSocket().is_open()) {
         try {
@@ -146,7 +153,7 @@ void GameSession::Stop() {
             if (ec && ec != asio::error::not_connected) {
                 Logger::Debug("Error shutting down socket: {}", ec.message());
             }
-            
+
             GetSocket().close(ec);
             if (ec) {
                 Logger::Debug("Error closing socket: {}", ec.message());
@@ -155,7 +162,7 @@ void GameSession::Stop() {
             Logger::Error("Exception closing socket: {}", e.what());
         }
     }
-    
+
     // Notify close handler
     if (close_handler_) {
         try {
@@ -164,7 +171,7 @@ void GameSession::Stop() {
             Logger::Error("Error in close handler: {}", e.what());
         }
     }
-    
+
     Logger::Info("GameSession {} stopped", sessionId_);
 }
 
@@ -178,8 +185,13 @@ bool GameSession::IsConnected() const {
 
 asio::ip::tcp::endpoint GameSession::GetRemoteEndpoint() const {
     try {
-        if (GetSocket().is_open()) {
-            return GetSocket().remote_endpoint();
+        // if (GetSocket().is_open()) {
+        //     return GetSocket().remote_endpoint();
+        // }
+        const asio::ip::tcp::socket& socket = ssl_stream_ ?
+        ssl_stream_->next_layer() : socket_;
+        if (socket.is_open()) {
+            return socket.remote_endpoint();
         }
     } catch (const std::exception& e) {
         Logger::Debug("Failed to get remote endpoint: {}", e.what());
@@ -743,7 +755,8 @@ void GameSession::CheckNetworkConditions() {
     
     // Adapt update rate based on connection quality
     uint32_t optimal_rate = network_monitor_.CalculateOptimalUpdateRate();
-    
+    Logger::Debug("Session optimal_rate: {}",optimal_rate);
+
     // Log connection quality changes
     static auto last_quality = NetworkQualityMonitor::ConnectionQuality::EXCELLENT;
     if (quality != last_quality) {
@@ -1239,10 +1252,10 @@ void GameSession::CancelGracefulShutdown() {
     Logger::Info("Cancelling graceful shutdown for session {}", sessionId_);
     graceful_shutdown_ = false;
     
-    std::error_code ec;
-    shutdown_timer_.cancel(ec);
-    if (ec) {
-        Logger::Debug("Error cancelling shutdown timer: {}", ec.message());
+    try {
+        shutdown_timer_.cancel();
+    } catch (const std::exception& e) {
+        Logger::Debug("Error cancelling shutdown timer: {}", e.what());
     }
 }
 
@@ -1327,6 +1340,13 @@ void GameSession::SendPositionCorrection(const glm::vec3& position, const glm::v
 // =============== Private Helper Methods ===============
 
 asio::ip::tcp::socket& GameSession::GetSocket() {
+    if (ssl_stream_) {
+        return ssl_stream_->next_layer();
+    }
+    return socket_;
+}
+
+const asio::ip::tcp::socket& GameSession::GetSocket() const {
     if (ssl_stream_) {
         return ssl_stream_->next_layer();
     }

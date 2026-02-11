@@ -1,9 +1,14 @@
 #pragma once
 
-#include <vector>
+#include <cstring>
 #include <cstdint>
+#include <vector>
+#include <stdexcept>
 #include <string>
+#include <zlib.h>
+
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <nlohmann/json.hpp>
 
 namespace BinaryProtocol {
@@ -120,7 +125,7 @@ namespace BinaryProtocol {
         void WriteString(const std::string& value);
         void WriteBytes(const uint8_t* data, size_t length);
         void WriteVector3(const glm::vec3& vec);
-        void WriteQuaternion(const glm::quat& quat);
+        void WriteQuaternion(const glm::quat& quaternion);
         void WriteJson(const nlohmann::json& json);
         
         // Get the buffer

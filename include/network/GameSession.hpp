@@ -1,28 +1,156 @@
 #pragma once
 
-#include <asio.hpp>
-#include <asio/ssl.hpp>
-#include <memory>
-#include <string>
-#include <functional>
-#include <nlohmann/json.hpp>
+#include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <deque>
+#include <functional>
+#include <iomanip>
+#include <map>
+#include <memory>
 #include <mutex>
+#include <string>
 #include <queue>
 #include <set>
-#include <map>
-#include <deque>
-#include <chrono>
 #include <vector>
 
-#include "BinaryProtocol.hpp"
-#include "NetworkQualityMonitor.hpp"
-#include "PredictionSystem.hpp"
+#include <openssl/err.h>
+#include <asio.hpp>
+#include <asio/ssl.hpp>
+#include <nlohmann/json.hpp>
 
-// Supporting struct definitions (unchanged)
-struct SessionStats { /* ... */ };
-struct SessionMetrics { /* ... */ };
-struct RateLimitConfig { /* ... */ };
+#include "logging/Logger.hpp"
+#include "config/ConfigManager.hpp"
+#include "network/BinaryProtocol.hpp"
+#include "network/NetworkQualityMonitor.hpp"
+#include "network/PredictionSystem.hpp"
+
+struct SessionStats {
+    // Message statistics
+    uint64_t messages_received{0};
+    uint64_t messages_sent{0};
+    uint64_t bytes_received{0};
+    uint64_t bytes_sent{0};
+
+    // Error statistics
+    uint64_t connection_errors{0};
+    uint64_t authentication_failures{0};
+    uint64_t rate_limit_exceeded{0};
+    uint64_t protocol_errors{0};
+    uint64_t checksum_errors{0};
+    uint64_t compression_errors{0};
+
+    // Time tracking
+    std::chrono::steady_clock::time_point last_message_received;
+    std::chrono::steady_clock::time_point last_message_sent;
+    std::chrono::steady_clock::time_point connection_start_time;
+
+    // Network statistics
+    uint64_t retransmissions{0};
+    uint64_t acknowledgments_received{0};
+    uint64_t acknowledgments_sent{0};
+    uint64_t packets_lost{0};
+
+    // Performance statistics
+    uint64_t max_write_queue_size_reached{0};
+    uint64_t binary_messages_processed{0};
+    uint64_t json_messages_processed{0};
+
+    // Session lifecycle statistics
+    uint64_t reconnections{0};
+    uint64_t graceful_shutdowns{0};
+    uint64_t force_disconnects{0};
+};
+
+struct SessionMetrics {
+    // Basic metrics
+    uint64_t session_id{0};
+    std::string remote_endpoint;
+    uint64_t connected_time_seconds{0};
+    bool is_connected{false};
+    bool is_authenticated{false};
+    int64_t player_id{0};
+
+    // Throughput metrics
+    uint64_t messages_received{0};
+    uint64_t messages_sent{0};
+    uint64_t bytes_received{0};
+    uint64_t bytes_sent{0};
+    double receive_rate{0.0};        // messages per second
+    double send_rate{0.0};           // messages per second
+    double data_receive_rate{0.0};   // bytes per second
+    double data_send_rate{0.0};      // bytes per second
+
+    // Network quality metrics
+    uint64_t average_latency{0};
+    uint64_t min_latency{0};
+    uint64_t max_latency{0};
+    double packet_loss{0.0};         // percentage
+    double jitter{0.0};              // milliseconds
+
+    // Resource usage metrics
+    size_t pending_message_count{0};
+    size_t memory_usage_bytes{0};
+    double cpu_usage_percent{0.0};
+
+    // Quality metrics
+    double compression_ratio{0.0};   // (1 - compressed/original)
+    uint64_t joined_groups{0};
+    uint64_t custom_events_processed{0};
+
+    // Error metrics
+    uint64_t rate_limit_exceeded{0};
+    uint64_t authentication_attempts{0};
+    uint64_t protocol_negotiation_time_ms{0};
+
+    // Configuration metrics
+    int max_write_queue_size{0};
+    int heartbeat_interval_seconds{0};
+    int session_timeout_seconds{0};
+    bool compression_enabled{false};
+    bool encryption_enabled{false};
+};
+
+struct RateLimitConfig {
+    // Token bucket parameters
+    int messages_per_second{100};      // Rate limit: messages per second
+    int burst_size{200};               // Maximum burst size
+    int tokens{0};                     // Current tokens available
+    int refill_rate_ms{1000};          // Token refill interval in milliseconds
+
+    // Tracking
+    std::chrono::steady_clock::time_point last_refill;
+    std::chrono::steady_clock::time_point last_violation;
+
+    // Enforcement parameters
+    bool enabled{true};                // Whether rate limiting is enabled
+    int violation_threshold{10};       // Number of violations before action
+    int violation_window_seconds{60};  // Time window for violation counting
+    int cool_down_period_seconds{300}; // Cool down period after limit
+    bool graceful_enforcement{true};   // Whether to use graceful enforcement
+
+    // Statistics
+    uint64_t total_requests{0};
+    uint64_t allowed_requests{0};
+    uint64_t denied_requests{0};
+    uint64_t consecutive_violations{0};
+
+    // Enforcement levels
+    std::vector<std::string> enforcement_levels{
+        "warn", "slowdown", "disconnect"
+    };
+    std::string current_level{"warn"};
+
+    // Client-specific adjustments
+    double quality_factor{1.0};        // Adjust rate based on network quality
+    bool adaptive_rate_limit{true};    // Whether to adapt based on conditions
+    int min_rate_limit{10};            // Minimum messages per second
+    int max_rate_limit{1000};          // Maximum messages per second
+
+    // Exemption parameters
+    std::set<uint16_t> exempt_message_types{}; // Message types exempt from rate limiting
+    bool exempt_authenticated_users{false};    // Whether authenticated users are exempt
+};
 
 class GameSession : public std::enable_shared_from_this<GameSession> {
 public:
@@ -44,16 +172,32 @@ public:
     bool IsEncrypted() const { return ssl_stream_ != nullptr; }
 
     // Binary protocol methods
+    void SendPing();
+    void SendPong();
     void SendBinary(uint16_t message_type, const std::vector<uint8_t>& data);
     void SendBinary(uint16_t message_type, const void* data, size_t length);
     void SendBinaryWithAck(uint16_t message_type, const std::vector<uint8_t>& data);
-    
+    void SendBinaryError(uint16_t message_type, const std::string& error_message, int code);
+
     // JSON compatibility (for backward compatibility)
     void Send(const nlohmann::json& message);
     void SendRaw(const std::string& data);
     void SendError(const std::string& message, int code);
     void SendSuccess(const std::string& message, const nlohmann::json& data = {});
-    
+    void SendWorldChunk(int chunkX, int chunkZ, const nlohmann::json& chunkData);
+    void SendEntityUpdate(uint64_t entityId, const nlohmann::json& entityData);
+    void SendEntitySpawn(uint64_t entityId, const nlohmann::json& spawnData);
+    void SendEntityDespawn(uint64_t entityId);
+    void SendCollisionEvent(uint64_t entityId1, uint64_t entityId2, const glm::vec3& point);
+    void SyncPlayerState(const glm::vec3& position, const glm::vec3& rotation, const glm::vec3& velocity);
+    void SendNearbyEntities(const std::vector<nlohmann::json>& entities);
+    void SendNPCInteraction(uint64_t npcId, const std::string& interactionType, const nlohmann::json& data);
+    void SendCompressedWorldData(const std::vector<uint8_t>& compressedData);
+    void HandleWorldRequest(const nlohmann::json& data);
+    void HandleEntityInteraction(const nlohmann::json& data);
+    void HandleMovementUpdate(const nlohmann::json& data);
+    void HandleFamiliarCommand(const nlohmann::json& data);
+
     // Protocol negotiation
     void StartProtocolNegotiation();
     
@@ -62,7 +206,7 @@ public:
     NetworkQualityMonitor& GetNetworkMonitor() { return network_monitor_; }
     
     // Prediction system
-    PredictionSystem& GetPredictionSystem() { return prediction_system_; }
+    PredictionSystem& GetPredictionSystem();
     
     // Message handling with binary support
     using BinaryMessageHandler = std::function<void(uint16_t, const std::vector<uint8_t>&)>;
@@ -164,11 +308,11 @@ private:
     // Core networking
     asio::ip::tcp::socket socket_;
     std::shared_ptr<asio::ssl::context> ssl_context_;
-    std::unique_ptr<asio::ssl::stream<asio::ip::tcp::socket>> ssl_stream_;
-    
+    mutable std::unique_ptr<asio::ssl::stream<asio::ip::tcp::socket>> ssl_stream_;
+
     asio::streambuf read_buffer_;
     std::queue<std::vector<uint8_t>> write_queue_;
-    std::mutex write_mutex_;
+    mutable std::mutex write_mutex_;
     
     // Binary protocol state
     std::unordered_map<uint16_t, BinaryMessageHandler> binary_handlers_;
@@ -272,5 +416,6 @@ private:
     
     // Helper methods
     asio::ip::tcp::socket& GetSocket();
+    const asio::ip::tcp::socket& GetSocket() const;
     void HandleNetworkError(std::error_code ec);
 };

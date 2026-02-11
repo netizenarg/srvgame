@@ -1,14 +1,19 @@
 #pragma once
 
-#include <glm/glm.hpp>
+#include <algorithm>
+#include <cmath>
+#include <chrono>
 #include <memory>
-#include <unordered_map>
-#include <vector>
 #include <mutex>
+#include <vector>
+#include <unordered_map>
+
+#include <glm/glm.hpp>
 
 #include "game/GameEntity.hpp"
 #include "game/PlayerEntity.hpp"
 #include "game/NPCEntity.hpp"
+#include "logging/Logger.hpp"
 
 class EntityManager {
 public:

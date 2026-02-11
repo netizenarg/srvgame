@@ -4,15 +4,51 @@ project(GameServer)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+if(NOT TARGET asio::asio)
+    message(STATUS "ASIO not found via find_package, using manual configuration")
+    set(ASIO_DIR "${CMAKE_SOURCE_DIR}/thirdparty/asio")
+    set(ASIO_INCLUDE_DIRS "${ASIO_DIR}/asio/include")
+    add_library(asio INTERFACE)
+    target_include_directories(asio INTERFACE ${ASIO_INCLUDE_DIRS})
+    target_compile_definitions(asio INTERFACE ASIO_STANDALONE)
+    add_library(asio::asio ALIAS asio)
+else()
+    message(STATUS "ASIO found via find_package")
+endif()
+
+set(GLM_DIR "${CMAKE_SOURCE_DIR}/thirdparty/glm")
+set(GLM_INCLUDE_DIRS "${GLM_DIR}")
+
+find_package(nlohmann_json 3.2.0 QUIET)
+if(NOT nlohmann_json_FOUND)
+    message(WARNING "nlohmann_json not found, using FetchContent...")
+    include(FetchContent)
+    FetchContent_Declare(
+        nlohmann_json
+        GIT_REPOSITORY https://github.com/nlohmann/json.git
+        GIT_TAG v3.11.2
+    )
+    FetchContent_MakeAvailable(nlohmann_json)
+endif()
+
+find_package(spdlog 1.13.0 QUIET)
+if(NOT spdlog_FOUND)
+    # Fall back to cloned version
+    message(STATUS "System spdlog not found, using local clone")
+    set(SPDLOG_DIR "${CMAKE_SOURCE_DIR}/thirdparty/spdlog")
+    add_subdirectory(${SPDLOG_DIR} EXCLUDE_FROM_ALL)
+endif()
+
 # Option for Citus support
 option(USE_CITUS "Enable Citus distributed database support" OFF)
 
 # Find dependencies
 find_package(OpenGL REQUIRED)
-find_package(glm REQUIRED)
-find_package(asio REQUIRED)
-find_package(nlohmann_json REQUIRED)
 find_package(PostgreSQL REQUIRED)
+find_package(Python3 REQUIRED COMPONENTS Development)
+#find_package(glm REQUIRED)
+#find_package(asio REQUIRED)
+#find_package(nlohmann_json REQUIRED)
 
 # Find zlib for compression
 find_package(ZLIB REQUIRED)
@@ -61,6 +97,9 @@ set(LOGIC_CORE_SOURCES
     src/game/LogicWorld.cpp
     src/game/LogicEntity.cpp
     src/game/GameLogic.cpp
+    src/game/EntityManager.cpp
+    src/game/PlayerEntity.cpp
+    src/game/NPCEntity.cpp
 )
 
 # Loot system source files
@@ -78,21 +117,17 @@ set(WORLD_SOURCES
     src/game/MobSystem.cpp
     src/game/GameEntity.cpp
     src/game/CollisionSystem.cpp
-    src/game/EntityManager.cpp
-    ${LOOT_SOURCES}
 )
 
 # Database system
 set(DATABASE_SOURCES
-    src/database/Pool.cpp
-    src/database/Backend.cpp
-    src/database/PostgreSQLBackend.cpp
+    src/database/DbManager.cpp
+    src/database/PostgreSqlClient.cpp
 )
 
 if(USE_CITUS)
     message(STATUS "Building with Citus support")
     list(APPEND DATABASE_SOURCES src/database/CitusClient.cpp)
-    list(APPEND DATABASE_SOURCES src/database/CitusBackend.cpp)
     add_definitions(-DUSE_CITUS=1)
 else()
     message(STATUS "Building without Citus (PostgreSQL only)")
@@ -118,20 +153,22 @@ add_executable(gameserver
     ${SCRIPTING_SOURCES}
     ${NETWORK_SOURCES}
     ${LOGIC_CORE_SOURCES}
+    ${LOOT_SOURCES}
     ${WORLD_SOURCES}
     ${DATABASE_SOURCES}
 )
 
 # Link libraries
-target_link_libraries(gameserver
+target_link_libraries(gameserver PRIVATE
     ${OPENGL_LIBRARIES}
     ${CMAKE_THREAD_LIBS_INIT}
-    asio::asio
-    nlohmann_json::nlohmann_json
     ${PostgreSQL_LIBRARIES}
     ${ZLIB_LIBRARIES}
+    asio::asio
+    nlohmann_json::nlohmann_json
     OpenSSL::SSL
     OpenSSL::Crypto
+    Python3::Python
 )
 
 # Compiler flags

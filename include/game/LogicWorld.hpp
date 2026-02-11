@@ -1,12 +1,18 @@
 #pragma once
 
-#include <glm/glm.hpp>
-#include <unordered_map>
+#include <cmath>
 #include <memory>
 #include <mutex>
+#include <unordered_map>
 
+#include <glm/glm.hpp>
+
+#include "config/ConfigManager.hpp"
+#include "logging/Logger.hpp"
 #include "game/WorldChunk.hpp"
 #include "game/WorldGenerator.hpp"
+
+#include "database/DbManager.hpp"
 
 class LogicWorld {
 public:
@@ -28,6 +34,10 @@ public:
     void Initialize(const WorldConfig& config);
     void Shutdown();
 
+    void SetDatabaseBackend(std::shared_ptr<DatabaseBackend> backend) {
+        databaseBackend_ = backend;
+    }
+
     // Chunk management
     std::shared_ptr<WorldChunk> GetOrCreateChunk(int chunkX, int chunkZ);
     void UnloadDistantChunks(const glm::vec3& centerPosition, float keepRadius = 200.0f);
@@ -47,6 +57,8 @@ public:
     void SaveChunkData();
 
 private:
+    std::shared_ptr<DatabaseBackend> databaseBackend_;
+
     WorldConfig worldConfig_;
     std::unique_ptr<WorldGenerator> worldGenerator_;
     std::unordered_map<std::string, std::shared_ptr<WorldChunk>> loadedChunks_;

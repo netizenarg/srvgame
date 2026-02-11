@@ -1,8 +1,3 @@
-#include <cmath>
-
-#include "config/ConfigManager.hpp"
-#include "logging/Logger.hpp"
-#include "database/CitusClient.hpp"
 #include "game/LogicWorld.hpp"
 
 LogicWorld::LogicWorld() {
@@ -16,7 +11,7 @@ LogicWorld::~LogicWorld() {
 void LogicWorld::Initialize(const WorldConfig& config) {
     worldConfig_ = config;
     
-    WorldGenerator::GenerationConfig genConfig;
+    GenerationConfig genConfig;
     genConfig.seed = worldConfig_.seed;
     genConfig.terrainScale = worldConfig_.terrainScale;
     genConfig.terrainHeight = worldConfig_.maxTerrainHeight;
@@ -40,14 +35,14 @@ std::string LogicWorld::GetChunkKey(int chunkX, int chunkZ) const {
 
 std::shared_ptr<WorldChunk> LogicWorld::GetOrCreateChunk(int chunkX, int chunkZ) {
     std::string chunkKey = GetChunkKey(chunkX, chunkZ);
-    
+
     std::lock_guard<std::mutex> lock(chunksMutex_);
-    
+
     auto it = loadedChunks_.find(chunkKey);
     if (it != loadedChunks_.end()) {
         return it->second;
     }
-    
+
     if (activeChunkCount_ >= worldConfig_.maxActiveChunks) {
         if (!loadedChunks_.empty()) {
             auto first = loadedChunks_.begin();
@@ -55,17 +50,20 @@ std::shared_ptr<WorldChunk> LogicWorld::GetOrCreateChunk(int chunkX, int chunkZ)
             activeChunkCount_--;
         }
     }
-    
-    auto chunk = worldGenerator_->GenerateChunk(chunkX, chunkZ);
-    if (!chunk) {
+
+    // Generate a unique_ptr, then convert to shared_ptr
+    std::unique_ptr<WorldChunk> uniqueChunk = worldGenerator_->GenerateChunk(chunkX, chunkZ);
+    if (!uniqueChunk) {
         Logger::Error("Failed to generate chunk [{}, {}]", chunkX, chunkZ);
         return nullptr;
     }
-    
+
+    // Convert to shared_ptr and store in map
+    std::shared_ptr<WorldChunk> chunk = std::move(uniqueChunk);
     loadedChunks_[chunkKey] = chunk;
     activeChunkCount_++;
-    
-    Logger::Debug("Generated chunk [{}, {}], total: {}", chunkX, chunkZ, activeChunkCount_);
+
+    Logger::Debug("Generated chunk [{}, {}], total: {}", chunkX, chunkZ, activeChunkCount_.load());
     return chunk;
 }
 
@@ -130,12 +128,14 @@ BiomeType LogicWorld::GetBiomeAt(float x, float z) const {
 
 void LogicWorld::SaveChunkData() {
     std::lock_guard<std::mutex> lock(chunksMutex_);
-    auto& dbClient = CitusClient::GetInstance();
-    
+    if (!databaseBackend_) {
+        Logger::Error("No database backend configured");
+        return;
+    }
     for (const auto& [key, chunk] : loadedChunks_) {
         try {
             nlohmann::json chunkData = chunk->Serialize();
-            dbClient.SaveChunkData(chunk->GetChunkX(), chunk->GetChunkZ(), chunkData);
+            databaseBackend_->SaveChunkData(chunk->GetChunkX(), chunk->GetChunkZ(), chunkData);
         } catch (const std::exception& e) {
             Logger::Error("Failed to save chunk [{}, {}]: {}",
                          chunk->GetChunkX(), chunk->GetChunkZ(), e.what());

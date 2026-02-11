@@ -1,12 +1,3 @@
-#include <cmath>
-#include <random>
-#include <chrono>
-
-#include "config/ConfigManager.hpp"
-#include "logging/Logger.hpp"
-#include "database/CitusClient.hpp"
-#include "scripting/PythonScripting.hpp"
-#include "network/ConnectionManager.hpp"
 #include "game/LogicCore.hpp"
 
 // =============== Static Members ===============
@@ -26,7 +17,7 @@ LogicCore& LogicCore::GetInstance() {
 LogicCore::LogicCore()
     : playerManager_(PlayerManager::GetInstance()),
       dbClient_(CitusClient::GetInstance()),
-      pythonScripting_(PythonScripting::PythonScripting::GetInstance()),
+      pythonScripting_(PythonScripting::GetInstance()),
       running_(false) {
     
     rng_.seed(std::random_device()());
@@ -59,12 +50,11 @@ void LogicCore::Initialize() {
         if (pythonScripting_.Initialize()) {
             Logger::Info("Python scripting initialized");
             RegisterPythonEventHandlers();
-            
+
             bool hotReloadEnabled = config.GetBool("python.hot_reload", true);
             if (hotReloadEnabled) {
                 std::string scriptDir = config.GetString("python.script_dir", "./scripts");
-                scriptHotReloader_ = std::make_unique<PythonScripting::ScriptHotReloader>(
-                    scriptDir, 2000);
+                scriptHotReloader_ = std::make_unique<ScriptHotReloader>(scriptDir, 2000);
                 scriptHotReloader_->Start();
             }
         } else {
@@ -297,6 +287,7 @@ void LogicCore::SendBinaryToSession(uint64_t sessionId, uint16_t messageType, co
 // =============== Python Scripting ===============
 void LogicCore::FirePythonEvent(const std::string& eventName, const nlohmann::json& data) {
     if (pythonEnabled_) {
+        Logger::Debug("LogicCore::FirePythonEvent: {}", eventName);
         pythonScripting_.FireEvent(eventName, data);
     }
 }

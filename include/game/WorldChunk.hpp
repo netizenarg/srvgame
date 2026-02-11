@@ -5,9 +5,19 @@
 #include <cstdint>
 #include <memory>
 #include <unordered_set>
+
 #include <nlohmann/json.hpp>
 
-#include "game/ChunkLOD.hpp"
+struct LODConfig;
+class LODChunk;
+
+enum class ChunkLOD {
+    HIGH = 0,      // Full detail (0-50 units)
+    MEDIUM = 1,    // Reduced detail (50-150 units)
+    LOW = 2,       // Minimal detail (150-500 units)
+    BILLBOARD = 3, // Impostors (500+ units)
+    NONE = 4       // Not visible
+};
 
 enum class BiomeType {
     PLAINS = 0,

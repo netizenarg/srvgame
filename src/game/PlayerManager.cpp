@@ -1,10 +1,3 @@
-#include <algorithm>
-#include <cmath>
-#include <chrono>
-
-#include "logging/Logger.hpp"
-#include "database/CitusClient.hpp"
-#include "game/RAIIThread.hpp"
 #include "game/PlayerManager.hpp"
 
 // =============== Player Implementation ===============
@@ -1160,7 +1153,7 @@ void PlayerManager::CleanupLoop() {
 
 // =============== Player Statistics ===============
 
-PlayerManager::PlayerStatsInfo PlayerManager::GetPlayerStats(int64_t playerId) const {
+PlayerStats PlayerManager::GetPlayerStats(int64_t playerId) const {
     std::lock_guard<std::mutex> lock(statsMutex_);
 
     auto it = playerStats_.find(playerId);
@@ -1168,11 +1161,11 @@ PlayerManager::PlayerStatsInfo PlayerManager::GetPlayerStats(int64_t playerId) c
         return it->second;
     }
 
-    return PlayerStatsInfo{};
+    return PlayerStats{};
 }
 
-PlayerManager::GlobalStats PlayerManager::GetGlobalStats() const {
-    GlobalStats stats;
+GlobalPlayerStats PlayerManager::GetGlobalPlayerStats() const {
+    GlobalPlayerStats stats;
 
     stats.total_players = GetPlayerCount();
     stats.online_players = GetOnlinePlayerCount();
@@ -1208,7 +1201,7 @@ PlayerManager::GlobalStats PlayerManager::GetGlobalStats() const {
     return stats;
 }
 
-void PlayerManager::PrintStats() const {
+void PlayerManager::PrintStats() {
     auto stats = GetGlobalStats();
 
     Logger::Info("=== Player Manager Statistics ===");

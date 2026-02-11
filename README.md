@@ -37,39 +37,39 @@ GameServer is a sophisticated, game server designed for massively multiplayer on
 ## Architecture
 
 ### Core Components
-┌─────────────────────────────────────────────────────────┐
-│                    Master Process                       │
-│    ┌─────────────┐  ┌─────────────┐  ┌─────────────┐    │
-│    │ Worker #1   │  │ Worker #2   │  │ Worker #N   │    │
-│    │ ┌─────────┐ │  │ ┌─────────┐ │  │ ┌─────────┐ │    │
-│    │ │GameLogic│ │  │ │GameLogic│ │  │ │GameLogic│ │    │
-│    │ │ World   │ │  │ │ World   │ │  │ │ World   │ │    │
-│    │ │ Entities│ │  │ │ Entities│ │  │ │ Entities│ │    │
-│    │ │ Network │ │  │ │ Network │ │  │ │ Network │ │    │
-│    │ └─────────┘ │  │ └─────────┘ │  │ └─────────┘ │    │
-│    └─────────────┘  └─────────────┘  └─────────────┘    │
-└─────────────────────────────────────────────────────────┘
-            │                │                │
-            ▼                ▼                ▼
-┌─────────────────────────────────────────────────────────┐
-│              Distributed Database (Citus)               │
-└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────┐
+│                  Master Process                     │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  │
+│  │ Worker #1   │  │ Worker #2   │  │ Worker #N   │  │
+│  │ ┌─────────┐ │  │ ┌─────────┐ │  │ ┌─────────┐ │  │
+│  │ │GameLogic│ │  │ │GameLogic│ │  │ │GameLogic│ │  │
+│  │ │ World   │ │  │ │ World   │ │  │ │ World   │ │  │
+│  │ │ Entities│ │  │ │ Entities│ │  │ │ Entities│ │  │
+│  │ │ Network │ │  │ │ Network │ │  │ │ Network │ │  │
+│  │ └─────────┘ │  │ └─────────┘ │  │ └─────────┘ │  │
+│  └─────────────┘  └─────────────┘  └─────────────┘  │
+└─────────────────────────────────────────────────────┘
+          │                │                │
+          ▼                ▼                ▼
+┌─────────────────────────────────────────────────────┐
+│           Distributed Database (Citus)              │
+└─────────────────────────────────────────────────────┘
 
 
 ### Network Protocol Stack
-┌─────────────────────────────────────────────────────┐
-│                                   Application Layer │
-│ • Game Logic Messages • Chat • Inventory • Combat   │
-├─────────────────────────────────────────────────────┤
-│                               Binary Protocol Layer │
-│ • Message Serialization • Compression • Encryption  │
-├─────────────────────────────────────────────────────┤
-│                           Transport Layer (TCP/SSL) │
-│ • Reliable Delivery • Flow Control • Congestion     │
-├─────────────────────────────────────────────────────┤
-│                            Session Management Layer │
-│ • Connection Pooling • Authentication • Rate Limit  │
-└─────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────┐
+│                               Application Layer │
+│ •Game Logic Messages •Chat •Inventory •Combat   │
+├─────────────────────────────────────────────────┤
+│                           Binary Protocol Layer │
+│ •Message Serialization •Compression •Encryption │
+├─────────────────────────────────────────────────┤
+│                       Transport Layer (TCP/SSL) │
+│ • Reliable Delivery • Flow Control • Congestion │
+├─────────────────────────────────────────────────┤
+│                        Session Management Layer │
+│ •Connection Pooling •Authentication •Rate Limit │
+└─────────────────────────────────────────────────┘
 
 
 ## Technology Stack
@@ -174,13 +174,15 @@ Client ↔ Server Communication
 │ ├── Human-readable format
 │ ├── Easy debugging and testing
 │ ├── Slower, higher bandwidth
-│ └── Used for configuration, chat, admin commands
+│ └── Used for configuration,
+│     chat, admin commands
 │
-└── Binary Protocol (Production)
+├── Binary Protocol (Production)
 ├── High-performance binary format
 ├── Minimal bandwidth usage
 ├── Fast serialization/deserialization
-└── Used for real-time gameplay, entity updates, world data
+└── Used for real-time gameplay,
+    entity updates, world data
 
 
 ### Protocol Features

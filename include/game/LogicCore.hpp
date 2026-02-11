@@ -1,22 +1,31 @@
 #pragma once
 
-#include <nlohmann/json.hpp>
+#include <atomic>
+#include <chrono>
+#include <cmath>
+#include <condition_variable>
+#include <deque>
 #include <functional>
-#include <unordered_map>
-#include <vector>
 #include <memory>
 #include <mutex>
-#include <atomic>
-#include <thread>
-#include <condition_variable>
 #include <queue>
-#include <chrono>
+#include <random>
+#include <unordered_map>
+#include <vector>
+#include <thread>
 
-#include "game/PlayerManager.hpp"
-#include "scripting/PythonScripting.hpp"
+#include <nlohmann/json.hpp>
+
 #include "network/ConnectionManager.hpp"
 #include "network/BinaryProtocol.hpp"
-#include "game/RAIIThread.hpp"
+//#include "config/ConfigManager.hpp"
+//#include "logging/Logger.hpp"
+//#include "database/DbManager.hpp"
+#include "game/PlayerManager.hpp"
+
+class PythonScripting;
+class ScriptHotReloader;
+#include "scripting/PythonScripting.hpp"
 
 class LogicCore {
 public:
@@ -86,6 +95,8 @@ protected:
     std::condition_variable gameLoopCV_;
     std::condition_variable spawnerCV_;
     std::condition_variable saveCV_;
+    std::condition_variable eventQueueCV_;
+    
     std::mutex gameLoopMutex_;
     std::mutex spawnerMutex_;
     std::mutex saveMutex_;
@@ -103,7 +114,7 @@ protected:
     // Session management
     std::unordered_map<uint64_t, uint64_t> sessionToPlayerMap_;
     std::unordered_map<uint64_t, uint64_t> playerToSessionMap_;
-    std::mutex sessionMutex_;
+    mutable std::mutex sessionMutex_;
 
     // Event queue
     std::queue<EventCallback> eventQueue_;
@@ -112,8 +123,9 @@ protected:
     // References to other systems
     PlayerManager& playerManager_;
     CitusClient& dbClient_;
-    PythonScripting::PythonScripting& pythonScripting_;
-    std::unique_ptr<PythonScripting::ScriptHotReloader> scriptHotReloader_;
+
+    PythonScripting& pythonScripting_;
+    std::unique_ptr<ScriptHotReloader> scriptHotReloader_;
     bool pythonEnabled_{false};
 
     // Random generator
@@ -123,6 +135,20 @@ protected:
     virtual void GameLoop();
     virtual void SpawnerLoop();
     virtual void SaveLoop();
+
+    // ADDED: Missing method declarations
+    void ProcessGameTick(float deltaTime);
+    void SpawnEnemies();
+    void RespawnNPCs();
+    void SpawnResources();
+    void SaveGameState();
+    void CleanupOldData();
+    
+    // ADDED: Missing handler declarations
+    void HandleLogin(uint64_t sessionId, const nlohmann::json& data);
+    void HandleChat(uint64_t sessionId, const nlohmann::json& data);
+    void HandleCombat(uint64_t sessionId, const nlohmann::json& data);
+    void HandleQuest(uint64_t sessionId, const nlohmann::json& data);
 
 private:
     static std::mutex instanceMutex_;

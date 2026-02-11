@@ -5,7 +5,6 @@
 
 #include "scripting/PythonEvent.hpp"
 
-namespace PythonScripting {
 
 // =============== PythonEventHandler Implementation ===============
 
@@ -362,5 +361,3 @@ void EventScheduler::ProcessScheduledEvents() {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 }
-
-} // namespace PythonScripting

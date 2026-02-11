@@ -61,6 +61,9 @@ public:
     float GetFloat(const std::string& key, float defaultValue = 0.0f) const;
     bool GetBool(const std::string& key, bool defaultValue = false) const;
     std::string GetString(const std::string& key, const std::string& defaultValue = "") const;
+    // nlohmann::json j = nlohmann::json::parse(R"(["root", "home", "var"])");
+    // std::vector<std::string> colors = {"root", "home", "var"};
+    std::vector<std::string> GetStringArray(const std::string& key) const;
     nlohmann::json GetJson(const std::string& key) const;
     bool HasKey(const std::string& key) const;
 

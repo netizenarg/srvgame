@@ -1,10 +1,4 @@
-#include <algorithm>
-#include <chrono>
-
 #include "network/ConnectionManager.hpp"
-#include "logging/Logger.hpp"
-
-// =============== ConnectionManager Implementation ===============
 
 std::mutex ConnectionManager::instanceMutex_;
 ConnectionManager* ConnectionManager::instance_ = nullptr;
@@ -15,6 +9,23 @@ ConnectionManager& ConnectionManager::GetInstance() {
         instance_ = new ConnectionManager();
     }
     return *instance_;
+}
+
+inline std::shared_ptr<ConnectionManager> ConnectionManager::GetInstancePtr() {
+    // Return a shared_ptr with a custom deleter that doesn't delete the singleton
+    static std::weak_ptr<ConnectionManager> weakInstance;
+
+    auto shared = weakInstance.lock();
+    if (!shared) {
+        shared = std::shared_ptr<ConnectionManager>(
+            &GetInstance(),
+            [](ConnectionManager*) {
+                // Custom deleter does nothing - singleton shouldn't be deleted
+            }
+        );
+        weakInstance = shared;
+    }
+    return shared;
 }
 
 ConnectionManager::ConnectionManager() {
@@ -35,36 +46,32 @@ void ConnectionManager::Start(std::shared_ptr<GameSession> session) {
 
     uint64_t sessionId = session->GetSessionId();
 
-    {
-        std::unique_lock<std::shared_mutex> lock(sessionsMutex_);
-        auto [it, inserted] = sessions_.emplace(sessionId, session);
+    std::unique_lock<std::shared_mutex> lock(sessionsMutex_);
+    auto [it, inserted] = sessions_.emplace(sessionId, session);
 
-        if (!inserted) {
-            Logger::Warn("Session {} already exists in ConnectionManager", sessionId);
-            return;
-        }
+    if (!inserted) {
+        Logger::Warn("Session {} already exists in ConnectionManager", sessionId);
+        return;
+    }
 
-        totalConnections_++;
+    totalConnections_++;
 
-        // Add session to default groups
-        auto defaultGroups = GetDefaultGroups();
-        for (const auto& group : defaultGroups) {
-            AddToGroupInternal(group, sessionId);
-        }
+    // Add session to default groups
+    auto defaultGroups = GetDefaultGroups();
+    for (const auto& group : defaultGroups) {
+        AddToGroupInternal(group, sessionId);
     }
 
     // Record session start time for statistics
-    {
-        std::lock_guard<std::mutex> statsLock(statsMutex_);
-        sessionStats_[sessionId] = SessionStats{
-            .start_time = std::chrono::steady_clock::now(),
-            .last_activity = std::chrono::steady_clock::now(),
-            .messages_sent = 0,
-            .messages_received = 0,
-            .bytes_sent = 0,
-            .bytes_received = 0
-        };
-    }
+    std::lock_guard<std::mutex> statsLock(statsMutex_);
+    sessionStats_[sessionId] = SessionStatsInfo{
+        .start_time = std::chrono::steady_clock::now(),
+        .last_activity = std::chrono::steady_clock::now(),
+        .messages_sent = 0,
+        .messages_received = 0,
+        .bytes_sent = 0,
+        .bytes_received = 0
+    };
 
     Logger::Info("Session {} started. Total connections: {}",
                  sessionId, totalConnections_.load());
@@ -662,15 +669,20 @@ void ConnectionManager::RegisterEventHandler(const std::string& eventType, Event
 
 void ConnectionManager::UnregisterEventHandler(const std::string& eventType, EventHandler handler) {
     std::lock_guard<std::mutex> lock(eventHandlersMutex_);
-
     auto it = eventHandlers_.find(eventType);
     if (it != eventHandlers_.end()) {
         auto& handlers = it->second;
-        handlers.erase(
-            std::remove(handlers.begin(), handlers.end(), handler),
-                    handlers.end()
-        );
-
+        handlers.erase(std::remove_if(handlers.begin(), handlers.end(), [&handler](const EventHandler& h) {
+            if (handler.target_type() != h.target_type()) {
+                return false;
+            }
+            if (handler.target_type() == typeid(void(*)(const std::string&, const nlohmann::json&))) {
+                auto h1 = *handler.target<void(*)(const std::string&, const nlohmann::json&)>();
+                auto h2 = *h.target<void(*)(const std::string&, const nlohmann::json&)>();
+                return h1 == h2;
+            }
+            return false;
+        }), handlers.end());
         if (handlers.empty()) {
             eventHandlers_.erase(it);
         }
@@ -678,7 +690,7 @@ void ConnectionManager::UnregisterEventHandler(const std::string& eventType, Eve
 }
 
 void ConnectionManager::EmitEvent(const std::string& eventType, const nlohmann::json& data) {
-    std::shared_lock<std::mutex> lock(eventHandlersMutex_);
+    std::lock_guard<std::mutex> lock(eventHandlersMutex_);
     auto it = eventHandlers_.find(eventType);
     if (it != eventHandlers_.end()) {
         for (const auto& handler : it->second) {

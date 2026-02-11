@@ -1,21 +1,23 @@
 #pragma once
 
-#include <glm/glm.hpp>
 #include <memory>
+#include <mutex>
 #include <vector>
 #include <functional>
 #include <chrono>
 #include <unordered_map>
 
+#include <glm/glm.hpp>
+
 #include "game/WorldChunk.hpp"
 
-enum class ChunkLOD {
-    HIGH = 0,      // Full detail (0-50 units)
-    MEDIUM = 1,    // Reduced detail (50-150 units)
-    LOW = 2,       // Minimal detail (150-500 units)
-    BILLBOARD = 3, // Impostors (500+ units)
-    NONE = 4       // Not visible
-};
+// enum class ChunkLOD {
+//     HIGH = 0,      // Full detail (0-50 units)
+//     MEDIUM = 1,    // Reduced detail (50-150 units)
+//     LOW = 2,       // Minimal detail (150-500 units)
+//     BILLBOARD = 3, // Impostors (500+ units)
+//     NONE = 4       // Not visible
+// };
 
 struct LODConfig {
     // Distance thresholds for LOD transitions
@@ -49,7 +51,7 @@ public:
     
     // Override base methods for LOD-specific behavior
     void GenerateGeometry() override;
-    void GenerateCollisionMesh() override;
+    void GenerateCollisionMesh();
     
     // LOD-specific geometry generation
     void GenerateHighLODGeometry() override;

@@ -12,8 +12,6 @@
 #include <memory>
 #include <mutex>
 
-namespace PythonScripting {
-
 // Event handler interface
 class IEventHandler {
 public:
@@ -162,5 +160,3 @@ private:
     std::atomic<bool> running_;
     std::thread schedulerThread_;
 };
-
-} // namespace PythonScripting

@@ -1,7 +1,3 @@
-#include <zlib.h>
-#include <cstring>
-#include <stdexcept>
-
 #include "network/BinaryProtocol.hpp"
 
 namespace BinaryProtocol {
@@ -108,11 +104,11 @@ namespace BinaryProtocol {
         WriteFloat(vec.z);
     }
 
-    void BinaryWriter::WriteQuaternion(const glm::quat& quat) {
-        WriteFloat(quat.x);
-        WriteFloat(quat.y);
-        WriteFloat(quat.z);
-        WriteFloat(quat.w);
+    void BinaryWriter::WriteQuaternion(const glm::quat& quaternion) {
+        WriteFloat(quaternion.x);
+        WriteFloat(quaternion.y);
+        WriteFloat(quaternion.z);
+        WriteFloat(quaternion.w);
     }
 
     void BinaryWriter::WriteJson(const nlohmann::json& json) {

@@ -4,9 +4,10 @@
 #include <unordered_map>
 #include <memory>
 #include <mutex>
-#include "LootItem.hpp"
 
-#include "database/CitusClient.hpp"
+#include "game/LootItem.hpp"
+
+#include "database/DbManager.hpp"
 
 struct InventorySlot {
     std::shared_ptr<LootItem> item;
