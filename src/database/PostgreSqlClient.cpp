@@ -1,14 +1,57 @@
 #include "database/PostgreSqlClient.hpp"
 
+// Safe conversion helpers in anonymous namespace
+namespace {
+    bool SafeStringToInt64(const char* str, int64_t& result) {
+        if (!str || str[0] == '\0') return false;
+        
+        char* endptr = nullptr;
+        errno = 0;
+        long long val = strtoll(str, &endptr, 10);
+        
+        if (errno == ERANGE || val < std::numeric_limits<int64_t>::min() || 
+            val > std::numeric_limits<int64_t>::max()) {
+            return false;
+        }
+        
+        if (endptr == str || *endptr != '\0') {
+            return false;
+        }
+        
+        result = static_cast<int64_t>(val);
+        return true;
+    }
+    
+    bool SafeStringToInt(const char* str, int& result) {
+        int64_t temp;
+        if (!SafeStringToInt64(str, temp)) return false;
+        
+        if (temp < std::numeric_limits<int>::min() || 
+            temp > std::numeric_limits<int>::max()) {
+            return false;
+        }
+        
+        result = static_cast<int>(temp);
+        return true;
+    }
+}
+
 // =============== Constructor and Destructor ===============
 PostgreSqlClient::PostgreSqlClient(const nlohmann::json& config)
     : config_(config),
       poolInitialized_(false),
       poolShuttingDown_(false),
-      totalShards_(config.value("shards", 32)),
       lastInsertId_(0),
       affectedRows_(0) {
-
+    
+    // Validate shards configuration with safe bounds
+    int shards = config.value("shards", 32);
+    if (shards <= 0 || shards > 1024) {
+        Logger::Error("Invalid shard count: {}. Using default 32.", shards);
+        shards = 32;
+    }
+    totalShards_ = shards;
+    
     stats_.startTime = std::chrono::steady_clock::now();
     connectionString_ = BuildConnectionString();
 
@@ -168,6 +211,19 @@ bool PostgreSqlClient::InitializeConnectionPool(size_t minConnections, size_t ma
         Logger::Error("Invalid connection pool parameters: min={}, max={}",
                      minConnections, maxConnections);
         return false;
+    }
+
+    // Set reasonable limits to prevent resource exhaustion
+    const size_t MAX_ALLOWED_CONNECTIONS = 1000;
+    if (maxConnections > MAX_ALLOWED_CONNECTIONS) {
+        Logger::Warn("Max connections {} exceeds limit {}, capping to {}",
+                    maxConnections, MAX_ALLOWED_CONNECTIONS, MAX_ALLOWED_CONNECTIONS);
+        maxConnections = MAX_ALLOWED_CONNECTIONS;
+    }
+    
+    // Ensure min doesn't exceed max after adjustment
+    if (minConnections > maxConnections) {
+        minConnections = maxConnections;
     }
 
     minConnections_ = minConnections;
@@ -335,6 +391,11 @@ PGconn* PostgreSqlClient::CreateNewConnection() {
     // Set statement timeout if configured
     if (config_.contains("timeout")) {
         int timeout = config_["timeout"];
+        // Validate timeout value
+        if (timeout < 0 || timeout > 3600) {
+            Logger::Warn("Invalid timeout value: {}, using default", timeout);
+            timeout = 30;
+        }
         std::string timeoutCmd = "SET statement_timeout = " + std::to_string(timeout * 1000);
         PGresult* res = PQexec(conn, timeoutCmd.c_str());
         if (PQresultStatus(res) != PGRES_COMMAND_OK) {
@@ -549,16 +610,28 @@ nlohmann::json PostgreSqlClient::ExecuteQuery(PGconn* conn, const std::string& s
         return nlohmann::json::array();
     }
 
-    // Get last insert ID if applicable
+    // Get last insert ID if applicable using safe conversion
     if (status == PGRES_COMMAND_OK && sql.find("INSERT") != std::string::npos) {
         const char* insertId = PQoidValue(result);
         if (insertId) {
-            lastInsertId_ = std::strtoll(insertId, nullptr, 10);
+            int64_t tempId;
+            if (SafeStringToInt64(insertId, tempId)) {
+                lastInsertId_ = tempId;
+            } else {
+                lastInsertId_ = 0;
+                Logger::Warn("Failed to parse last insert ID: {}", insertId);
+            }
         }
 
         const char* affected = PQcmdTuples(result);
         if (affected) {
-            affectedRows_ = std::atoi(affected);
+            int tempRows;
+            if (SafeStringToInt(affected, tempRows)) {
+                affectedRows_ = tempRows;
+            } else {
+                affectedRows_ = 0;
+                Logger::Warn("Failed to parse affected rows: {}", affected);
+            }
         }
     }
 
@@ -600,17 +673,29 @@ bool PostgreSqlClient::ExecuteCommand(PGconn* conn, const std::string& sql,
         return false;
     }
 
-    // Get affected rows
+    // Get affected rows using safe conversion
     const char* affected = PQcmdTuples(result);
     if (affected) {
-        affectedRows_ = std::atoi(affected);
+        int tempRows;
+        if (SafeStringToInt(affected, tempRows)) {
+            affectedRows_ = tempRows;
+        } else {
+            affectedRows_ = 0;
+            Logger::Warn("Failed to parse affected rows: {}", affected);
+        }
     }
 
-    // Get last insert ID if applicable
+    // Get last insert ID if applicable using safe conversion
     if (status == PGRES_COMMAND_OK && sql.find("INSERT") != std::string::npos) {
         const char* insertId = PQoidValue(result);
         if (insertId) {
-            lastInsertId_ = std::strtoll(insertId, nullptr, 10);
+            int64_t tempId;
+            if (SafeStringToInt64(insertId, tempId)) {
+                lastInsertId_ = tempId;
+            } else {
+                lastInsertId_ = 0;
+                Logger::Warn("Failed to parse last insert ID: {}", insertId);
+            }
         }
     }
 
@@ -715,8 +800,22 @@ std::string PostgreSqlClient::EscapeString(const std::string& str) {
 }
 
 int PostgreSqlClient::GetShardId(uint64_t entityId) const {
-    // Simple hash-based sharding for compatibility
-    return static_cast<int>(entityId % totalShards_);
+    // Safe shard calculation with bounds checking
+    if (totalShards_ <= 0) {
+        Logger::Error("Invalid totalShards: {}", totalShards_);
+        return 0;  // Default to shard 0
+    }
+    
+    // Prevent division by zero and handle large entityId
+    uint64_t shard = entityId % static_cast<uint64_t>(totalShards_);
+    
+    // Ensure shard fits in int without overflow
+    if (shard > static_cast<uint64_t>(std::numeric_limits<int>::max())) {
+        Logger::Warn("Shard calculation overflow for entityId: {}", entityId);
+        shard = shard % static_cast<uint64_t>(totalShards_);
+    }
+    
+    return static_cast<int>(shard);
 }
 
 int PostgreSqlClient::GetTotalShards() const {
@@ -992,10 +1091,37 @@ bool PostgreSqlClient::DeleteChunkData(int chunkX, int chunkZ) {
 }
 
 std::vector<std::pair<int, int>> PostgreSqlClient::ListChunksInRange(int centerX, int centerZ, int radius) {
+    // Validate inputs to prevent integer overflow
+    if (radius < 0) {
+        Logger::Error("Invalid radius: {}", radius);
+        return {};
+    }
+    
+    // Prevent integer overflow in calculations
+    if (radius > 10000) {  // Reasonable limit for chunk operations
+        Logger::Warn("Radius too large: {}, limiting to 10000", radius);
+        radius = 10000;
+    }
+    
+    // Use safe subtraction with bounds checking
+    int64_t minX = static_cast<int64_t>(centerX) - radius;
+    int64_t maxX = static_cast<int64_t>(centerX) + radius;
+    int64_t minZ = static_cast<int64_t>(centerZ) - radius;
+    int64_t maxZ = static_cast<int64_t>(centerZ) + radius;
+    
+    // Check for overflow
+    if (minX < std::numeric_limits<int>::min() || maxX > std::numeric_limits<int>::max() ||
+        minZ < std::numeric_limits<int>::min() || maxZ > std::numeric_limits<int>::max()) {
+        Logger::Error("Chunk range calculation overflow");
+        return {};
+    }
+
     std::string sql =
         "SELECT chunk_x, chunk_z FROM world_chunks "
-        "WHERE ABS(chunk_x - " + std::to_string(centerX) + ") <= " + std::to_string(radius) +
-        " AND ABS(chunk_z - " + std::to_string(centerZ) + ") <= " + std::to_string(radius);
+        "WHERE chunk_x BETWEEN " + std::to_string(static_cast<int>(minX)) + 
+        " AND " + std::to_string(static_cast<int>(maxX)) +
+        " AND chunk_z BETWEEN " + std::to_string(static_cast<int>(minZ)) + 
+        " AND " + std::to_string(static_cast<int>(maxZ));
 
     auto result = Query(sql);
     std::vector<std::pair<int, int>> chunks;
