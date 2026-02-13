@@ -413,7 +413,7 @@ void PostgreSqlClient::CloseConnection(PGconn* conn) {
     }
 }
 
-bool PostgreSqlClient::TestConnection(PGconn* conn) {
+bool PostgreSqlClient::TestConnection(PGconn* conn) const {
     if (!conn) {
         return false;
     }
@@ -612,15 +612,11 @@ nlohmann::json PostgreSqlClient::ExecuteQuery(PGconn* conn, const std::string& s
 
     // Get last insert ID if applicable using safe conversion
     if (status == PGRES_COMMAND_OK && sql.find("INSERT") != std::string::npos) {
-        const char* insertId = PQoidValue(result);
-        if (insertId) {
-            int64_t tempId;
-            if (SafeStringToInt64(insertId, tempId)) {
-                lastInsertId_ = tempId;
-            } else {
-                lastInsertId_ = 0;
-                Logger::Warn("Failed to parse last insert ID: {}", insertId);
-            }
+        Oid insertId = PQoidValue(result);
+        if (insertId != InvalidOid) {
+            lastInsertId_ = static_cast<int64_t>(insertId);
+        } else {
+            lastInsertId_ = 0;
         }
 
         const char* affected = PQcmdTuples(result);
@@ -687,15 +683,11 @@ bool PostgreSqlClient::ExecuteCommand(PGconn* conn, const std::string& sql,
 
     // Get last insert ID if applicable using safe conversion
     if (status == PGRES_COMMAND_OK && sql.find("INSERT") != std::string::npos) {
-        const char* insertId = PQoidValue(result);
-        if (insertId) {
-            int64_t tempId;
-            if (SafeStringToInt64(insertId, tempId)) {
-                lastInsertId_ = tempId;
-            } else {
-                lastInsertId_ = 0;
-                Logger::Warn("Failed to parse last insert ID: {}", insertId);
-            }
+        Oid insertId = PQoidValue(result);
+        if (insertId != InvalidOid) {
+            lastInsertId_ = static_cast<int64_t>(insertId);
+        } else {
+            lastInsertId_ = 0;
         }
     }
 
