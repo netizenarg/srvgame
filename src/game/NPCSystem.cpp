@@ -85,7 +85,7 @@ void NPCManager::ProcessNPCAI(NPCEntity* npc, float deltaTime) {
 }
 
 void NPCManager::HandleCombat(NPCEntity* npc, float deltaTime) {
-    if (npc->GetBehaviorState() == NPCBehaviorState::COMBAT) {
+    if (npc->GetBehaviorState() == NPCAIState::COMBAT) {
         // Check if target is in attack range
         // If yes, attack
         // If no, chase

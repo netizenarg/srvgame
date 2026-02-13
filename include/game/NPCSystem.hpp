@@ -12,28 +12,6 @@
 #include "game/NPCEntity.hpp"
 #include "logging/Logger.hpp"
 
-
-enum class NPCBehaviorState {
-    IDLE,
-    PATROL,
-    CHASE,
-    COMBAT,
-    FLEE,
-    FOLLOW,
-    INTERACT
-};
-
-// struct NPCStats {
-//     float health = 100.0f;
-//     float maxHealth = 100.0f;
-//     float attackDamage = 10.0f;
-//     float defense = 5.0f;
-//     float speed = 5.0f;
-//     float attackRange = 2.0f;
-//     float detectionRange = 20.0f;
-//     float followRange = 30.0f;
-// };
-
 class NPCManager {
 public:
     NPCManager();
