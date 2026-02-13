@@ -14,7 +14,9 @@ GameLogic& GameLogic::GetInstance() {
 }
 
 // =============== Constructor and Destructor ===============
-GameLogic::GameLogic() {
+GameLogic::GameLogic()
+//    : playerManager_(PlayerManager::GetInstance())
+{
     Logger::Debug("GameLogic created");
 }
 
@@ -73,9 +75,6 @@ void GameLogic::Shutdown() {
     // Shutdown component systems
     entityLogic_.Shutdown();
     worldLogic_.Shutdown();
-
-    // Shutdown base LogicCore
-    LogicCore::Shutdown();
 
     Logger::Info("GameLogic world system shutdown complete");
 }

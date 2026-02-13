@@ -259,6 +259,10 @@ bool DbManager::SetBackend(DatabaseType type, const nlohmann::json& config) {
     return true;
 }
 
+bool DbManager::SaveGameState(const std::string& key, const nlohmann::json& state) {
+    return backend_.SaveGameState(key, state);
+}
+
 bool DbManager::Connect() {
     if (!initialized_) {
         Logger::Error("DbManager not initialized");

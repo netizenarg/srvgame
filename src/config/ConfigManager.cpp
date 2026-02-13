@@ -565,38 +565,3 @@ bool ConfigManager::HasKey(const std::string& key) const {
         return false;
     }
 }
-
-// Utility methods (not declared in header but useful for implementation)
-namespace {
-    // Helper function to safely get world size
-    std::map<std::string, float> GetWorldSizeFromConfig(const nlohmann::json& config) {
-        std::map<std::string, float> worldSize;
-        try {
-            if (config.contains("world") && 
-                config["world"].contains("size") &&
-                config["world"]["size"].is_object()) {
-
-                const auto& world = config["world"]["size"];
-                if (world.contains("x") && world["x"].is_number()) {
-                    worldSize["x"] = world["x"].get<float>();
-                }
-                if (world.contains("y") && world["y"].is_number()) {
-                    worldSize["y"] = world["y"].get<float>();
-                }
-                if (world.contains("z") && world["z"].is_number()) {
-                    worldSize["z"] = world["z"].get<float>();
-                }
-            }
-        } catch (const std::exception& e) {
-            // Use defaults
-            Logger::Error("{}", e.what());
-        }
-
-        // Set defaults if not specified
-        if (worldSize.find("x") == worldSize.end()) worldSize["x"] = 1000.0f;
-        if (worldSize.find("y") == worldSize.end()) worldSize["y"] = 1000.0f;
-        if (worldSize.find("z") == worldSize.end()) worldSize["z"] = 100.0f;
-
-        return worldSize;
-    }
-}

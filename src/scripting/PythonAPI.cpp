@@ -1,7 +1,5 @@
 #include "scripting/PythonAPI.hpp"
-
-
-// =============== Python C API Functions ===============
+#include "game/GameLogic.hpp"
 
 // Helper to convert nlohmann::json to Python object
 PyObject* JsonToPython(const nlohmann::json& json) {
@@ -250,7 +248,7 @@ static PyObject* py_set_player_position(PyObject* self, PyObject* args) {
 
     player->UpdatePosition(x, y, z);
 
-    // Update database through the GameLogic backend
+    // Update database through the backend
     auto& gameLogic = GameLogic::GetInstance();
     auto backend = gameLogic.GetDatabaseBackend();
     
@@ -344,51 +342,33 @@ static PyObject* py_broadcast_to_nearby(PyObject* self, PyObject* args) {
 static PyObject* py_query_database(PyObject* self, PyObject* args) {
     const char* query;
     PyObject* params_obj = nullptr;
-
-    // Parse query and optional parameters
     if (!PyArg_ParseTuple(args, "s|O", &query, &params_obj)) {
         return nullptr;
     }
-
-    // Get database backend from GameLogic
-    auto& gameLogic = GameLogic::GetInstance();
-    auto backend = gameLogic.GetDatabaseBackend();
-    
-    if (!backend) {
-        Logger::Error("Database backend not available");
-        Py_RETURN_NONE;
-    }
-    
+    auto& dbManager = DbManager::GetInstance();
     try {
         if (params_obj) {
-            // Convert Python sequence to vector of strings
             std::vector<std::string> params = PythonSequenceToStringVector(params_obj);
-            
-            // Use parameterized query if backend supports it
-            // For now, construct parameterized query manually
             if (!params.empty()) {
-                // Simple placeholder replacement for demonstration
-                // WARNING: This is not secure - use proper parameterized queries in production!
+                // Simple placeholder replacement (as before)
                 std::string processed_query = query;
                 for (size_t i = 0; i < params.size(); ++i) {
                     std::string placeholder = "$" + std::to_string(i + 1);
                     std::string escaped_value = "'" + params[i] + "'";
-                    
                     size_t pos = 0;
                     while ((pos = processed_query.find(placeholder, pos)) != std::string::npos) {
                         processed_query.replace(pos, placeholder.length(), escaped_value);
                         pos += escaped_value.length();
                     }
                 }
-                nlohmann::json result = backend->Query(processed_query);
+                auto result = dbManager.Query(processed_query);
                 return JsonToPython(result);
             } else {
-                auto result = backend->Query(query);
+                auto result = dbManager.Query(query);
                 return JsonToPython(result);
             }
         } else {
-            // Execute query without parameters
-            auto result = backend->Query(query);
+            auto result = dbManager.Query(query);
             return JsonToPython(result);
         }
     } catch (const std::exception& e) {
@@ -926,16 +906,8 @@ bool PythonAPI::ExecuteDatabase(const std::string& query, const std::vector<std:
 }
 
 nlohmann::json PythonAPI::GetPlayerFromDB(int64_t playerId) {
-    // Get database backend from GameLogic
-    auto& gameLogic = GameLogic::GetInstance();
-    auto backend = gameLogic.GetDatabaseBackend();
-    
-    if (!backend) {
-        Logger::Error("Database backend not available");
-        return nlohmann::json();
-    }
-    
-    return backend->GetPlayer(playerId);
+    auto& dbManager = DbManager::GetInstance();
+    return dbManager.GetPlayer(playerId);
 }
 
 bool PythonAPI::SavePlayerToDB(int64_t playerId, const nlohmann::json& data) {

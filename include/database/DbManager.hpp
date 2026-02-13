@@ -47,9 +47,12 @@ public:
     bool IsInitialized() const { return initialized_; }
 
     // Backend Management
+    bool SaveGameState(const std::string& key, const nlohmann::json& state);
     bool SetBackend(DatabaseType type, const nlohmann::json& config);
     DatabaseBackend* GetBackend() const { return backend_.get(); }
     DatabaseType GetCurrentType() const { return currentType_; }
+    nlohmann::json Query(const std::string& sql) { return backend_->Query(sql); };
+    nlohmann::json GetPlayer(uint64_t playerId){ return backend_->GetPlayer(playerId); };
 
     // Configuration
     bool LoadConfiguration(const std::string& configPath = "");
@@ -85,6 +88,11 @@ private:
     static DbManager* instance_;
 
     std::unique_ptr<DatabaseBackend> backend_;
+// #ifdef USE_CITUS
+//     std::unique_ptr<CitusClient> backend_;
+// #else
+//     std::unique_ptr<PostgreSqlClient> backend_;
+// #endif
     DatabaseType currentType_;
     nlohmann::json config_;
     std::atomic<bool> initialized_;

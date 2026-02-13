@@ -21,7 +21,10 @@
 //#include "config/ConfigManager.hpp"
 //#include "logging/Logger.hpp"
 //#include "database/DbManager.hpp"
+#include "game/RAIIThread.hpp"
 #include "game/PlayerManager.hpp"
+#include "game/LogicWorld.hpp"
+#include "game/LogicEntity.hpp"
 
 class PythonScripting;
 class ScriptHotReloader;
@@ -29,6 +32,9 @@ class ScriptHotReloader;
 
 class LogicCore {
 public:
+    LogicCore();
+    ~LogicCore();
+
     using MessageHandler = std::function<void(uint64_t sessionId, const nlohmann::json&)>;
     using BinaryMessageHandler = std::function<void(uint64_t sessionId, uint16_t messageType, const std::vector<uint8_t>&)>;
     using EventCallback = std::function<void()>;
@@ -81,15 +87,13 @@ public:
     bool CheckRateLimit(uint64_t sessionId);
 
 protected:
-    LogicCore();
-    virtual ~LogicCore();
 
     // Threading
     RAIIThread gameLoopThread_;
     RAIIThread spawnerThread_;
     RAIIThread saveThread_;
     
-    std::atomic<bool> running_{false};
+    std::atomic<bool> running_;
     std::chrono::milliseconds gameLoopInterval_{16};
     
     std::condition_variable gameLoopCV_;
@@ -122,11 +126,11 @@ protected:
 
     // References to other systems
     PlayerManager& playerManager_;
-    CitusClient& dbClient_;
+    DbManager& dbManager_;
 
     PythonScripting& pythonScripting_;
     std::unique_ptr<ScriptHotReloader> scriptHotReloader_;
-    bool pythonEnabled_{false};
+    bool pythonEnabled_;
 
     // Random generator
     std::mt19937 rng_;
@@ -136,7 +140,7 @@ protected:
     virtual void SpawnerLoop();
     virtual void SaveLoop();
 
-    // ADDED: Missing method declarations
+    // method declarations
     void ProcessGameTick(float deltaTime);
     void SpawnEnemies();
     void RespawnNPCs();
@@ -144,7 +148,7 @@ protected:
     void SaveGameState();
     void CleanupOldData();
     
-    // ADDED: Missing handler declarations
+    // handler declarations
     void HandleLogin(uint64_t sessionId, const nlohmann::json& data);
     void HandleChat(uint64_t sessionId, const nlohmann::json& data);
     void HandleCombat(uint64_t sessionId, const nlohmann::json& data);

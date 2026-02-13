@@ -1,25 +1,19 @@
 #include "game/LogicCore.hpp"
 
 // =============== Static Members ===============
-std::mutex LogicCore::instanceMutex_;
-LogicCore* LogicCore::instance_ = nullptr;
-
-// =============== Singleton Access ===============
-LogicCore& LogicCore::GetInstance() {
-    std::lock_guard<std::mutex> lock(instanceMutex_);
-    if (!instance_) {
-        instance_ = new LogicCore();
-    }
-    return *instance_;
-}
+//std::mutex LogicCore::instanceMutex_;
+//LogicCore* LogicCore::instance_ = nullptr;
 
 // =============== Constructor and Destructor ===============
 LogicCore::LogicCore()
     : playerManager_(PlayerManager::GetInstance()),
-      dbClient_(CitusClient::GetInstance()),
-      pythonScripting_(PythonScripting::GetInstance()),
-      running_(false) {
-    
+    dbManager_(DbManager::GetInstance()),
+    pythonScripting_(PythonScripting::GetInstance()),
+    scriptHotReloader_(nullptr),
+    pythonEnabled_(false),
+    running_(false)
+{
+
     rng_.seed(std::random_device()());
     Logger::Debug("LogicCore initialized");
 }
@@ -28,6 +22,15 @@ LogicCore::~LogicCore() {
     if (running_) {
         Shutdown();
     }
+}
+
+// =============== Singleton Access ===============
+LogicCore& LogicCore::GetInstance() {
+    std::lock_guard<std::mutex> lock(instanceMutex_);
+    if (!instance_) {
+        instance_ = new LogicCore();
+    }
+    return *instance_;
 }
 
 // =============== Initialization and Shutdown ===============
@@ -502,7 +505,7 @@ void LogicCore::SaveGameState() {
             {"server_time", GetCurrentTimestamp()},
             {"online_players", playerManager_.GetOnlinePlayerCount()}
         };
-        dbClient_.SaveGameState("current_game", gameState);
+        dbManager_.SaveGameState("current_game", gameState);
         Logger::Debug("Game state saved");
     } catch (const std::exception& e) {
         Logger::Error("Failed to save game state: {}", e.what());

@@ -6,18 +6,17 @@
 #include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
 
-#include "config/ConfigManager.hpp"
-#include "logging/Logger.hpp"
-#include "network/ConnectionManager.hpp"
-#include "database/DbManager.hpp"
+// #include "config/ConfigManager.hpp"
+// #include "logging/Logger.hpp"
+// #include "network/ConnectionManager.hpp"
+// #include "database/DbManager.hpp"
+//
+// #include "game/ChunkLOD.hpp"
+// #include "game/CollisionSystem.hpp"
+#include "game/LogicCore.hpp"
 
-#include "game/LogicWorld.hpp"
-#include "game/LogicEntity.hpp"
-#include "game/ChunkLOD.hpp"
-#include "game/CollisionSystem.hpp"
-
-
-class GameLogic {
+class GameLogic : public LogicCore
+{
 public:
     static GameLogic& GetInstance();
 
@@ -122,10 +121,11 @@ private:
     // Component systems
     LogicWorld worldLogic_;
     LogicEntity entityLogic_;
-    
+    //PlayerManager& playerManager_;
+
     // Database backend
     std::unique_ptr<DatabaseBackend> databaseBackend_;
-    
+
     // Connection manager for broadcasting
     std::shared_ptr<ConnectionManager> connectionManager_;
 
