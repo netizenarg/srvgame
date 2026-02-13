@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <functional>
@@ -12,15 +13,12 @@
 #include <unordered_map>
 
 #include <nlohmann/json.hpp>
-#include <Python.h>
 
-#include "config/ConfigManager.hpp"
-#include "logging/Logger.hpp"
 #include "scripting/PythonAPI.hpp"
 
 // Forward declarations
-class Player;
-class GameSession;
+//class Player;
+//class GameSession;
 
 
 // Python object wrapper for RAII
@@ -242,4 +240,3 @@ private:
     std::unordered_map<std::string, std::string> watchedModules_;
     std::unordered_map<std::string, std::filesystem::file_time_type> lastModified_;
 };
-

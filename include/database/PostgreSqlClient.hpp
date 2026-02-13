@@ -132,7 +132,7 @@ private:
     void ReleaseConnection(PGconn* conn);
     PGconn* CreateNewConnection();
     void CloseConnection(PGconn* conn);
-    bool TestConnection(PGconn* conn);
+    bool TestConnection(PGconn* conn) const;
 
     // Connection pool management
     void MaintainPool();

@@ -6,25 +6,19 @@
 #include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
 
-#include "config/ConfigManager.hpp"
-#include "logging/Logger.hpp"
-#include "network/ConnectionManager.hpp"
-#include "database/DbManager.hpp"
+// #include "config/ConfigManager.hpp"
+// #include "logging/Logger.hpp"
+// #include "network/ConnectionManager.hpp"
+// #include "database/DbManager.hpp"
+//
+// #include "game/ChunkLOD.hpp"
+// #include "game/CollisionSystem.hpp"
+#include "game/LogicCore.hpp"
 
-#include "game/LogicWorld.hpp"
-#include "game/LogicEntity.hpp"
-#include "game/ChunkLOD.hpp"
-#include "game/CollisionSystem.hpp"
-
-//class LogicCore;
-//#include "game/LogicCore.hpp"
-
-class GameLogic {
+class GameLogic : public LogicCore
+{
 public:
     static GameLogic& GetInstance();
-
-    //LogicCore& GetLogicCore() { return LogicCore::GetInstance(); }
-    //LogicCore& GetLogicCore() { return logicCore_; }
 
     // Core lifecycle
     void Initialize();
@@ -57,7 +51,7 @@ public:
     // IPC message handling
     void HandleIPCMessage(const nlohmann::json& message);
 
-    // 3D World methods
+    // World methods
     std::shared_ptr<WorldChunk> GetOrCreateChunk(int chunkX, int chunkZ);
     void GenerateWorldAroundPlayer(uint64_t playerId, const glm::vec3& position);
     void PreloadWorldData(float radius);
@@ -84,7 +78,7 @@ public:
     void HandleTradeRequest(uint64_t sessionId, const nlohmann::json& data);
     void HandleGoldTransaction(uint64_t sessionId, const nlohmann::json& data);
 
-    // 3D World message handlers
+    // World message handlers
     void HandleWorldChunkRequest(uint64_t sessionId, const nlohmann::json& data);
     void HandlePlayerPositionUpdate(uint64_t sessionId, const nlohmann::json& data);
     void HandleNPCInteraction(uint64_t sessionId, const nlohmann::json& data);
@@ -92,9 +86,8 @@ public:
     void HandleEntitySpawnRequest(uint64_t sessionId, const nlohmann::json& data);
     void HandleFamiliarCommand(uint64_t sessionId, const nlohmann::json& data);
 
-    // Message handling (inherited from LogicCore)
+    // Message handling
     void HandleMessage(uint64_t sessionId, const nlohmann::json& message) {
-        // Delegate to base class or implement here
         HandleMessage(sessionId, message);
     }
 
@@ -124,15 +117,15 @@ private:
 
     static std::mutex instanceMutex_;
     static GameLogic* instance_;
-    //LogicCore& logicCore_;
 
     // Component systems
     LogicWorld worldLogic_;
     LogicEntity entityLogic_;
-    
+    //PlayerManager& playerManager_;
+
     // Database backend
     std::unique_ptr<DatabaseBackend> databaseBackend_;
-    
+
     // Connection manager for broadcasting
     std::shared_ptr<ConnectionManager> connectionManager_;
 
@@ -147,7 +140,7 @@ private:
 
     // Helper methods
     void RegisterWorldHandlers();
-    void LoadGameData();
+    bool LoadGameData();
     void SaveGameState();
     void SaveChunkData();
     void CleanupOldData();

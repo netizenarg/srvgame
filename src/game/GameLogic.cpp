@@ -14,24 +14,26 @@ GameLogic& GameLogic::GetInstance() {
 }
 
 // =============== Constructor and Destructor ===============
-GameLogic::GameLogic() {
+GameLogic::GameLogic()
+//    : playerManager_(PlayerManager::GetInstance())
+{
     Logger::Debug("GameLogic created");
 }
 
 GameLogic::~GameLogic() {
-    if (IsRunning()) {
+    if (instance_) {
         Shutdown();
     }
 }
 
 // =============== Initialization and Shutdown ===============
 void GameLogic::Initialize() {
-    if (IsRunning()) {
+    if (instance_) {
         Logger::Warn("GameLogic already initialized");
         return;
     }
 
-    Logger::Info("Initializing GameLogic with 3D world system...");
+    Logger::Info("Initializing GameLogic with world system...");
 
     auto& config = ConfigManager::GetInstance();
 
@@ -58,30 +60,23 @@ void GameLogic::Initialize() {
     }
 
     // Register handlers
-    RegisterDefaultHandlers();
     RegisterWorldHandlers();
 
-    // Initialize base LogicCore
-    LogicCore::Initialize();
-
-    Logger::Info("GameLogic 3D world system initialized successfully");
+    Logger::Info("GameLogic world system initialized successfully");
 }
 
 void GameLogic::Shutdown() {
-    if (!IsRunning()) {
+    if (!instance_) {
         return;
     }
 
-    Logger::Info("Shutting down GameLogic 3D world system...");
+    Logger::Info("Shutting down GameLogic world system...");
 
     // Shutdown component systems
     entityLogic_.Shutdown();
     worldLogic_.Shutdown();
 
-    // Shutdown base LogicCore
-    LogicCore::Shutdown();
-
-    Logger::Info("GameLogic 3D world system shutdown complete");
+    Logger::Info("GameLogic world system shutdown complete");
 }
 
 // =============== World Configuration ===============
@@ -93,7 +88,7 @@ const GameLogic::WorldConfig& GameLogic::GetWorldConfig() const {
     return static_cast<const WorldConfig&>(worldLogic_.GetConfig());
 }
 
-// =============== 3D World Methods ===============
+// =============== World Methods ===============
 std::shared_ptr<WorldChunk> GameLogic::GetOrCreateChunk(int chunkX, int chunkZ) {
     return worldLogic_.GetOrCreateChunk(chunkX, chunkZ);
 }
@@ -215,7 +210,7 @@ void GameLogic::HandleGoldTransaction(uint64_t sessionId, const nlohmann::json& 
     SendError(sessionId, "Gold transactions not implemented yet", 501);
 }
 
-// =============== 3D World Message Handlers ===============
+// =============== World Message Handlers ===============
 void GameLogic::RegisterWorldHandlers() {
     RegisterHandler("world_chunk_request", [this](uint64_t sessionId, const nlohmann::json& data) {
         HandleWorldChunkRequest(sessionId, data);
@@ -288,7 +283,7 @@ void GameLogic::RegisterWorldHandlers() {
             HandleWorldChunkRequest(sessionId, jsonData);
         });
 
-    Logger::Info("Registered 3D world message handlers");
+    Logger::Info("Registered world message handlers");
 }
 
 void GameLogic::HandleWorldChunkRequest(uint64_t sessionId, const nlohmann::json& data) {
@@ -448,13 +443,13 @@ void GameLogic::HandleFamiliarCommand(uint64_t sessionId, const nlohmann::json& 
         }
 
         if (command == "follow") {
-            familiar->SetBehaviorState(NPCBehaviorState::FOLLOW);
+            familiar->SetBehaviorState(NPCAIState::FOLLOW);
             familiar->SetTarget(playerId);
         } else if (command == "attack") {
-            familiar->SetBehaviorState(NPCBehaviorState::CHASE);
+            familiar->SetBehaviorState(NPCAIState::CHASE);
             familiar->SetTarget(targetId);
         } else if (command == "stay") {
-            familiar->SetBehaviorState(NPCBehaviorState::IDLE);
+            familiar->SetBehaviorState(NPCAIState::IDLE);
             familiar->SetTarget(0);
         }
 
@@ -557,11 +552,11 @@ void GameLogic::SyncNearbyEntitiesToPlayer(uint64_t sessionId, const glm::vec3& 
 
 // =============== Thread Functions ===============
 void GameLogic::GameLoop() {
-    Logger::Info("3D Game loop started");
+    Logger::Info("Game loop started");
     
     auto lastUpdate = std::chrono::steady_clock::now();
     
-    while (IsRunning()) {
+    while (!instanceMutex_.try_lock()) {
         try {
             auto startTime = std::chrono::steady_clock::now();
             
@@ -570,7 +565,7 @@ void GameLogic::GameLoop() {
             float deltaTime = deltaTimeMillis.count() / 1000.0f;
             lastUpdate = now;
             
-            // Update 3D systems
+            // Update systems
             UpdateWorld(deltaTime);
             entityLogic_.UpdateNPCs(deltaTime);
             entityLogic_.UpdateCollisions(deltaTime);
@@ -586,35 +581,37 @@ void GameLogic::GameLoop() {
                 std::unique_lock<std::mutex> lock(gameLoopMutex_);
                 gameLoopCV_.wait_for(lock, 
                     gameLoopInterval_ - std::chrono::milliseconds(processingTime),
-                    [this] { return !IsRunning(); });
+                    [this] { return !instance_; });
             } else {
-                Logger::Warn("3D Game loop lagging: {}ms", processingTime);
+                Logger::Warn("Game loop lagging: {}ms", processingTime);
             }
         } catch (const std::exception& e) {
-            Logger::Error("Error in 3D game loop: {}", e.what());
+            Logger::Error("Error in game loop: {}", e.what());
         }
     }
-    
-    Logger::Info("3D Game loop stopped");
+
+    instanceMutex_.unlock();
+
+    Logger::Info("Game loop stopped");
 }
 
 void GameLogic::SpawnerLoop() {
-    Logger::Info("3D Spawner loop started");
+    Logger::Info("Spawner loop started");
     LogicCore::SpawnerLoop();
-    Logger::Info("3D Spawner loop stopped");
+    Logger::Info("Spawner loop stopped");
 }
 
 void GameLogic::SaveLoop() {
-    Logger::Info("3D Save loop started");
+    Logger::Info("Save loop started");
     LogicCore::SaveLoop();
     SaveChunkData();
-    Logger::Info("3D Save loop stopped");
+    Logger::Info("Save loop stopped");
 }
 
 // =============== Game Tick Processing ===============
 void GameLogic::ProcessGameTick(float deltaTime) {
     LogicCore::ProcessGameTick(deltaTime);
-    // Additional 3D game tick processing
+    // Additional game tick processing
 }
 
 void GameLogic::UpdateWorld(float deltaTime) {
@@ -635,7 +632,7 @@ void GameLogic::UpdateWorld(float deltaTime) {
 }
 
 // =============== Data Management ===============
-void GameLogic::LoadGameData() {
+bool GameLogic::LoadGameData() {
     Logger::Debug("Loading game data");
     return true;
 }
@@ -659,9 +656,9 @@ void GameLogic::SaveGameState() {
         auto& dbClient = CitusClient::GetInstance();
         dbClient.SaveGameState("current_game", gameState);
 
-        Logger::Debug("3D game state saved");
+        Logger::Debug("game state saved");
     } catch (const std::exception& e) {
-        Logger::Error("Failed to save 3D game state: {}", e.what());
+        Logger::Error("Failed to save game state: {}", e.what());
     }
 }
 
@@ -671,7 +668,7 @@ void GameLogic::SaveChunkData() {
 
 void GameLogic::CleanupOldData() {
     LogicCore::CleanupOldData();
-    Logger::Debug("Cleaning up 3D game data");
+    Logger::Debug("Cleaning up game data");
 }
 
 // =============== World maintenance ===============

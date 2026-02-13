@@ -7,14 +7,17 @@
 #include <uuid/uuid.h>
 
 #include <nlohmann/json.hpp>
+#include <Python.h>
 
-#include "database/DbManager.hpp"
-#include "network/ConnectionManager.hpp"
+#include "logging/Logger.hpp"
+#include "config/ConfigManager.hpp"
+//#include "database/DbManager.hpp"
+// #include "network/ConnectionManager.hpp"
 #include "game/PlayerManager.hpp"
-#include "game/GameLogic.hpp"
-#include "scripting/PythonScripting.hpp"
+//#include "game/GameLogic.hpp"
 
 class PythonAPI {
+
 public:
     // =============== Python C API Functions ===============
     

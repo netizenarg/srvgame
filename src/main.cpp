@@ -8,13 +8,12 @@
 #include "logging/Logger.hpp"
 #include "network/GameServer.hpp"
 #include "process/ProcessPool.hpp"
+#include "database/DbManager.hpp"
 #include "game/GameLogic.hpp"
 
-#include "database/DbManager.hpp"
-
-class GameSession;
-class ConnectionManager;
-class PlayerManager;
+//class GameSession;
+//class ConnectionManager;
+//class PlayerManager;
 
 std::atomic<bool> g_shutdown(false);
 
@@ -294,6 +293,12 @@ int main(int argc, char* argv[]) {
     Logger::Info("World Seed: {}", config.GetWorldSeed());
     Logger::Info("View Distance: {} chunks", config.GetViewDistance());
     Logger::Info("Chunk Size: {} units", config.GetChunkSize());
+    std::string cmdline;
+    for (int i = 0; i < argc; ++i) {
+        if (i > 0) cmdline += " ";
+        cmdline += argv[i];
+    }
+    Logger::Info("{} commands ({})", argc, cmdline);
 
     // Create process pool
     int processCount = config.GetProcessCount();

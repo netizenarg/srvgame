@@ -1,7 +1,5 @@
 #include "scripting/PythonAPI.hpp"
-
-
-// =============== Python C API Functions ===============
+#include "game/GameLogic.hpp"
 
 // Helper to convert nlohmann::json to Python object
 PyObject* JsonToPython(const nlohmann::json& json) {
@@ -161,174 +159,149 @@ std::vector<std::string> PythonSequenceToStringVector(PyObject* obj) {
 
 // Python function wrappers
 static PyObject* py_log_debug(PyObject* self, PyObject* args) {
+    (void)self;
     const char* message;
-
     if (!PyArg_ParseTuple(args, "s", &message)) {
         return nullptr;
     }
-
     Logger::Debug("[Python] {}", message);
     Py_RETURN_NONE;
 }
 
 static PyObject* py_log_info(PyObject* self, PyObject* args) {
+    (void)self;
     const char* message;
-
     if (!PyArg_ParseTuple(args, "s", &message)) {
         return nullptr;
     }
-
     Logger::Info("[Python] {}", message);
     Py_RETURN_NONE;
 }
 
 static PyObject* py_log_warning(PyObject* self, PyObject* args) {
+    (void)self;
     const char* message;
-
     if (!PyArg_ParseTuple(args, "s", &message)) {
         return nullptr;
     }
-
     Logger::Warn("[Python] {}", message);
     Py_RETURN_NONE;
 }
 
 static PyObject* py_log_error(PyObject* self, PyObject* args) {
+    (void)self;
     const char* message;
-
     if (!PyArg_ParseTuple(args, "s", &message)) {
         return nullptr;
     }
-
     Logger::Error("[Python] {}", message);
     Py_RETURN_NONE;
 }
 
 static PyObject* py_log_critical(PyObject* self, PyObject* args) {
+    (void)self;
     const char* message;
-
     if (!PyArg_ParseTuple(args, "s", &message)) {
         return nullptr;
     }
-
     Logger::Critical("[Python] {}", message);
     Py_RETURN_NONE;
 }
 
 static PyObject* py_get_player(PyObject* self, PyObject* args) {
+    (void)self;
     long player_id;
-
     if (!PyArg_ParseTuple(args, "l", &player_id)) {
         return nullptr;
     }
-
     auto& playerMgr = PlayerManager::GetInstance();
     auto player = playerMgr.GetPlayer(player_id);
-
     if (!player) {
         Py_RETURN_NONE;
     }
-
-    //return JsonToPython(((Player)player)->ToJson());
     return JsonToPython(player->ToJson());
 }
 
 static PyObject* py_set_player_position(PyObject* self, PyObject* args) {
+    (void)self;
     long player_id;
     double x, y, z;
-
     if (!PyArg_ParseTuple(args, "lddd", &player_id, &x, &y, &z)) {
         return nullptr;
     }
-
     auto& playerMgr = PlayerManager::GetInstance();
     auto player = playerMgr.GetPlayer(player_id);
-
     if (!player) {
         Py_RETURN_FALSE;
     }
-
     player->UpdatePosition(x, y, z);
-
-    // Update database through the GameLogic backend
+    // Update database through the backend
     auto& gameLogic = GameLogic::GetInstance();
     auto backend = gameLogic.GetDatabaseBackend();
-    
     if (backend) {
         backend->UpdatePlayerPosition(player_id, x, y, z);
     }
-
     Py_RETURN_TRUE;
 }
 
 static PyObject* py_give_player_item(PyObject* self, PyObject* args) {
+    (void)self;
     long player_id;
     const char* item_id;
     int count;
-
     if (!PyArg_ParseTuple(args, "lsi", &player_id, &item_id, &count)) {
         return nullptr;
     }
-
     auto& playerMgr = PlayerManager::GetInstance();
     if (playerMgr.GiveItemToPlayer(player_id, item_id, count)) {
         Py_RETURN_TRUE;
     }
-
     Py_RETURN_FALSE;
 }
 
 static PyObject* py_add_player_experience(PyObject* self, PyObject* args) {
+    (void)self;
     long player_id;
     long long amount;
-
     if (!PyArg_ParseTuple(args, "lL", &player_id, &amount)) {
         return nullptr;
     }
-
     auto& playerMgr = PlayerManager::GetInstance();
     auto player = playerMgr.GetPlayer(player_id);
-
     if (!player) {
         Py_RETURN_FALSE;
     }
-
     player->AddExperience(amount);
     Py_RETURN_TRUE;
 }
 
 static PyObject* py_send_message_to_player(PyObject* self, PyObject* args) {
+    (void)self;
     long player_id;
     const char* message;
-
     if (!PyArg_ParseTuple(args, "ls", &player_id, &message)) {
         return nullptr;
     }
-
     auto& playerMgr = PlayerManager::GetInstance();
-
     nlohmann::json msg = {
         {"type", "system_message"},
         {"message", message},
         {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count()}
     };
-
     playerMgr.SendToPlayer(player_id, msg);
     Py_RETURN_TRUE;
 }
 
 static PyObject* py_broadcast_to_nearby(PyObject* self, PyObject* args) {
+    (void)self;
     long player_id;
     const char* message;
     double radius;
-
     if (!PyArg_ParseTuple(args, "lsd", &player_id, &message, &radius)) {
         return nullptr;
     }
-
     auto& playerMgr = PlayerManager::GetInstance();
-
     nlohmann::json msg = {
         {"type", "broadcast_message"},
         {"message", message},
@@ -336,59 +309,41 @@ static PyObject* py_broadcast_to_nearby(PyObject* self, PyObject* args) {
         {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count()}
     };
-
     playerMgr.BroadcastToNearbyPlayers(player_id, msg);
     Py_RETURN_TRUE;
 }
 
 static PyObject* py_query_database(PyObject* self, PyObject* args) {
+    (void)self;
     const char* query;
     PyObject* params_obj = nullptr;
-
-    // Parse query and optional parameters
     if (!PyArg_ParseTuple(args, "s|O", &query, &params_obj)) {
         return nullptr;
     }
-
-    // Get database backend from GameLogic
-    auto& gameLogic = GameLogic::GetInstance();
-    auto backend = gameLogic.GetDatabaseBackend();
-    
-    if (!backend) {
-        Logger::Error("Database backend not available");
-        Py_RETURN_NONE;
-    }
-    
+    auto& dbManager = DbManager::GetInstance();
     try {
         if (params_obj) {
-            // Convert Python sequence to vector of strings
             std::vector<std::string> params = PythonSequenceToStringVector(params_obj);
-            
-            // Use parameterized query if backend supports it
-            // For now, construct parameterized query manually
             if (!params.empty()) {
-                // Simple placeholder replacement for demonstration
-                // WARNING: This is not secure - use proper parameterized queries in production!
+                // Simple placeholder replacement (as before)
                 std::string processed_query = query;
                 for (size_t i = 0; i < params.size(); ++i) {
                     std::string placeholder = "$" + std::to_string(i + 1);
                     std::string escaped_value = "'" + params[i] + "'";
-                    
                     size_t pos = 0;
                     while ((pos = processed_query.find(placeholder, pos)) != std::string::npos) {
                         processed_query.replace(pos, placeholder.length(), escaped_value);
                         pos += escaped_value.length();
                     }
                 }
-                nlohmann::json result = backend->Query(processed_query);
+                auto result = dbManager.Query(processed_query);
                 return JsonToPython(result);
             } else {
-                auto result = backend->Query(query);
+                auto result = dbManager.Query(query);
                 return JsonToPython(result);
             }
         } else {
-            // Execute query without parameters
-            auto result = backend->Query(query);
+            auto result = dbManager.Query(query);
             return JsonToPython(result);
         }
     } catch (const std::exception& e) {
@@ -398,36 +353,30 @@ static PyObject* py_query_database(PyObject* self, PyObject* args) {
 }
 
 static PyObject* py_execute_database(PyObject* self, PyObject* args) {
+    (void)self;
     const char* query;
     PyObject* params_obj = nullptr;
-
     if (!PyArg_ParseTuple(args, "s|O", &query, &params_obj)) {
         return nullptr;
     }
-
     // Get database backend from GameLogic
     auto& gameLogic = GameLogic::GetInstance();
     auto backend = gameLogic.GetDatabaseBackend();
-    
     if (!backend) {
         Logger::Error("Database backend not available");
         Py_RETURN_FALSE;
     }
-    
     try {
         bool success = false;
-        
         if (params_obj) {
             // Convert Python sequence to vector of strings
             std::vector<std::string> params = PythonSequenceToStringVector(params_obj);
-            
             if (!params.empty()) {
                 // Simple placeholder replacement for demonstration
                 std::string processed_query = query;
                 for (size_t i = 0; i < params.size(); ++i) {
                     std::string placeholder = "$" + std::to_string(i + 1);
                     std::string escaped_value = "'" + params[i] + "'";
-                    
                     size_t pos = 0;
                     while ((pos = processed_query.find(placeholder, pos)) != std::string::npos) {
                         processed_query.replace(pos, placeholder.length(), escaped_value);
@@ -441,12 +390,10 @@ static PyObject* py_execute_database(PyObject* self, PyObject* args) {
         } else {
             success = backend->Execute(query);
         }
-
         if (success) {
             Py_RETURN_TRUE;
         }
         Py_RETURN_FALSE;
-        
     } catch (const std::exception& e) {
         Logger::Error("Database execute failed: {}", e.what());
         Py_RETURN_FALSE;
@@ -455,35 +402,29 @@ static PyObject* py_execute_database(PyObject* self, PyObject* args) {
 
 // New function for secure parameterized queries
 static PyObject* py_query_database_params(PyObject* self, PyObject* args) {
+    (void)self;
     const char* query;
     PyObject* params_obj = nullptr;
-
     if (!PyArg_ParseTuple(args, "sO", &query, &params_obj)) {
         return nullptr;
     }
-
     // Get database backend from GameLogic
     auto& gameLogic = GameLogic::GetInstance();
     auto backend = gameLogic.GetDatabaseBackend();
-    
     if (!backend) {
         Logger::Error("Database backend not available");
         Py_RETURN_NONE;
     }
-    
     try {
         // Convert Python sequence to vector of strings
         std::vector<std::string> params = PythonSequenceToStringVector(params_obj);
-        
         // Use parameterized query
         nlohmann::json result;
-        
         if (!params.empty()) {
             std::string processed_query = query;
             for (size_t i = 0; i < params.size(); ++i) {
                 std::string placeholder = "$" + std::to_string(i + 1);
                 std::string escaped_value = "'" + params[i] + "'";
-                
                 size_t pos = 0;
                 while ((pos = processed_query.find(placeholder, pos)) != std::string::npos) {
                     processed_query.replace(pos, placeholder.length(), escaped_value);
@@ -494,9 +435,7 @@ static PyObject* py_query_database_params(PyObject* self, PyObject* args) {
         } else {
             result = backend->Query(query);
         }
-        
         return JsonToPython(result);
-        
     } catch (const std::exception& e) {
         Logger::Error("Parameterized database query failed: {}", e.what());
         Py_RETURN_NONE;
@@ -504,115 +443,101 @@ static PyObject* py_query_database_params(PyObject* self, PyObject* args) {
 }
 
 static PyObject* py_fire_event(PyObject* self, PyObject* args) {
+    (void)self;
     const char* event_name;
     PyObject* data_obj;
-
     if (!PyArg_ParseTuple(args, "sO", &event_name, &data_obj)) {
         return nullptr;
     }
-
     nlohmann::json data = PythonToJson(data_obj);
     auto& scripting = PythonScripting::GetInstance();
     scripting.FireEvent(event_name, data);
-
     Py_RETURN_NONE;
 }
 
 static PyObject* py_schedule_event(PyObject* self, PyObject* args) {
+    (void)self;
     int delay_ms;
     const char* event_name;
     PyObject* data_obj;
-
     if (!PyArg_ParseTuple(args, "isO", &delay_ms, &event_name, &data_obj)) {
         return nullptr;
     }
-
     // This would be implemented with a timer/scheduler
     // For now, just fire the event immediately
     nlohmann::json data = PythonToJson(data_obj);
     auto& scripting = PythonScripting::GetInstance();
-
     std::thread([delay_ms, event_name, data, &scripting]() {
         std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
         scripting.FireEvent(event_name, data);
     }).detach();
-
     Py_RETURN_NONE;
 }
 
 static PyObject* py_get_current_time(PyObject* self, PyObject* args) {
+    (void)self;
+    (void)args;
     auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
-
     return PyLong_FromLongLong(now);
 }
 
 static PyObject* py_generate_uuid(PyObject* self, PyObject* args) {
+    (void)self;
+    (void)args;
     uuid_t uuid;
     char uuid_str[37];
-
     uuid_generate(uuid);
     uuid_unparse(uuid, uuid_str);
-
     return PyUnicode_FromString(uuid_str);
 }
 
 static PyObject* py_random_float(PyObject* self, PyObject* args) {
+    (void)self;
     double min, max;
-
     if (!PyArg_ParseTuple(args, "dd", &min, &max)) {
         return nullptr;
     }
-
     static std::random_device rd;
     static std::mt19937 gen(rd());
     std::uniform_real_distribution<> dis(min, max);
-
     return PyFloat_FromDouble(dis(gen));
 }
 
 static PyObject* py_random_int(PyObject* self, PyObject* args) {
+    (void)self;
     long min, max;
-
     if (!PyArg_ParseTuple(args, "ll", &min, &max)) {
         return nullptr;
     }
-
     static std::random_device rd;
     static std::mt19937 gen(rd());
     std::uniform_int_distribution<> dis(min, max);
-
     return PyLong_FromLong(dis(gen));
 }
 
 static PyObject* py_distance(PyObject* self, PyObject* args) {
+    (void)self;
     double x1, y1, z1, x2, y2, z2;
-
     if (!PyArg_ParseTuple(args, "dddddd", &x1, &y1, &z1, &x2, &y2, &z2)) {
         return nullptr;
     }
-
     double dx = x2 - x1;
     double dy = y2 - y1;
     double dz = z2 - z1;
-
     double distance = std::sqrt(dx*dx + dy*dy + dz*dz);
-
     return PyFloat_FromDouble(distance);
 }
 
 static PyObject* py_get_config(PyObject* self, PyObject* args) {
+    (void)self;
     const char* key;
-
     if (!PyArg_ParseTuple(args, "s", &key)) {
         return nullptr;
     }
-
     auto& config = ConfigManager::GetInstance();
-
     // Try different getter methods
     nlohmann::json value;
-
     if (config.HasKey(key)) {
         // Try to get as string first
         std::string strValue = config.GetString(key, "");
@@ -633,31 +558,28 @@ static PyObject* py_get_config(PyObject* self, PyObject* args) {
             }
         }
     }
-
     return JsonToPython(value);
 }
 
 static PyObject* py_take_player_item(PyObject* self, PyObject* args) {
+    (void)self;
     long player_id;
     const char* item_id;
     int count;
-
     if (!PyArg_ParseTuple(args, "lsi", &player_id, &item_id, &count)) {
         return nullptr;
     }
-
     // Implementation would go here
     Py_RETURN_FALSE;
 }
 
 static PyObject* py_set_player_health(PyObject* self, PyObject* args) {
+    (void)self;
     long player_id;
     int health;
-
     if (!PyArg_ParseTuple(args, "li", &player_id, &health)) {
         return nullptr;
     }
-
     // Implementation would go here
     Py_RETURN_FALSE;
 }
@@ -691,8 +613,8 @@ static PyMethodDef GameServerMethods[] = {
     {"schedule_event", py_schedule_event, METH_VARARGS, "Schedule delayed event"},
 
     // Utility functions
-    {"get_current_time", py_get_current_time, METH_VARARGS, "Get current timestamp"},
-    {"generate_uuid", py_generate_uuid, METH_VARARGS, "Generate UUID"},
+    {"get_current_time", py_get_current_time, METH_NOARGS, "Get current timestamp"},
+    {"generate_uuid", py_generate_uuid, METH_NOARGS, "Generate UUID"},
     {"random_float", py_random_float, METH_VARARGS, "Generate random float"},
     {"random_int", py_random_int, METH_VARARGS, "Generate random integer"},
     {"distance", py_distance, METH_VARARGS, "Calculate distance between points"},
@@ -709,7 +631,11 @@ static struct PyModuleDef gameservermodule = {
     "gameserver",  // Module name
     "Game Server Python API",  // Module documentation
     -1,  // Module keeps state in global variables
-    GameServerMethods
+    GameServerMethods, // m_methods
+    nullptr, // m_slots
+    nullptr, // m_traverse
+    nullptr, // m_clear
+    nullptr  // m_free
 };
 
 // Module initialization
@@ -856,6 +782,7 @@ bool PythonAPI::BroadcastToNearby(int64_t playerId, const std::string& message, 
         {"type", "broadcast_message"},
         {"message", message},
         {"source_player_id", playerId},
+        {"radius", radius},
         {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count()}
     };
@@ -926,16 +853,8 @@ bool PythonAPI::ExecuteDatabase(const std::string& query, const std::vector<std:
 }
 
 nlohmann::json PythonAPI::GetPlayerFromDB(int64_t playerId) {
-    // Get database backend from GameLogic
-    auto& gameLogic = GameLogic::GetInstance();
-    auto backend = gameLogic.GetDatabaseBackend();
-    
-    if (!backend) {
-        Logger::Error("Database backend not available");
-        return nlohmann::json();
-    }
-    
-    return backend->GetPlayer(playerId);
+    auto& dbManager = DbManager::GetInstance();
+    return dbManager.GetPlayer(playerId);
 }
 
 bool PythonAPI::SavePlayerToDB(int64_t playerId, const nlohmann::json& data) {
@@ -1038,7 +957,32 @@ nlohmann::json PythonAPI::GetConfig(const std::string& key) {
 }
 
 bool PythonAPI::SetConfig(const std::string& key, const nlohmann::json& value) {
-    // This would need to be implemented in ConfigManager
-    // For now, return false
-    return false;
+    auto& config = ConfigManager::GetInstance();
+    try {
+        if (value.is_boolean()) {
+            config.SetBool(key, value.get<bool>());
+        }
+        else if (value.is_number_integer()) {
+            config.SetInt(key, value.get<int>());
+        }
+        else if (value.is_number_float()) {
+            // Store as string; GetConfig will parse it back to a number
+            config.SetString(key, std::to_string(value.get<double>()));
+        }
+        else if (value.is_string()) {
+            config.SetString(key, value.get<std::string>());
+        }
+        else if (value.is_array() || value.is_object()) {
+            config.SetJson(key, value);
+        }
+        else {
+            // Unsupported type (null, etc.)
+            return false;
+        }
+        return true;
+    }
+    catch (const std::exception& e) {
+        Logger::Error("Failed to set config key {}: {}", key, e.what());
+        return false;
+    }
 }

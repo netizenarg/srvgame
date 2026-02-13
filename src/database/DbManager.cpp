@@ -106,7 +106,7 @@ void DbManager::Shutdown() {
     if (backend_) {
         backend_->Disconnect();
         backend_->ReleaseConnectionPool();
-        backend_.reset();
+        backend_->ResetStats();
     }
 
     initialized_ = false;
@@ -259,6 +259,10 @@ bool DbManager::SetBackend(DatabaseType type, const nlohmann::json& config) {
     return true;
 }
 
+bool DbManager::SaveGameState(const std::string& key, const nlohmann::json& state) {
+    return backend_->SaveGameState(key, state);
+}
+
 bool DbManager::Connect() {
     if (!initialized_) {
         Logger::Error("DbManager not initialized");
@@ -343,8 +347,8 @@ nlohmann::json DbManager::GetStatistics() const {
 
     // Basic info
     stats["type"] = DatabaseTypeToString(currentType_);
-    stats["initialized"] = initialized_;
-    stats["connected"] = connected_;
+    stats["initialized"] = initialized_.load();
+    stats["connected"] = connected_.load();
 
     if (backend_) {
         stats["connection_info"] = backend_->GetConnectionInfo();

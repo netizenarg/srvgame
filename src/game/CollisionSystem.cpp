@@ -10,11 +10,18 @@
 static constexpr float EPSILON = 1e-6f;
 static constexpr float INV_EPSILON = 1e6f;
 
+float distance_between_vec3(glm::vec3 pos0, glm::vec3 pos1)
+{
+    glm::vec3 delta = pos0 - pos1;
+    return glm::dot(delta, delta);
+}
+
 // BoundingSphere implementation
 bool BoundingSphere::Intersects(const BoundingSphere& other) const {
     if (!IsValid() || !other.IsValid()) return false;
     
-    float distanceSquared = glm::distance2(center, other.center);
+    //float distanceSquared = glm::distance2(center, other.center);
+    float distanceSquared = distance_between_vec3(center, other.center);
     float radiusSum = radius + other.radius;
     return distanceSquared <= (radiusSum * radiusSum);
 }
@@ -717,7 +724,7 @@ bool CollisionSystem::TestSphereTriangle(const glm::vec3& sphereCenter, float ra
         float t = glm::dot(ap, ab) / glm::dot(ab, ab);
         t = std::clamp(t, 0.0f, 1.0f);
         glm::vec3 closest = a + ab * t;
-        float distSq = glm::distance2(sphereCenter, closest);
+        float distSq = distance_between_vec3(sphereCenter, closest);
         if (distSq < minDistanceSquared) {
             minDistanceSquared = distSq;
             closestPoint = closest;
@@ -730,7 +737,7 @@ bool CollisionSystem::TestSphereTriangle(const glm::vec3& sphereCenter, float ra
     
     // Check vertices
     auto checkVertex = [&](const glm::vec3& vertex) {
-        float distSq = glm::distance2(sphereCenter, vertex);
+        float distSq = distance_between_vec3(sphereCenter, vertex);
         if (distSq < minDistanceSquared) {
             minDistanceSquared = distSq;
             closestPoint = vertex;
@@ -829,7 +836,7 @@ bool CollisionSystem::TestRayTriangle(const glm::vec3& origin, const glm::vec3& 
 
 bool CollisionSystem::ValidatePosition(const glm::vec3& position) const {
     // Check for NaN and infinite values
-    if (!glm::all(glm::isfinite(position))) {
+    if (!std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z)) {
         return false;
     }
     

@@ -19,6 +19,9 @@
 
 class LootTableManager {
 public:
+    LootTableManager();
+    ~LootTableManager();
+
     // Singleton pattern
     static LootTableManager& GetInstance();
     
@@ -78,8 +81,6 @@ public:
     );
     
 private:
-    LootTableManager();
-    ~LootTableManager() = default;
     
     // Helper methods for loot generation
     std::shared_ptr<LootItem> CreateItemFromEntry(

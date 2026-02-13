@@ -129,6 +129,46 @@ bool ConfigManager::ValidateConfig() const {
     }
 }
 
+void ConfigManager::SetBool(const std::string& key, bool value) {
+    std::lock_guard<std::mutex> lock(configMutex_);
+    std::string keyPath = key;
+    std::replace(keyPath.begin(), keyPath.end(), '.', '/');
+    nlohmann::json::json_pointer ptr("/" + keyPath);
+    config_[ptr] = value;
+}
+
+void ConfigManager::SetInt(const std::string& key, int value) {
+    std::lock_guard<std::mutex> lock(configMutex_);
+    std::string keyPath = key;
+    std::replace(keyPath.begin(), keyPath.end(), '.', '/');
+    nlohmann::json::json_pointer ptr("/" + keyPath);
+    config_[ptr] = value;
+}
+
+void ConfigManager::SetFloat(const std::string& key, float value) {
+    std::lock_guard<std::mutex> lock(configMutex_);
+    std::string keyPath = key;
+    std::replace(keyPath.begin(), keyPath.end(), '.', '/');
+    nlohmann::json::json_pointer ptr("/" + keyPath);
+    config_[ptr] = value;
+}
+
+void ConfigManager::SetString(const std::string& key, const std::string& value) {
+    std::lock_guard<std::mutex> lock(configMutex_);
+    std::string keyPath = key;
+    std::replace(keyPath.begin(), keyPath.end(), '.', '/');
+    nlohmann::json::json_pointer ptr("/" + keyPath);
+    config_[ptr] = value;
+}
+
+void ConfigManager::SetJson(const std::string& key, const nlohmann::json& value) {
+    std::lock_guard<std::mutex> lock(configMutex_);
+    std::string keyPath = key;
+    std::replace(keyPath.begin(), keyPath.end(), '.', '/');
+    nlohmann::json::json_pointer ptr("/" + keyPath);
+    config_[ptr] = value;
+}
+
 // Server configuration getters
 std::string ConfigManager::GetServerHost() const {
     std::lock_guard<std::mutex> lock(configMutex_);
@@ -563,40 +603,5 @@ bool ConfigManager::HasKey(const std::string& key) const {
         return config_.contains(ptr);
     } catch (const std::exception& e) {
         return false;
-    }
-}
-
-// Utility methods (not declared in header but useful for implementation)
-namespace {
-    // Helper function to safely get world size
-    std::map<std::string, float> GetWorldSizeFromConfig(const nlohmann::json& config) {
-        std::map<std::string, float> worldSize;
-        try {
-            if (config.contains("world") && 
-                config["world"].contains("size") &&
-                config["world"]["size"].is_object()) {
-
-                const auto& world = config["world"]["size"];
-                if (world.contains("x") && world["x"].is_number()) {
-                    worldSize["x"] = world["x"].get<float>();
-                }
-                if (world.contains("y") && world["y"].is_number()) {
-                    worldSize["y"] = world["y"].get<float>();
-                }
-                if (world.contains("z") && world["z"].is_number()) {
-                    worldSize["z"] = world["z"].get<float>();
-                }
-            }
-        } catch (const std::exception& e) {
-            // Use defaults
-            Logger::Error("{}", e.what());
-        }
-
-        // Set defaults if not specified
-        if (worldSize.find("x") == worldSize.end()) worldSize["x"] = 1000.0f;
-        if (worldSize.find("y") == worldSize.end()) worldSize["y"] = 1000.0f;
-        if (worldSize.find("z") == worldSize.end()) worldSize["z"] = 100.0f;
-
-        return worldSize;
     }
 }

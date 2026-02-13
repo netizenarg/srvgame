@@ -144,11 +144,11 @@ void MobSystem::OnMobDeath(uint64_t mobId, uint64_t killerId) {
     MobDeathInfo deathInfo;
     deathInfo.mobId = mobId;
     deathInfo.killerId = killerId;
-    deathInfo.mobType = mob->GetType();
+    deathInfo.mobType = mob->GetNPCType();
     deathInfo.deathPosition = mob->GetPosition();
     deathInfo.deathTime = std::chrono::steady_clock::now();
     deathInfo.level = 1; // TODO: Get level from mob
-    deathInfo.lootTableId = GetLootTableIdForMob(mob->GetType(), zoneName);
+    deathInfo.lootTableId = GetLootTableIdForMob(mob->GetNPCType(), zoneName);
 
     // Award experience
     float experience = GetExperienceReward(deathInfo.mobType, deathInfo.level);
@@ -183,7 +183,7 @@ void MobSystem::OnMobDeath(uint64_t mobId, uint64_t killerId) {
     gameLogic.FirePythonEvent("mob_death", {
         {"mobId", mobId},
         {"killerId", killerId},
-        {"mobType", static_cast<int>(mob->GetType())},
+        {"mobType", static_cast<int>(mob->GetNPCType())},
                               {"level", deathInfo.level},
                               {"experience", experience},
                               {"deathPosition", {
