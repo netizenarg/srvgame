@@ -222,14 +222,17 @@ void PlayerSettings::Deserialize(const nlohmann::json& data) {
 // =============== PlayerEntity Implementation ===============
 PlayerEntity::PlayerEntity(const glm::vec3& position)
     : GameEntity(EntityType::PLAYER, position),
-      player_class_(PlayerClass::WARRIOR),
-      race_(PlayerRace::HUMAN),
-      status_(PlayerStatus::IDLE) {
+    inventory_system_(InventorySystem::GetInstance()),
+    skill_system_(SkillSystem::GetInstance()),
+    quest_system_(QuestSystem::GetInstance()),
+    player_class_(PlayerClass::WARRIOR),
+    race_(PlayerRace::HUMAN),
+    status_(PlayerStatus::IDLE) {
 
     // Initialize systems
-    inventory_system_ = std::make_shared<InventorySystem>();
-    skill_system_ = std::make_shared<SkillSystem>();
-    quest_system_ = std::make_shared<QuestSystem>();
+    // inventory_system_ = std::make_shared<InventorySystem>();
+    // skill_system_ = std::make_shared<SkillSystem>();
+    // quest_system_ = std::make_shared<QuestSystem>();
 
     // Apply default bonuses
     ApplyRaceBonuses();
@@ -243,14 +246,17 @@ PlayerEntity::PlayerEntity(const glm::vec3& position)
 
 PlayerEntity::PlayerEntity(const glm::vec3& position, PlayerClass player_class, PlayerRace race)
     : GameEntity(EntityType::PLAYER, position),
-      player_class_(player_class),
-      race_(race),
-      status_(PlayerStatus::IDLE) {
+    inventory_system_(InventorySystem::GetInstance()),
+    skill_system_(SkillSystem::GetInstance()),
+    quest_system_(QuestSystem::GetInstance()),
+    player_class_(player_class),
+    race_(race),
+    status_(PlayerStatus::IDLE) {
 
     // Initialize systems
-    inventory_system_ = std::make_shared<InventorySystem>();
-    skill_system_ = std::make_shared<SkillSystem>();
-    quest_system_ = std::make_shared<QuestSystem>();
+    // inventory_system_ = std::make_shared<InventorySystem>();
+    // skill_system_ = std::make_shared<SkillSystem>();
+    // quest_system_ = std::make_shared<QuestSystem>();
 
     // Apply bonuses based on class and race
     ApplyRaceBonuses();

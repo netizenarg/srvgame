@@ -37,6 +37,7 @@ struct PlayerAttributes {
     // Derived stats
     int attack_power = 10;
     int defense = 5;
+    int max_mana = 100;
     float critical_chance = 0.05f;
     float critical_damage = 1.5f;
     float move_speed = 1.0f;
@@ -257,9 +258,9 @@ public:
     void UnblockPlayer(uint64_t player_id);
 
     // Player systems access
-    std::shared_ptr<InventorySystem> GetInventorySystem() const { return inventory_system_; }
-    std::shared_ptr<SkillSystem> GetSkillSystem() const { return skill_system_; }
-    std::shared_ptr<QuestSystem> GetQuestSystem() const { return quest_system_; }
+    InventorySystem& GetInventorySystem() const { return inventory_system_; }
+    SkillSystem& GetSkillSystem() const { return skill_system_; }
+    QuestSystem& GetQuestSystem() const { return quest_system_; }
 
     // Utility methods
     bool IsAlive() const { return stats_.health > 0; }
@@ -350,9 +351,9 @@ private:
     bool is_sprinting_ = false;
 
     // Systems
-    std::shared_ptr<InventorySystem> inventory_system_;
-    std::shared_ptr<SkillSystem> skill_system_;
-    std::shared_ptr<QuestSystem> quest_system_;
+    InventorySystem& inventory_system_;
+    SkillSystem& skill_system_;
+    QuestSystem& quest_system_;
 
     // Private methods
     void OnLevelUp();
