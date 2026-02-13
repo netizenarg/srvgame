@@ -88,11 +88,6 @@ private:
     static DbManager* instance_;
 
     std::unique_ptr<DatabaseBackend> backend_;
-// #ifdef USE_CITUS
-//     std::unique_ptr<CitusClient> backend_;
-// #else
-//     std::unique_ptr<PostgreSqlClient> backend_;
-// #endif
     DatabaseType currentType_;
     nlohmann::json config_;
     std::atomic<bool> initialized_;
