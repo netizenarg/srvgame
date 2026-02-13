@@ -12,6 +12,7 @@
 #include <unordered_map>
 
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <nlohmann/json.hpp>
 
 #include "logging/Logger.hpp"
@@ -38,11 +39,11 @@ enum class EntityType {
     ANY
 };
 
-class GameEntity {
+class GameEntity : public std::enable_shared_from_this<GameEntity> {
 public:
     GameEntity(EntityType type, const glm::vec3& position);
     virtual ~GameEntity();
-    
+
     // Core properties
     EntityType GetType() const { return type_; }
     uint64_t GetId() const { return id_; }
@@ -183,9 +184,12 @@ public:
     std::string ToString() const;
     
     // Events and callbacks
+    using EventToken = uint64_t;
     using EventCallback = std::function<void(std::shared_ptr<GameEntity>)>;
-    void SubscribeToEvent(const std::string& event_name, EventCallback callback);
-    void UnsubscribeFromEvent(const std::string& event_name, EventCallback callback);
+    // void SubscribeToEvent(const std::string& event_name, EventCallback callback);
+    // void UnsubscribeFromEvent(const std::string& event_name, EventCallback callback);
+    EventToken SubscribeToEvent(const std::string& event_name, EventCallback callback);
+    void UnsubscribeFromEvent(EventToken token);
     void FireEvent(const std::string& event_name);
     
     // Static utilities
@@ -229,9 +233,6 @@ protected:
     BoundingSphere bounding_sphere_;
     bool bounding_volumes_dirty_ = true;
     
-    // Events
-    std::unordered_map<std::string, std::vector<EventCallback>> event_callbacks_;
-    
     // Private methods
     void UpdateWorldTransform();
     void UpdateLocalTransform();
@@ -241,4 +242,11 @@ protected:
     
     // Static ID generator
     static std::atomic<uint64_t> next_entity_id_;
+
+private:
+
+    // Events
+    //std::unordered_map<std::string, std::vector<EventCallback>> event_callbacks_;
+    std::unordered_map<std::string, std::vector<std::pair<EventToken, EventCallback>>> event_callbacks_;
+    std::atomic<EventToken> next_token_{1};
 };

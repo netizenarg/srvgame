@@ -1,5 +1,17 @@
 #include "game/GameEntity.hpp"
 
+// =============== Utility Function ===============
+namespace {
+    std::string JoinStrings(const std::vector<std::string>& strings, const std::string& delimiter) {
+        std::stringstream ss;
+        for (size_t i = 0; i < strings.size(); ++i) {
+            if (i > 0) ss << delimiter;
+            ss << strings[i];
+        }
+        return ss.str();
+    }
+}
+
 // =============== Static Initialization ===============
 std::atomic<uint64_t> GameEntity::next_entity_id_(1);
 
@@ -569,22 +581,46 @@ void GameEntity::LookAt(std::shared_ptr<GameEntity> target) {
 }
 
 // =============== Event System ===============
-void GameEntity::SubscribeToEvent(const std::string& event_name, EventCallback callback) {
-    event_callbacks_[event_name].push_back(callback);
+// void GameEntity::SubscribeToEvent(const std::string& event_name, EventCallback callback) {
+//     event_callbacks_[event_name].push_back(callback);
+// }
+// void GameEntity::UnsubscribeFromEvent(const std::string& event_name, EventCallback callback) {
+//     auto it = event_callbacks_.find(event_name);
+//     if (it != event_callbacks_.end()) {
+//         auto& callbacks = it->second;
+//         callbacks.erase(std::remove(callbacks.begin(), callbacks.end(), callback), callbacks.end());
+//     }
+// }
+// void GameEntity::FireEvent(const std::string& event_name) {
+//     auto it = event_callbacks_.find(event_name);
+//     if (it != event_callbacks_.end()) {
+//         for (auto& callback : it->second) {
+//             callback(shared_from_this());
+//         }
+//     }
+// }
+
+GameEntity::EventToken GameEntity::SubscribeToEvent(const std::string& event_name, EventCallback callback) {
+    EventToken token = next_token_++;
+    event_callbacks_[event_name].emplace_back(token, std::move(callback));
+    return token;
 }
 
-void GameEntity::UnsubscribeFromEvent(const std::string& event_name, EventCallback callback) {
-    auto it = event_callbacks_.find(event_name);
-    if (it != event_callbacks_.end()) {
-        auto& callbacks = it->second;
-        callbacks.erase(std::remove(callbacks.begin(), callbacks.end(), callback), callbacks.end());
+void GameEntity::UnsubscribeFromEvent(EventToken token) {
+    for (auto& [name, callbacks] : event_callbacks_) {
+        auto it = std::remove_if(callbacks.begin(), callbacks.end(),
+                                 [token](const auto& pair) { return pair.first == token; });
+        if (it != callbacks.end()) {
+            callbacks.erase(it, callbacks.end());
+            return;
+        }
     }
 }
 
 void GameEntity::FireEvent(const std::string& event_name) {
     auto it = event_callbacks_.find(event_name);
     if (it != event_callbacks_.end()) {
-        for (auto& callback : it->second) {
+        for (auto& [token, callback] : it->second) {
             callback(shared_from_this());
         }
     }
@@ -646,7 +682,7 @@ const char* GameEntity::EntityTypeToString(EntityType type) {
     }
 }
 
-GameEntity::EntityType GameEntity::StringToEntityType(const std::string& type_str) {
+EntityType GameEntity::StringToEntityType(const std::string& type_str) {
     static const std::unordered_map<std::string, EntityType> type_map = {
         {"PLAYER", EntityType::PLAYER},
         {"NPC", EntityType::NPC},
@@ -675,16 +711,4 @@ GameEntity::EntityType GameEntity::StringToEntityType(const std::string& type_st
 
 uint64_t GameEntity::GenerateEntityId() {
     return next_entity_id_++;
-}
-
-// =============== Utility Function ===============
-namespace {
-    std::string JoinStrings(const std::vector<std::string>& strings, const std::string& delimiter) {
-        std::stringstream ss;
-        for (size_t i = 0; i < strings.size(); ++i) {
-            if (i > 0) ss << delimiter;
-            ss << strings[i];
-        }
-        return ss.str();
-    }
 }
