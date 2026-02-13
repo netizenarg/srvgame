@@ -10,7 +10,6 @@ EntityManager& EntityManager::GetInstance() {
 EntityManager::EntityManager() : nextEntityId_(1) {
     Logger::Info("EntityManager initialized");
 }
-
 // =============== Entity Lifecycle ===============
 uint64_t EntityManager::CreateEntity(EntityType type, const glm::vec3& position) {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -26,7 +25,7 @@ uint64_t EntityManager::CreateEntity(EntityType type, const glm::vec3& position)
             break;
         }
         case EntityType::NPC: {
-            auto npcEntity = std::make_unique<NPCEntity>(position);
+            auto npcEntity = std::make_unique<NPCEntity>(NPCType::VILLAGER, position);
             npcEntities_[entityId] = npcEntity.get();
             entity = std::move(npcEntity);
             break;

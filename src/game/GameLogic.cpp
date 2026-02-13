@@ -443,13 +443,13 @@ void GameLogic::HandleFamiliarCommand(uint64_t sessionId, const nlohmann::json& 
         }
 
         if (command == "follow") {
-            familiar->SetBehaviorState(NPCBehaviorState::FOLLOW);
+            familiar->SetBehaviorState(NPCAIState::FOLLOW);
             familiar->SetTarget(playerId);
         } else if (command == "attack") {
-            familiar->SetBehaviorState(NPCBehaviorState::CHASE);
+            familiar->SetBehaviorState(NPCAIState::CHASE);
             familiar->SetTarget(targetId);
         } else if (command == "stay") {
-            familiar->SetBehaviorState(NPCBehaviorState::IDLE);
+            familiar->SetBehaviorState(NPCAIState::IDLE);
             familiar->SetTarget(0);
         }
 
@@ -556,7 +556,7 @@ void GameLogic::GameLoop() {
     
     auto lastUpdate = std::chrono::steady_clock::now();
     
-    while (instanceMutex_) {
+    while (!instanceMutex_.try_lock()) {
         try {
             auto startTime = std::chrono::steady_clock::now();
             
@@ -589,7 +589,9 @@ void GameLogic::GameLoop() {
             Logger::Error("Error in game loop: {}", e.what());
         }
     }
-    
+
+    instanceMutex_.unlock();
+
     Logger::Info("Game loop stopped");
 }
 

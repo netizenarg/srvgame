@@ -1,7 +1,3 @@
-#include "config/ConfigManager.hpp"
-#include "logging/Logger.hpp"
-#include "network/BinaryProtocol.hpp"
-#include "network/ConnectionManager.hpp"
 #include "game/LogicEntity.hpp"
 
 LogicEntity::LogicEntity()
@@ -21,8 +17,9 @@ void LogicEntity::Initialize() {
     auto& config = ConfigManager::GetInstance();
     // Initialize loot systems
     //inventorySystem_ = std::make_unique<InventorySystem>();
-    lootTableManager_ = std::make_unique<LootTableManager>();
-    lootTableManager_->LoadLootTables("config/loot_tables.json");
+    //lootTableManager_ = std::make_unique<LootTableManager>();
+    //lootTableManager_->LoadLootTables("config/loot_tables.json");
+    LootTableManager::GetInstance().LoadLootTables("config/loot_tables.json");
     Logger::Info("LogicEntity initialized");
 }
 

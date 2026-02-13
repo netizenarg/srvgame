@@ -5,11 +5,17 @@
 #include <memory>
 #include <mutex>
 
+#include "config/ConfigManager.hpp"
+#include "logging/Logger.hpp"
+#include "network/BinaryProtocol.hpp"
+#include "network/ConnectionManager.hpp"
+
 #include "game/NPCSystem.hpp"
 #include "game/MobSystem.hpp"
 #include "game/EntityManager.hpp"
 #include "game/CollisionSystem.hpp"
-#include "game/LootItem.hpp"
+//#include "game/LootItem.hpp"
+#include "game/LootTableManager.hpp"
 
 class LogicEntity {
 public:

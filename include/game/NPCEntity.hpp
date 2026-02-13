@@ -171,6 +171,8 @@ struct NPCAIProfile {
     float patrol_speed = 2.0f;
     float chase_speed_multiplier = 1.5f;
     float flee_health_threshold = 0.3f;
+    float sight_range = 25.0f;
+    float chase_range = 40.0f;
 
     bool can_summon_allies = false;
     int max_allies = 0;
@@ -245,6 +247,7 @@ public:
     // AI and behavior
     const NPCAIProfile& GetAIProfile() const { return ai_profile_; }
     void SetAIProfile(const NPCAIProfile& profile);
+    void SetDefaultAIProfile();
 
     void UpdateAI(float delta_time);
     void SetTarget(uint64_t target_id);
@@ -329,10 +332,12 @@ public:
     std::string GetRarityString() const;
     std::string GetFactionString() const;
     std::string GetAIStateString() const;
+    std::string AIStateToString(NPCAIState state) const;
 
     NPCStats GetStats() const { return npc_stats_; };
     uint64_t GetOwnerId() const { return target_id_; };
     void SetBehaviorState(NPCAIState st) { ai_state_ = st; };
+    void MoveTo(const glm::vec3& destination, float speed_multiplier = 1.0f);
 
 private:
     NPCType npc_type_;
