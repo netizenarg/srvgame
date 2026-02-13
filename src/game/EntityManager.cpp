@@ -6,20 +6,18 @@ EntityManager& EntityManager::GetInstance() {
     return instance;
 }
 
-// =============== Private Constructor ===============
-EntityManager::EntityManager() 
-    : nextEntityId_(1) {
+// =============== Constructor ===============
+EntityManager::EntityManager() : nextEntityId_(1) {
     Logger::Info("EntityManager initialized");
 }
 
 // =============== Entity Lifecycle ===============
 uint64_t EntityManager::CreateEntity(EntityType type, const glm::vec3& position) {
     std::lock_guard<std::mutex> lock(mutex_);
-    
+
     uint64_t entityId = nextEntityId_++;
     std::unique_ptr<GameEntity> entity;
-    
-    // Create entity based on type
+
     switch (type) {
         case EntityType::PLAYER: {
             auto playerEntity = std::make_unique<PlayerEntity>(position);
@@ -41,218 +39,166 @@ uint64_t EntityManager::CreateEntity(EntityType type, const glm::vec3& position)
             Logger::Error("Unknown entity type: {}", static_cast<int>(type));
             return 0;
     }
-    
+
     if (!entity) {
         Logger::Error("Failed to create entity of type {}", static_cast<int>(type));
         return 0;
     }
-    
+
     entity->SetId(entityId);
     entities_[entityId] = std::move(entity);
-    
+
     Logger::Debug("Created entity {} of type {} at [{:.1f}, {:.1f}, {:.1f}]",
-                  entityId, static_cast<int>(type), 
+                  entityId, static_cast<int>(type),
                   position.x, position.y, position.z);
-    
+
     return entityId;
 }
 
 void EntityManager::DestroyEntity(uint64_t entityId) {
     std::lock_guard<std::mutex> lock(mutex_);
-    
-    auto entityIt = entities_.find(entityId);
-    if (entityIt == entities_.end()) {
+
+    auto it = entities_.find(entityId);
+    if (it == entities_.end()) {
         Logger::Warn("Attempted to destroy non-existent entity: {}", entityId);
         return;
     }
-    
-    // Mark the entity as pending destruction
-    EntityType type = entityIt->second->GetType();
-    
-    // Add to pending destruction queue with timestamp
+
+    EntityType type = it->second->GetType();
     pendingDestruction_.push_back({entityId, type, std::chrono::steady_clock::now()});
-    
-    // Immediately remove from active maps to prevent further interactions
+
     if (type == EntityType::PLAYER) {
         playerEntities_.erase(entityId);
     } else if (type == EntityType::NPC) {
         npcEntities_.erase(entityId);
     }
-    
-    // Also remove from ownership mappings
+
     ownership_.erase(entityId);
-    
+
     Logger::Debug("Marked entity {} for destruction", entityId);
 }
 
 // =============== Entity Access ===============
 GameEntity* EntityManager::GetEntity(uint64_t entityId) {
     std::lock_guard<std::mutex> lock(mutex_);
-    
     auto it = entities_.find(entityId);
     return it != entities_.end() ? it->second.get() : nullptr;
 }
 
 PlayerEntity* EntityManager::GetPlayerEntity(uint64_t playerId) {
     std::lock_guard<std::mutex> lock(mutex_);
-    
     auto it = playerEntities_.find(playerId);
     return it != playerEntities_.end() ? it->second : nullptr;
 }
 
 NPCEntity* EntityManager::GetNPCEntity(uint64_t npcId) {
     std::lock_guard<std::mutex> lock(mutex_);
-    
     auto it = npcEntities_.find(npcId);
     return it != npcEntities_.end() ? it->second : nullptr;
 }
 
 // =============== Spatial Queries ===============
-std::vector<uint64_t> EntityManager::GetEntitiesInRadius(const glm::vec3& position, 
-                                                         float radius, 
+std::vector<uint64_t> EntityManager::GetEntitiesInRadius(const glm::vec3& position,
+                                                         float radius,
                                                          EntityType filter) {
     std::lock_guard<std::mutex> lock(mutex_);
-    
     std::vector<uint64_t> result;
-    float radiusSquared = radius * radius;
-    
-    for (const auto& [entityId, entity] : entities_) {
-        // Skip if doesn't match filter
-        if (filter != EntityType::ANY && entity->GetType() != filter) {
+    float radiusSq = radius * radius;
+
+    for (const auto& [id, entity] : entities_) {
+        if (filter != EntityType::ANY && entity->GetType() != filter)
             continue;
-        }
-        
-        // Calculate squared distance
-        glm::vec3 entityPos = entity->GetPosition();
-        glm::vec3 diff = entityPos - position;
-        float distanceSquared = diff.x * diff.x + diff.y * diff.y + diff.z * diff.z;
-        
-        if (distanceSquared <= radiusSquared) {
-            result.push_back(entityId);
-        }
+
+        glm::vec3 diff = entity->GetPosition() - position;
+        if (glm::dot(diff, diff) <= radiusSq)
+            result.push_back(id);
     }
-    
     return result;
 }
 
 std::vector<uint64_t> EntityManager::GetEntitiesInChunk(int chunkX, int chunkZ) {
     std::lock_guard<std::mutex> lock(mutex_);
-    
     std::vector<uint64_t> result;
-    
-    // Assuming chunk size is 32 units (common in voxel games)
     const float CHUNK_SIZE = 32.0f;
     const float HALF_CHUNK = CHUNK_SIZE / 2.0f;
-    
-    // Calculate chunk bounds
+
     float minX = chunkX * CHUNK_SIZE - HALF_CHUNK;
     float maxX = (chunkX + 1) * CHUNK_SIZE - HALF_CHUNK;
     float minZ = chunkZ * CHUNK_SIZE - HALF_CHUNK;
     float maxZ = (chunkZ + 1) * CHUNK_SIZE - HALF_CHUNK;
-    
-    for (const auto& [entityId, entity] : entities_) {
+
+    for (const auto& [id, entity] : entities_) {
         glm::vec3 pos = entity->GetPosition();
-        
-        // Check if entity is within chunk bounds (ignore Y coordinate for now)
-        if (pos.x >= minX && pos.x <= maxX && 
-            pos.z >= minZ && pos.z <= maxZ) {
-            result.push_back(entityId);
-        }
+        if (pos.x >= minX && pos.x <= maxX && pos.z >= minZ && pos.z <= maxZ)
+            result.push_back(id);
     }
-    
     return result;
 }
 
 // =============== Entity Updates ===============
 void EntityManager::Update(float deltaTime) {
     std::lock_guard<std::mutex> lock(mutex_);
-    
     CleanupDestroyedEntities();
-    
-    // Update all entities
-    for (auto& [entityId, entity] : entities_) {
-        // Apply velocity to position
-        glm::vec3 pos = entity->GetPosition();
+
+    for (auto& [id, entity] : entities_) {
         glm::vec3 vel = entity->GetVelocity();
-        
         if (vel.x != 0.0f || vel.y != 0.0f || vel.z != 0.0f) {
-            pos += vel * deltaTime;
-            entity->SetPosition(pos);
+            entity->SetPosition(entity->GetPosition() + vel * deltaTime);
         }
     }
 }
 
 void EntityManager::UpdateEntityPosition(uint64_t entityId, const glm::vec3& newPosition) {
     std::lock_guard<std::mutex> lock(mutex_);
-    
-    auto entity = GetEntity(entityId);
-    if (entity) {
+    if (auto* entity = GetEntity(entityId))
         entity->SetPosition(newPosition);
-    }
 }
 
 // =============== Serialization ===============
 nlohmann::json EntityManager::SerializeEntity(uint64_t entityId) const {
     std::lock_guard<std::mutex> lock(mutex_);
-    
     auto it = entities_.find(entityId);
-    if (it == entities_.end()) {
-        return nlohmann::json();
-    }
-    
-    return it->second->Serialize();
+    return it != entities_.end() ? it->second->Serialize() : nlohmann::json{};
 }
 
-nlohmann::json EntityManager::SerializeEntitiesInRadius(const glm::vec3& position, 
-                                                       float radius) const {
+nlohmann::json EntityManager::SerializeEntitiesInRadius(const glm::vec3& position,
+                                                        float radius) const {
     std::lock_guard<std::mutex> lock(mutex_);
-    
-    nlohmann::json result = nlohmann::json::array();
-    float radiusSquared = radius * radius;
-    
-    for (const auto& [entityId, entity] : entities_) {
-        glm::vec3 entityPos = entity->GetPosition();
-        glm::vec3 diff = entityPos - position;
-        float distanceSquared = diff.x * diff.x + diff.y * diff.y + diff.z * diff.z;
-        
-        if (distanceSquared <= radiusSquared) {
-            result.push_back(entity->Serialize());
-        }
+    nlohmann::json arr = nlohmann::json::array();
+    float radiusSq = radius * radius;
+
+    for (const auto& [id, entity] : entities_) {
+        glm::vec3 diff = entity->GetPosition() - position;
+        if (glm::dot(diff, diff) <= radiusSq)
+            arr.push_back(entity->Serialize());
     }
-    
-    return result;
+    return arr;
 }
 
 // =============== Ownership Management ===============
 void EntityManager::SetEntityOwner(uint64_t entityId, uint64_t ownerId) {
     std::lock_guard<std::mutex> lock(mutex_);
-    
-    // Check if entity exists
+
     if (entities_.find(entityId) == entities_.end()) {
         Logger::Warn("Cannot set owner for non-existent entity: {}", entityId);
         return;
     }
-    
-    // Check if owner exists (optional, could be NPC or player)
     if (ownerId != 0 && entities_.find(ownerId) == entities_.end()) {
         Logger::Warn("Owner entity {} does not exist", ownerId);
         return;
     }
-    
-    // Remove entity from previous owner if any
-    for (auto& [existingOwnerId, ownedEntities] : ownership_) {
-        auto it = std::find(ownedEntities.begin(), ownedEntities.end(), entityId);
-        if (it != ownedEntities.end()) {
-            ownedEntities.erase(it);
-            // If owner no longer owns anything, remove the entry
-            if (ownedEntities.empty()) {
-                ownership_.erase(existingOwnerId);
-            }
+
+    // Remove from previous owner
+    for (auto& [existingOwner, vec] : ownership_) {
+        auto it = std::find(vec.begin(), vec.end(), entityId);
+        if (it != vec.end()) {
+            vec.erase(it);
+            if (vec.empty())
+                ownership_.erase(existingOwner);
             break;
         }
     }
-    
-    // Add to new owner
+
     if (ownerId != 0) {
         ownership_[ownerId].push_back(entityId);
         Logger::Debug("Entity {} is now owned by {}", entityId, ownerId);
@@ -261,116 +207,67 @@ void EntityManager::SetEntityOwner(uint64_t entityId, uint64_t ownerId) {
 
 std::vector<uint64_t> EntityManager::GetOwnedEntities(uint64_t ownerId) {
     std::lock_guard<std::mutex> lock(mutex_);
-    
     auto it = ownership_.find(ownerId);
-    if (it != ownership_.end()) {
-        return it->second;
-    }
-    
-    return {};
+    return it != ownership_.end() ? it->second : std::vector<uint64_t>{};
 }
 
-// =============== Cleanup Destroyed Entities ===============
+// =============== Cleanup ===============
 void EntityManager::CleanupDestroyedEntities() {
     auto now = std::chrono::steady_clock::now();
-    
-    // Configuration: Delay before actually removing entities
-    const std::chrono::milliseconds DESTRUCTION_DELAY(100); // 100ms delay
-    size_t cleanedCount = 0;
-    
-    // Process pending destruction queue
+    const std::chrono::milliseconds DELAY(100);
+    size_t cleaned = 0;
+
     for (auto it = pendingDestruction_.begin(); it != pendingDestruction_.end();) {
-        // Check if enough time has passed since destruction was requested
-        auto timeSinceDestruction = now - it->destructionTime;
-        
-        if (timeSinceDestruction >= DESTRUCTION_DELAY) {
-            uint64_t entityId = it->entityId;
-            EntityType type = it->type;
-            
-            // Actually remove the entity from the main storage
-            auto entityIt = entities_.find(entityId);
-            if (entityIt != entities_.end()) {
-                // Remove from any ownership lists where this entity might be owned
-                for (auto& [ownerId, ownedEntities] : ownership_) {
-                    auto ownedIt = std::find(ownedEntities.begin(), ownedEntities.end(), entityId);
-                    if (ownedIt != ownedEntities.end()) {
-                        ownedEntities.erase(ownedIt);
-                        
-                        // If owner no longer owns anything, remove the entry
-                        if (ownedEntities.empty()) {
-                            ownership_.erase(ownerId);
-                        }
-                        
-                        // Break after finding the owner (entity can only have one owner)
-                        break;
-                    }
+        if (now - it->destructionTime >= DELAY) {
+            uint64_t id = it->entityId;
+
+            // Remove from ownership lists
+            for (auto& [owner, vec] : ownership_) {
+                auto pos = std::find(vec.begin(), vec.end(), id);
+                if (pos != vec.end()) {
+                    vec.erase(pos);
+                    if (vec.empty())
+                        ownership_.erase(owner);
+                    break;
                 }
-                
-                // Perform any type-specific cleanup
-                switch (type) {
-                    case EntityType::PLAYER:
-                        // Player-specific cleanup
-                        Logger::Debug("Performing player-specific cleanup for entity {}", entityId);
-                        break;
-                    case EntityType::NPC:
-                        // NPC-specific cleanup
-                        Logger::Debug("Performing NPC-specific cleanup for entity {}", entityId);
-                        break;
-                    case EntityType::ITEM:
-                        // Item-specific cleanup
-                        Logger::Debug("Performing item-specific cleanup for entity {}", entityId);
-                        break;
-                    case EntityType::PROJECTILE:
-                        // Projectile-specific cleanup
-                        Logger::Debug("Performing projectile-specific cleanup for entity {}", entityId);
-                        break;
-                    default:
-                        break;
-                }
-                
-                // Remove the entity
-                entities_.erase(entityIt);
-                cleanedCount++;
-                
-                Logger::Debug("Completely removed entity {} from EntityManager", entityId);
             }
-            
-            // Remove from pending destruction list
+
+            // Type‑specific cleanup (can be extended)
+            switch (it->type) {
+                case EntityType::PLAYER:
+                case EntityType::NPC:
+                case EntityType::ITEM:
+                case EntityType::PROJECTILE:
+                    Logger::Debug("Performing cleanup for entity {} (type {})",
+                                  id, EntityTypeToString(it->type));
+                    break;
+                default: break;
+            }
+
+            entities_.erase(id);
+            cleaned++;
             it = pendingDestruction_.erase(it);
         } else {
             ++it;
         }
     }
-    
-    // Clean up stale references in ownership lists
+
     CleanupStaleOwnershipReferences();
-    
-    if (cleanedCount > 0) {
-        Logger::Debug("Cleaned up {} destroyed entities", cleanedCount);
-    }
+    if (cleaned > 0)
+        Logger::Debug("Cleaned up {} destroyed entities", cleaned);
 }
 
-// =============== Private Helper Methods ===============
 void EntityManager::CleanupStaleOwnershipReferences() {
-    // Clean up any ownership references to non-existent entities
     for (auto it = ownership_.begin(); it != ownership_.end();) {
-        auto& [ownerId, ownedEntities] = *it;
-        
-        // Remove any owned entities that no longer exist
-        ownedEntities.erase(
-            std::remove_if(ownedEntities.begin(), ownedEntities.end(),
-                [this](uint64_t entityId) {
-                    return entities_.find(entityId) == entities_.end();
-                }),
-            ownedEntities.end()
+        it->second.erase(
+            std::remove_if(it->second.begin(), it->second.end(),
+                [this](uint64_t id) { return entities_.find(id) == entities_.end(); }),
+            it->second.end()
         );
-        
-        // If owner has no more valid owned entities, remove the entry
-        if (ownedEntities.empty()) {
+        if (it->second.empty())
             it = ownership_.erase(it);
-        } else {
+        else
             ++it;
-        }
     }
 }
 
@@ -395,160 +292,122 @@ size_t EntityManager::GetPendingDestructionCount() const {
     return pendingDestruction_.size();
 }
 
-// =============== Debug Methods ===============
+// =============== Debug ===============
 void EntityManager::DumpEntityStats() const {
     std::lock_guard<std::mutex> lock(mutex_);
-    
     Logger::Info("=== Entity Manager Statistics ===");
     Logger::Info("  Total Entities: {}", entities_.size());
     Logger::Info("  Players: {}", playerEntities_.size());
     Logger::Info("  NPCs: {}", npcEntities_.size());
     Logger::Info("  Pending Destruction: {}", pendingDestruction_.size());
     Logger::Info("  Ownership Relations: {}", ownership_.size());
-    
-    // Count by type
-    std::unordered_map<EntityType, size_t> typeCounts;
-    for (const auto& [id, entity] : entities_) {
-        typeCounts[entity->GetType()]++;
-    }
-    
+
+    std::unordered_map<EntityType, size_t> counts;
+    for (const auto& [id, e] : entities_)
+        counts[e->GetType()]++;
+
     Logger::Info("  Entity Type Breakdown:");
-    for (const auto& [type, count] : typeCounts) {
-        Logger::Info("    - {}: {}", EntityTypeToString(type), count);
-    }
-    
+    for (const auto& [type, cnt] : counts)
+        Logger::Info("    - {}: {}", EntityTypeToString(type), cnt);
     Logger::Info("=================================");
 }
 
-// =============== Utility Methods ===============
 const char* EntityManager::EntityTypeToString(EntityType type) const {
     switch (type) {
-        case EntityType::PLAYER: return "PLAYER";
-        case EntityType::NPC: return "NPC";
-        case EntityType::ITEM: return "ITEM";
+        case EntityType::PLAYER:     return "PLAYER";
+        case EntityType::NPC:        return "NPC";
+        case EntityType::ITEM:       return "ITEM";
         case EntityType::PROJECTILE: return "PROJECTILE";
-        case EntityType::ANY: return "ANY";
-        default: return "UNKNOWN";
+        case EntityType::ANY:        return "ANY";
+        default:                     return "UNKNOWN";
     }
 }
 
 // =============== Advanced Queries ===============
 std::vector<uint64_t> EntityManager::FindEntitiesByCriteria(
     const std::function<bool(const GameEntity&)>& predicate) const {
-    
     std::lock_guard<std::mutex> lock(mutex_);
     std::vector<uint64_t> result;
-    
-    for (const auto& [entityId, entity] : entities_) {
-        if (predicate(*entity)) {
-            result.push_back(entityId);
-        }
-    }
-    
+    for (const auto& [id, e] : entities_)
+        if (predicate(*e))
+            result.push_back(id);
     return result;
 }
 
 std::vector<uint64_t> EntityManager::FindEntitiesInBox(
     const glm::vec3& minBounds, const glm::vec3& maxBounds, EntityType filter) const {
-    
     std::lock_guard<std::mutex> lock(mutex_);
     std::vector<uint64_t> result;
-    
-    for (const auto& [entityId, entity] : entities_) {
-        // Skip if doesn't match filter
-        if (filter != EntityType::ANY && entity->GetType() != filter) {
+    for (const auto& [id, e] : entities_) {
+        if (filter != EntityType::ANY && e->GetType() != filter)
             continue;
-        }
-        
-        glm::vec3 pos = entity->GetPosition();
+        glm::vec3 pos = e->GetPosition();
         if (pos.x >= minBounds.x && pos.x <= maxBounds.x &&
             pos.y >= minBounds.y && pos.y <= maxBounds.y &&
-            pos.z >= minBounds.z && pos.z <= maxBounds.z) {
-            result.push_back(entityId);
-        }
+            pos.z >= minBounds.z && pos.z <= maxBounds.z)
+            result.push_back(id);
     }
-    
     return result;
 }
 
-// =============== Entity Pool Management ===============
+// =============== Entity Pooling ===============
 void EntityManager::PreallocateEntityPool(EntityType type, size_t count) {
     std::lock_guard<std::mutex> lock(mutex_);
-    
     for (size_t i = 0; i < count; ++i) {
-        // Create entities at a far away location
-        uint64_t entityId = nextEntityId_++;
-        auto entity = std::make_unique<GameEntity>(type, glm::vec3(-10000, -10000, -10000));
-        entity->SetId(entityId);
-        
-        // Mark as inactive/pooled
-        inactiveEntities_[entityId] = std::move(entity);
+        uint64_t id = nextEntityId_++;
+        auto e = std::make_unique<GameEntity>(type, glm::vec3(-10000, -10000, -10000));
+        e->SetId(id);
+        inactiveEntities_[id] = std::move(e);
     }
-    
     Logger::Info("Preallocated {} entities of type {}", count, EntityTypeToString(type));
 }
 
 uint64_t EntityManager::ActivatePooledEntity(EntityType type, const glm::vec3& position) {
     std::lock_guard<std::mutex> lock(mutex_);
-    
-    // Find an inactive entity of the right type
     for (auto it = inactiveEntities_.begin(); it != inactiveEntities_.end(); ++it) {
         if (it->second->GetType() == type) {
-            uint64_t entityId = it->first;
-            
-            // Move to active entities
+            uint64_t id = it->first;
             it->second->SetPosition(position);
-            entities_[entityId] = std::move(it->second);
+            entities_[id] = std::move(it->second);
             inactiveEntities_.erase(it);
-            
-            // Add to type-specific maps
-            if (type == EntityType::PLAYER) {
-                playerEntities_[entityId] = dynamic_cast<PlayerEntity*>(entities_[entityId].get());
-            } else if (type == EntityType::NPC) {
-                npcEntities_[entityId] = dynamic_cast<NPCEntity*>(entities_[entityId].get());
-            }
-            
-            Logger::Debug("Activated pooled entity {} of type {}", entityId, EntityTypeToString(type));
-            return entityId;
+
+            if (type == EntityType::PLAYER)
+                playerEntities_[id] = dynamic_cast<PlayerEntity*>(entities_[id].get());
+            else if (type == EntityType::NPC)
+                npcEntities_[id] = dynamic_cast<NPCEntity*>(entities_[id].get());
+
+            Logger::Debug("Activated pooled entity {} of type {}", id, EntityTypeToString(type));
+            return id;
         }
     }
-    
-    // No pooled entity available, create new one
     return CreateEntity(type, position);
 }
 
 void EntityManager::DeactivateEntity(uint64_t entityId) {
     std::lock_guard<std::mutex> lock(mutex_);
-    
-    auto entityIt = entities_.find(entityId);
-    if (entityIt == entities_.end()) {
+    auto it = entities_.find(entityId);
+    if (it == entities_.end()) {
         Logger::Warn("Cannot deactivate non-existent entity: {}", entityId);
         return;
     }
-    
-    // Move to inactive pool
-    EntityType type = entityIt->second->GetType();
-    
-    // Remove from active maps
-    if (type == EntityType::PLAYER) {
+
+    EntityType type = it->second->GetType();
+    if (type == EntityType::PLAYER)
         playerEntities_.erase(entityId);
-    } else if (type == EntityType::NPC) {
+    else if (type == EntityType::NPC)
         npcEntities_.erase(entityId);
-    }
-    
+
     // Remove from ownership
     ownership_.erase(entityId);
-    for (auto& [ownerId, ownedEntities] : ownership_) {
-        auto it = std::find(ownedEntities.begin(), ownedEntities.end(), entityId);
-        if (it != ownedEntities.end()) {
-            ownedEntities.erase(it);
+    for (auto& [owner, vec] : ownership_) {
+        auto pos = std::find(vec.begin(), vec.end(), entityId);
+        if (pos != vec.end()) {
+            vec.erase(pos);
             break;
         }
     }
-    
-    // Move to inactive pool
-    inactiveEntities_[entityId] = std::move(entityIt->second);
-    entities_.erase(entityIt);
-    
+
+    inactiveEntities_[entityId] = std::move(it->second);
+    entities_.erase(it);
     Logger::Debug("Deactivated entity {} to pool", entityId);
 }

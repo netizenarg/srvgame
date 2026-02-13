@@ -46,12 +46,12 @@ else
     export USE_CITUS=OFF
 fi
 
-rm -rf build
-rm -f CMakeCache.txt Makefile cmake_install.cmake
-rm -rf CMakeFiles
+#rm -rf build
+#rm -f CMakeCache.txt Makefile cmake_install.cmake
+#rm -rf CMakeFiles
 
 # Build
-mkdir -p build
+#mkdir -p build
 cd build
 cmake .. -B . -DUSE_CITUS=${USE_CITUS:-OFF} -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)
