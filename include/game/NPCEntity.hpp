@@ -339,46 +339,6 @@ public:
     void SetBehaviorState(NPCAIState st) { ai_state_ = st; };
     void MoveTo(const glm::vec3& destination, float speed_multiplier = 1.0f);
 
-private:
-    NPCType npc_type_;
-    NPCRarity rarity_;
-    NPCFaction faction_;
-    NPCAIState ai_state_;
-
-    NPCStats npc_stats_;
-    NPCAIProfile ai_profile_;
-    NPCLootTable loot_table_;
-    NPCDialogue dialogue_;
-
-    // Targeting
-    uint64_t target_id_ = 0;
-    std::vector<uint64_t> hate_list_; // Ordered by hate/damage dealt
-    std::unordered_map<uint64_t, float> damage_taken_; // Damage taken from each attacker
-
-    // AI state tracking
-    float state_timer_ = 0.0f;
-    float idle_timer_ = 0.0f;
-    float patrol_index_ = 0.0f;
-    bool patrol_direction_ = true; // true = forward, false = backward
-
-    // Combat tracking
-    float attack_cooldown_ = 0.0f;
-    float stun_timer_ = 0.0f;
-    float flee_timer_ = 0.0f;
-    float summon_cooldown_ = 0.0f;
-
-    // Patrol and movement
-    glm::vec3 spawn_position_;
-    std::queue<glm::vec3> patrol_queue_;
-
-    // Quests and trade
-    std::vector<std::string> quests_;
-    std::unordered_map<std::string, int> trade_items_;
-
-    // Special abilities
-    std::vector<std::string> abilities_;
-    std::unordered_map<std::string, float> ability_cooldowns_;
-
     // AI decision making
     void UpdateIdle(float delta_time);
     void UpdatePatrol(float delta_time);
@@ -431,6 +391,46 @@ private:
 
     void SaveTradeItemsToJson(nlohmann::json& json) const;
     void LoadTradeItemsFromJson(const nlohmann::json& json);
+
+private:
+    NPCType npc_type_;
+    NPCRarity rarity_;
+    NPCFaction faction_;
+    NPCAIState ai_state_;
+
+    NPCStats npc_stats_;
+    NPCAIProfile ai_profile_;
+    NPCLootTable loot_table_;
+    NPCDialogue dialogue_;
+
+    // Targeting
+    uint64_t target_id_ = 0;
+    std::vector<uint64_t> hate_list_; // Ordered by hate/damage dealt
+    std::unordered_map<uint64_t, float> damage_taken_; // Damage taken from each attacker
+
+    // AI state tracking
+    float state_timer_ = 0.0f;
+    float idle_timer_ = 0.0f;
+    float patrol_index_ = 0.0f;
+    bool patrol_direction_ = true; // true = forward, false = backward
+
+    // Combat tracking
+    float attack_cooldown_ = 0.0f;
+    float stun_timer_ = 0.0f;
+    float flee_timer_ = 0.0f;
+    float summon_cooldown_ = 0.0f;
+
+    // Patrol and movement
+    glm::vec3 spawn_position_;
+    std::queue<glm::vec3> patrol_queue_;
+
+    // Quests and trade
+    std::vector<std::string> quests_;
+    std::unordered_map<std::string, int> trade_items_;
+
+    // Special abilities
+    std::vector<std::string> abilities_;
+    std::unordered_map<std::string, float> ability_cooldowns_;
 
     // Constants
     static constexpr float ATTACK_COOLDOWN_BASE = 2.0f;

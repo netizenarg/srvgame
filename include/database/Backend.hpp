@@ -1,9 +1,7 @@
-/**
- * @brief Abstract Database Backend Interface
- *
- * Provides a unified interface for database operations with support for
- * both PostgreSQL and Citus (distributed PostgreSQL) backends.
- */
+#include <nlohmann/json.hpp>
+
+#include "logging/Logger.hpp"
+
 class DatabaseBackend {
 public:
     virtual ~DatabaseBackend() = default;
