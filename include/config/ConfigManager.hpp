@@ -14,6 +14,13 @@ public:
     bool LoadConfig(const std::string& configPath);
     bool ReloadConfig();
 
+    // Setters
+    void SetBool(const std::string& key, bool value);
+    void SetInt(const std::string& key, int value);
+    void SetFloat(const std::string& key, float value);
+    void SetString(const std::string& key, const std::string& value);
+    void SetJson(const std::string& key, const nlohmann::json& value);
+
     // Server configuration
     std::string GetServerHost() const;
     uint16_t GetServerPort() const;
@@ -38,7 +45,7 @@ public:
     int GetHeartbeatInterval() const;
     int GetSessionTimeout() const;
     
-    // 3D World configuration
+    // World configuration
     int GetWorldSeed() const;
     int GetViewDistance() const;
     int GetChunkSize() const;

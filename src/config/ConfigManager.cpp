@@ -129,6 +129,46 @@ bool ConfigManager::ValidateConfig() const {
     }
 }
 
+void ConfigManager::SetBool(const std::string& key, bool value) {
+    std::lock_guard<std::mutex> lock(configMutex_);
+    std::string keyPath = key;
+    std::replace(keyPath.begin(), keyPath.end(), '.', '/');
+    nlohmann::json::json_pointer ptr("/" + keyPath);
+    config_[ptr] = value;
+}
+
+void ConfigManager::SetInt(const std::string& key, int value) {
+    std::lock_guard<std::mutex> lock(configMutex_);
+    std::string keyPath = key;
+    std::replace(keyPath.begin(), keyPath.end(), '.', '/');
+    nlohmann::json::json_pointer ptr("/" + keyPath);
+    config_[ptr] = value;
+}
+
+void ConfigManager::SetFloat(const std::string& key, float value) {
+    std::lock_guard<std::mutex> lock(configMutex_);
+    std::string keyPath = key;
+    std::replace(keyPath.begin(), keyPath.end(), '.', '/');
+    nlohmann::json::json_pointer ptr("/" + keyPath);
+    config_[ptr] = value;
+}
+
+void ConfigManager::SetString(const std::string& key, const std::string& value) {
+    std::lock_guard<std::mutex> lock(configMutex_);
+    std::string keyPath = key;
+    std::replace(keyPath.begin(), keyPath.end(), '.', '/');
+    nlohmann::json::json_pointer ptr("/" + keyPath);
+    config_[ptr] = value;
+}
+
+void ConfigManager::SetJson(const std::string& key, const nlohmann::json& value) {
+    std::lock_guard<std::mutex> lock(configMutex_);
+    std::string keyPath = key;
+    std::replace(keyPath.begin(), keyPath.end(), '.', '/');
+    nlohmann::json::json_pointer ptr("/" + keyPath);
+    config_[ptr] = value;
+}
+
 // Server configuration getters
 std::string ConfigManager::GetServerHost() const {
     std::lock_guard<std::mutex> lock(configMutex_);
