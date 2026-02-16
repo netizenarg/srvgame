@@ -126,10 +126,6 @@ GameEntity* LogicEntity::GetEntity(uint64_t entityId) {
     return entityManager_.GetEntity(entityId);
 }
 
-PlayerEntity* LogicEntity::GetPlayerEntity(uint64_t playerId) {
-    return entityManager_.GetPlayerEntity(playerId);
-}
-
 CollisionResult LogicEntity::CheckCollision(const glm::vec3& position, float radius, uint64_t excludeEntityId) {
     if (!collisionSystem_) {
         return CollisionResult{false};

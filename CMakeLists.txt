@@ -98,7 +98,7 @@ set(LOGIC_CORE_SOURCES
     src/game/LogicEntity.cpp
     src/game/GameLogic.cpp
     src/game/EntityManager.cpp
-    src/game/PlayerEntity.cpp
+    src/game/Player.cpp
     src/game/NPCEntity.cpp
 )
 

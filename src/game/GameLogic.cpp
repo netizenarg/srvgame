@@ -129,8 +129,8 @@ GameEntity* GameLogic::GetEntity(uint64_t entityId) {
     return entityLogic_.GetEntity(entityId);
 }
 
-PlayerEntity* GameLogic::GetPlayerEntity(uint64_t playerId) {
-    return entityLogic_.GetPlayerEntity(playerId);
+Player* GameLogic::GetPlayer(uint64_t playerId) {
+    return entityLogic_.GetPlayer(playerId);
 }
 
 // =============== Collision Methods ===============
@@ -163,7 +163,7 @@ void GameLogic::HandleLootPickup(uint64_t sessionId, const nlohmann::json& data)
             return;
         }
 
-        PlayerEntity* player = GetPlayerEntity(playerId);
+        Player* player = GetPlayer(playerId);
         if (!player) {
             SendError(sessionId, "Player not found");
             return;
@@ -286,6 +286,35 @@ void GameLogic::RegisterWorldHandlers() {
     Logger::Info("Registered world message handlers");
 }
 
+void GameLogic::HandleMessage(uint64_t sessionId, const nlohmann::json& message) {
+    Logger::Debug("GameLogic handling message from session {}", sessionId);
+    FirePythonEvent("game_message", {
+        {"sessionId", sessionId},
+        {"message", message}
+    });
+    LogicCore::HandleMessage(sessionId, message);
+}
+
+void GameLogic::OnPlayerConnected(uint64_t sessionId, uint64_t playerId) {
+    Logger::Info("GameLogic: Player {} connected with session {}", playerId, sessionId);
+    FirePythonEvent("player_connected", {
+        {"sessionId", sessionId},
+        {"playerId", playerId}
+    });
+    LogicCore::OnPlayerConnected(sessionId, playerId);
+}
+
+void GameLogic::OnPlayerDisconnected(uint64_t sessionId) {
+    // Capture player ID before base class removes the mapping
+    uint64_t playerId = GetPlayerIdBySession(sessionId);
+    Logger::Info("GameLogic: Player {} disconnected from session {}", playerId, sessionId);
+    FirePythonEvent("player_disconnected", {
+        {"sessionId", sessionId},
+        {"playerId", playerId}
+    });
+    LogicCore::OnPlayerDisconnected(sessionId);
+}
+
 void GameLogic::HandleWorldChunkRequest(uint64_t sessionId, const nlohmann::json& data) {
     try {
         int chunkX = data.value("chunkX", 0);
@@ -327,7 +356,7 @@ void GameLogic::HandlePlayerPositionUpdate(uint64_t sessionId, const nlohmann::j
             return;
         }
 
-        PlayerEntity* player = GetPlayerEntity(playerId);
+        Player* player = GetPlayer(playerId);
         if (player) {
             float collisionRadius = 0.5f;
             CollisionResult collision = CheckCollision(position, collisionRadius, playerId);
@@ -380,7 +409,7 @@ void GameLogic::HandleNPCInteraction(uint64_t sessionId, const nlohmann::json& d
         }
 
         uint64_t playerId = GetPlayerIdBySession(sessionId);
-        PlayerEntity* player = GetPlayerEntity(playerId);
+        Player* player = GetPlayer(playerId);
 
         if (!player) {
             SendError(sessionId, "Player not found", 404);
@@ -620,7 +649,7 @@ void GameLogic::UpdateWorld(float deltaTime) {
     
     std::lock_guard<std::mutex> lock(sessionMutex_);
     for (const auto& [playerId, sessionId] : playerToSessionMap_) {
-        PlayerEntity* player = GetPlayerEntity(playerId);
+        Player* player = GetPlayer(playerId);
         if (player) {
             playerPositions.push_back(player->GetPosition());
         }

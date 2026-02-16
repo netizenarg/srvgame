@@ -63,7 +63,7 @@ public:
     void DespawnNPC(uint64_t npcId);
     NPCEntity* GetNPCEntity(uint64_t npcId);
     GameEntity* GetEntity(uint64_t entityId);
-    PlayerEntity* GetPlayerEntity(uint64_t playerId);
+    Player* GetPlayer(uint64_t playerId);
 
     // Collision methods
     CollisionResult CheckCollision(const glm::vec3& position, float radius, uint64_t excludeEntityId = 0);
@@ -87,18 +87,11 @@ public:
     void HandleFamiliarCommand(uint64_t sessionId, const nlohmann::json& data);
 
     // Message handling
-    void HandleMessage(uint64_t sessionId, const nlohmann::json& message) {
-        HandleMessage(sessionId, message);
-    }
+    void HandleMessage(uint64_t sessionId, const nlohmann::json& message);
 
     // Player connection/disconnection
-    void OnPlayerConnected(uint64_t sessionId, uint64_t playerId) {
-        OnPlayerConnected(sessionId, playerId);
-    }
-
-    void OnPlayerDisconnected(uint64_t sessionId) {
-        OnPlayerDisconnected(sessionId);
-    }
+    void OnPlayerConnected(uint64_t sessionId, uint64_t playerId);
+    void OnPlayerDisconnected(uint64_t sessionId);
 
     // Broadcasting
     void BroadcastBinaryToNearbyPlayers(const glm::vec3& position, uint16_t messageType, 

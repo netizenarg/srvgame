@@ -21,7 +21,7 @@
 #include "game/GameEntity.hpp"
 #include "game/InventorySystem.hpp"
 #include "game/SkillSystem.hpp"
-#include "game/QuestSystem.hpp"
+#include "game/QuestManager.hpp"
 
 class InventorySystem;
 class SkillSystem;
@@ -73,6 +73,12 @@ struct PlayerStats {
     int skill_points = 0;
     int talent_points = 0;
     int reputation_level = 0;
+
+    float attack_damage = 10.0f;
+    float attack_speed = 1.0f;
+    float attack_range = 2.0f;
+    float critical_chance = 0.05f;
+    float critical_damage = 1.5f;
 
     int kills = 0;
     int deaths = 0;
@@ -142,11 +148,17 @@ struct PlayerSettings {
     void Deserialize(const nlohmann::json& data);
 };
 
-class PlayerEntity : public GameEntity {
+class Player : public GameEntity {
 public:
-    PlayerEntity(const glm::vec3& position);
-    PlayerEntity(const glm::vec3& position, PlayerClass player_class, PlayerRace race);
-    virtual ~PlayerEntity();
+    Player(int64_t id, const std::string& username);
+    Player(const glm::vec3& position);
+    Player(const glm::vec3& position, PlayerClass player_class, PlayerRace race);
+    virtual ~Player();
+
+    int64_t GetId() const { return id_; }
+    const std::string& GetUsername() const { return username_; }
+
+    void UpdatePosition(float x, float y, float z);
 
     // Player-specific properties
     void SetPlayerClass(PlayerClass player_class) { player_class_ = player_class; }
@@ -168,6 +180,8 @@ public:
     void SetMaxMana(int max_mana);
     int GetMana() const { return stats_.mana; }
     int GetMaxMana() const { return stats_.max_mana; }
+    float GetAttackDamage() const { return stats_.attack_damage; }
+    float GetAttackRange() const { return stats_.attack_range; }
 
     void SetLevel(int level);
     int GetLevel() const { return stats_.level; }
@@ -220,13 +234,10 @@ public:
     // Combat
     void TakeDamage(int amount, uint64_t attacker_id = 0);
     void Heal(int amount, uint64_t healer_id = 0);
+    int CalculateDamage(const std::string& attackType = "melee") const;
     void ApplyBuff(const std::string& buff_id, const nlohmann::json& buff_data, float duration);
     void RemoveBuff(const std::string& buff_id);
     void UpdateBuffs(float delta_time);
-
-    // Serialization
-    virtual nlohmann::json Serialize() const override;
-    virtual void Deserialize(const nlohmann::json& data) override;
 
     // Player state management
     void Update(float delta_time);
@@ -295,7 +306,20 @@ public:
     void SetConnectionQuality(float quality) { connection_quality_ = quality; }
     float GetConnectionQuality() const { return connection_quality_; }
 
+    // Serialization
+    virtual nlohmann::json Serialize() const override;
+    virtual void Deserialize(const nlohmann::json& data) override;
+    nlohmann::json JsonGetInventory() const;
+
 private:
+    int64_t id_;
+    std::string username_;
+
+    //struct Position {float x, y, z;} position_;
+    //nlohmann::json attributes_;
+
+    mutable std::shared_mutex mutex_;
+
     PlayerClass player_class_;
     PlayerRace race_;
     PlayerStatus status_;

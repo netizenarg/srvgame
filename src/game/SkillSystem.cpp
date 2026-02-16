@@ -997,7 +997,7 @@ bool SkillSystem::MeetsSkillRequirements(uint64_t player_id, const std::string& 
     const SkillData& skill_data = skill_data_it->second;
     
     // Check level requirement
-    // This would require access to player's level from PlayerEntity
+    // This would require access to player's level from Player
     // For now, we'll assume the requirement is met
     
     // Check skill requirements

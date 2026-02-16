@@ -1,5 +1,16 @@
 #include "game/LogicWorld.hpp"
 
+std::mutex LogicWorld::instanceMutex_;
+LogicWorld* LogicWorld::instance_ = nullptr;
+
+LogicWorld& LogicWorld::GetInstance() {
+    std::lock_guard<std::mutex> lock(instanceMutex_);
+    if (!instance_) {
+        instance_ = new LogicWorld();
+    }
+    return *instance_;
+}
+
 LogicWorld::LogicWorld() {
     Logger::Debug("LogicWorld created");
 }
@@ -140,5 +151,30 @@ void LogicWorld::SaveChunkData() {
             Logger::Error("Failed to save chunk [{}, {}]: {}",
                          chunk->GetChunkX(), chunk->GetChunkZ(), e.what());
         }
+    }
+}
+
+void LogicWorld::AddEntity(std::shared_ptr<GameEntity> entity) {
+    std::lock_guard<std::mutex> lock(entitiesMutex_);
+    if (entity) {
+        entities_[entity->GetId()] = entity;
+    }
+}
+
+void LogicWorld::RemoveEntity(uint64_t entityId) {
+    std::lock_guard<std::mutex> lock(entitiesMutex_);
+    entities_.erase(entityId);
+}
+
+std::shared_ptr<GameEntity> LogicWorld::GetEntity(uint64_t entityId) const {
+    std::lock_guard<std::mutex> lock(entitiesMutex_);
+    auto it = entities_.find(entityId);
+    return (it != entities_.end()) ? it->second : nullptr;
+}
+
+void LogicWorld::UpdateEntities(float deltaTime) {
+    std::lock_guard<std::mutex> lock(entitiesMutex_);
+    for (auto& [id, entity] : entities_) {
+        entity->Update(deltaTime);
     }
 }

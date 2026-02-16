@@ -140,11 +140,11 @@ bool GameWorld::AddEntity(uint64_t entityId, const nlohmann::json& data) {
         std::shared_ptr<GameEntity> entity;
         
         if (entityType == "player") {
-            entity = std::make_shared<PlayerEntity>();
+            entity = std::make_shared<Player>();
             entity->SetPosition(position);
             // Store reference to player
             if (data.value("is_local", false)) {
-                player_ = std::static_pointer_cast<PlayerEntity>(entity);
+                player_ = std::static_pointer_cast<Player>(entity);
             }
         }
         else if (entityType == "npc") {
