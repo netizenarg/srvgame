@@ -1,17 +1,17 @@
 #include "game/LogicCore.hpp"
 
 // =============== Static Members ===============
-//std::mutex LogicCore::instanceMutex_;
-//LogicCore* LogicCore::instance_ = nullptr;
+std::mutex LogicCore::instanceMutex_;
+LogicCore* LogicCore::instance_ = nullptr;
 
 // =============== Constructor and Destructor ===============
 LogicCore::LogicCore()
-    : playerManager_(PlayerManager::GetInstance()),
+    : running_(false),
+    playerManager_(PlayerManager::GetInstance()),
     dbManager_(DbManager::GetInstance()),
     pythonScripting_(PythonScripting::GetInstance()),
     scriptHotReloader_(nullptr),
-    pythonEnabled_(false),
-    running_(false)
+    pythonEnabled_(false)
 {
 
     rng_.seed(std::random_device()());
@@ -448,39 +448,161 @@ int64_t LogicCore::GetCurrentTimestamp() {
 
 // =============== Stub Methods ===============
 void LogicCore::HandleLogin(uint64_t sessionId, const nlohmann::json& data) {
-    Logger::Debug("Login handler called for session {}", sessionId);
-    SendSuccess(sessionId, "Login successful (stub)", {
-        {"playerId", 12345},
-        {"position", {0.0f, 20.0f, 0.0f}},
-        {"health", 100},
-        {"level", 1}
-    });
-}
+    if (!data.contains("username") || !data["username"].is_string() ||
+        !data.contains("password") || !data["password"].is_string()) {
+        SendError(sessionId, "Missing or invalid username/password", 400);
+    return;
+        }
 
-void LogicCore::HandleChat(uint64_t sessionId, const nlohmann::json& data) {
-    Logger::Debug("Chat handler called for session {}", sessionId);
-    std::string message = data.value("message", "");
-    if (!message.empty()) {
-        uint64_t playerId = GetPlayerIdBySession(sessionId);
-        nlohmann::json chatMsg = {
-            {"type", "chat_message"},
+        std::string username = data["username"];
+        std::string password = data["password"];
+
+        uint64_t playerId = playerManager_.AuthenticatePlayer(username, password);
+        if (playerId == 0) {
+            SendError(sessionId, "Invalid credentials", 401);
+            return;
+        }
+
+        auto player = playerManager_.GetPlayer(playerId);
+        if (!player) {
+            SendError(sessionId, "Player data unavailable", 500);
+            return;
+        }
+
+        OnPlayerConnected(sessionId, playerId);
+
+        auto& world = LogicWorld::GetInstance();
+        world.AddEntity(player);
+
+        FirePythonEvent("player_login", {
             {"playerId", playerId},
-            {"playerName", "Player" + std::to_string(playerId)},
-            {"message", message},
-            {"timestamp", GetCurrentTimestamp()}
-        };
-        SendToSession(sessionId, chatMsg);
-    }
+            {"username", username}
+        });
+
+        SendSuccess(sessionId, "Login successful", nlohmann::json{
+            {"playerId", playerId},
+            {"position", player->JsonGetPosition()},
+            {"health", player->GetHealth()},
+            {"maxHealth", player->GetMaxHealth()},
+            {"level", player->GetLevel()},
+            {"experience", player->GetExperience()},
+            {"inventory", player->JsonGetInventory()}
+        });
 }
 
 void LogicCore::HandleCombat(uint64_t sessionId, const nlohmann::json& data) {
-    Logger::Debug("Combat handler called for session {}", sessionId);
-    SendError(sessionId, "Combat not implemented yet", 501);
+    uint64_t playerId = GetPlayerIdBySession(sessionId);
+    if (playerId == 0) {
+        SendError(sessionId, "Player not authenticated", 401);
+        return;
+    }
+
+    if (!data.contains("targetId") || !data["targetId"].is_number_integer()) {
+        SendError(sessionId, "Missing or invalid targetId", 400);
+        return;
+    }
+    uint64_t targetId = data["targetId"];
+
+    std::string attackType = data.value("attackType", "melee");
+
+    auto player = playerManager_.GetPlayer(playerId);
+    if (!player) {
+        SendError(sessionId, "Player not found", 500);
+        return;
+    }
+
+    auto& world = LogicWorld::GetInstance();
+    auto target = world.GetEntity(targetId);
+    if (!target) {
+        SendError(sessionId, "Target not found", 404);
+        return;
+    }
+
+    float distance = CalculateDistance(player->GetPosition(), target->GetPosition());
+    if (distance > player->GetAttackRange()) {
+        SendError(sessionId, "Target out of range", 400);
+        return;
+    }
+
+    int damage = player->CalculateDamage(attackType);
+    target->TakeDamage(damage, playerId);
+
+    FirePythonEvent("player_attack", {
+        {"playerId", playerId},
+        {"targetId", targetId},
+        {"damage", damage},
+        {"attackType", attackType}
+    });
+
+    SendSuccess(sessionId, "Combat resolved", nlohmann::json{
+        {"damageDealt", damage},
+        {"targetHealth", target->GetHealth()},
+                {"targetDefeated", target->IsDead()}
+    });
 }
 
 void LogicCore::HandleQuest(uint64_t sessionId, const nlohmann::json& data) {
-    Logger::Debug("Quest handler called for session {}", sessionId);
-    SendError(sessionId, "Quest system not implemented yet", 501);
+    uint64_t playerId = GetPlayerIdBySession(sessionId);
+    if (playerId == 0) {
+        SendError(sessionId, "Player not authenticated", 401);
+        return;
+    }
+
+    if (!data.contains("questId") || !data["questId"].is_number_integer()) {
+        SendError(sessionId, "Missing or invalid questId", 400);
+        return;
+    }
+    uint64_t questId = data["questId"];
+
+    if (!data.contains("action") || !data["action"].is_string()) {
+        SendError(sessionId, "Missing or invalid action", 400);
+        return;
+    }
+    std::string action = data["action"];
+
+    auto player = playerManager_.GetPlayer(playerId);
+    if (!player) {
+        SendError(sessionId, "Player not found", 500);
+        return;
+    }
+
+    auto& questManager = QuestManager::GetInstance();
+    nlohmann::json result;
+
+    if (action == "start") {
+        if (questManager.CanStartQuest(playerId, questId)) {
+            questManager.StartQuest(playerId, questId);
+            result["status"] = "started";
+        } else {
+            SendError(sessionId, "Cannot start quest", 400);
+            return;
+        }
+    } else if (action == "update") {
+        std::string objective = data.value("objective", "");
+        int progress = data.value("progress", 1);
+        questManager.UpdateObjective(playerId, questId, objective, progress);
+        result["status"] = "updated";
+    } else if (action == "complete") {
+        if (questManager.CanCompleteQuest(playerId, questId)) {
+            auto rewards = questManager.CompleteQuest(playerId, questId);
+            result["status"] = "completed";
+            result["rewards"] = rewards;
+        } else {
+            SendError(sessionId, "Quest cannot be completed yet", 400);
+            return;
+        }
+    } else {
+        SendError(sessionId, "Unknown action: " + action, 400);
+        return;
+    }
+
+    FirePythonEvent("player_quest", {
+        {"playerId", playerId},
+        {"questId", questId},
+        {"action", action}
+    });
+
+    SendSuccess(sessionId, "Quest action processed", result);
 }
 
 void LogicCore::SpawnEnemies() {
@@ -496,7 +618,10 @@ void LogicCore::SpawnResources() {
 }
 
 void LogicCore::ProcessGameTick(float deltaTime) {
-    // Base implementation
+    auto& world = LogicWorld::GetInstance();
+    world.UpdateEntities(deltaTime);
+    ProcessEvents();
+    FirePythonEvent("game_tick", {{"deltaTime", deltaTime}});
 }
 
 void LogicCore::SaveGameState() {

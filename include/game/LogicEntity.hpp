@@ -14,13 +14,11 @@
 #include "game/MobSystem.hpp"
 #include "game/EntityManager.hpp"
 #include "game/CollisionSystem.hpp"
-//#include "game/LootItem.hpp"
 #include "game/LootTableManager.hpp"
 
 class LogicEntity {
 public:
-    LogicEntity();
-    ~LogicEntity();
+    static LogicEntity& GetInstance();
 
     // Initialization
     void Initialize();
@@ -34,7 +32,6 @@ public:
 
     // Entity management
     GameEntity* GetEntity(uint64_t entityId);
-    PlayerEntity* GetPlayerEntity(uint64_t playerId);
 
     // Collision management
     CollisionResult CheckCollision(const glm::vec3& position, float radius, uint64_t excludeEntityId = 0);
@@ -48,6 +45,12 @@ public:
     int GetActiveNPCCount() const { return activeNPCCount_; }
 
 private:
+    LogicEntity();
+    ~LogicEntity();
+
+    static std::mutex instanceMutex_;
+    static LogicEntity* instance_;
+
     std::unique_ptr<NPCManager> npcManager_;
     std::unordered_map<uint64_t, std::unique_ptr<NPCEntity>> npcEntities_;
     std::mutex npcMutex_;

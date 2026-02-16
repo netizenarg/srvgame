@@ -146,7 +146,7 @@ EntityManager::CreateEntity()
     │
     ├─→ Create Entity Object
     │   │
-    │   ├─→ PlayerEntity
+    │   ├─→ Player
     │   ├─→ NPCEntity
     │   └─→ GameEntity
     │

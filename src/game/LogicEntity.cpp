@@ -1,5 +1,18 @@
 #include "game/LogicEntity.hpp"
 
+// =============== Static Members ===============
+std::mutex LogicEntity::instanceMutex_;
+LogicEntity* LogicEntity::instance_ = nullptr;
+
+// =============== Singleton Access ===============
+LogicEntity& LogicEntity::GetInstance() {
+    std::lock_guard<std::mutex> lock(instanceMutex_);
+    if (!instance_) {
+        instance_ = new LogicEntity();
+    }
+    return *instance_;
+}
+
 LogicEntity::LogicEntity()
     : mobSystem_(MobSystem::GetInstance()),
       entityManager_(EntityManager::GetInstance()) {
@@ -14,7 +27,7 @@ void LogicEntity::Initialize() {
     InitializeNPCSystem();
     InitializeMobSystem();
     InitializeCollisionSystem();
-    auto& config = ConfigManager::GetInstance();
+    //auto& config = ConfigManager::GetInstance();
     // Initialize loot systems
     //inventorySystem_ = std::make_unique<InventorySystem>();
     //lootTableManager_ = std::make_unique<LootTableManager>();
@@ -126,10 +139,6 @@ GameEntity* LogicEntity::GetEntity(uint64_t entityId) {
     return entityManager_.GetEntity(entityId);
 }
 
-PlayerEntity* LogicEntity::GetPlayerEntity(uint64_t playerId) {
-    return entityManager_.GetPlayerEntity(playerId);
-}
-
 CollisionResult LogicEntity::CheckCollision(const glm::vec3& position, float radius, uint64_t excludeEntityId) {
     if (!collisionSystem_) {
         return CollisionResult{false};
@@ -146,7 +155,8 @@ bool LogicEntity::Raycast(const glm::vec3& origin, const glm::vec3& direction, f
 
 void LogicEntity::UpdateCollisions(float deltaTime) {
     if (collisionSystem_) {
-        collisionSystem_->UpdateBroadPhase();
+        //collisionSystem_->UpdateBroadPhase();
+        collisionSystem_->Update(deltaTime);
     }
 }
 

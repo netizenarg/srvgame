@@ -712,3 +712,29 @@ EntityType GameEntity::StringToEntityType(const std::string& type_str) {
 uint64_t GameEntity::GenerateEntityId() {
     return next_entity_id_++;
 }
+
+nlohmann::json GameEntity::JsonGetPosition() const {
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    return nlohmann::json{
+        {"x", position_.x},
+        {"y", position_.y},
+        {"z", position_.z},
+        {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
+            last_movement_.time_since_epoch()).count()}
+    };
+}
+
+void GameEntity::JsonSetAttribute(const std::string& key, const nlohmann::json& value) {
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    properties_[key] = value;
+}
+
+nlohmann::json GameEntity::JsonGetAttribute(const std::string& key, const nlohmann::json& defaultValue) const {
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    return properties_.value(key, defaultValue);
+}
+
+nlohmann::json GameEntity::JsonGetAttributes() const {
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    return properties_;
+}

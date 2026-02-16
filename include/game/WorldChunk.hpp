@@ -1,11 +1,12 @@
 #pragma once
 
-#include <glm/glm.hpp>
-#include <vector>
+#include <algorithm>
 #include <cstdint>
 #include <memory>
+#include <vector>
 #include <unordered_set>
 
+#include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
 
 struct LODConfig;

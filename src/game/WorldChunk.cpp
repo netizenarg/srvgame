@@ -1,5 +1,3 @@
-#include <algorithm>
-
 #include "game/WorldChunk.hpp"
 
 const float WorldChunk::BLOCK_SIZE = 1.0f;

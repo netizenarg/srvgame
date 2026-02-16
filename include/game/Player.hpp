@@ -21,11 +21,10 @@
 #include "game/GameEntity.hpp"
 #include "game/InventorySystem.hpp"
 #include "game/SkillSystem.hpp"
-#include "game/QuestSystem.hpp"
+#include "game/QuestManager.hpp"
 
 class InventorySystem;
 class SkillSystem;
-class QuestSystem;
 
 struct PlayerAttributes {
     int strength = 10;        // Physical power
@@ -73,6 +72,12 @@ struct PlayerStats {
     int skill_points = 0;
     int talent_points = 0;
     int reputation_level = 0;
+
+    float attack_damage = 10.0f;
+    float attack_speed = 1.0f;
+    float attack_range = 2.0f;
+    float critical_chance = 0.05f;
+    float critical_damage = 1.5f;
 
     int kills = 0;
     int deaths = 0;
@@ -142,11 +147,21 @@ struct PlayerSettings {
     void Deserialize(const nlohmann::json& data);
 };
 
-class PlayerEntity : public GameEntity {
+class Player : public GameEntity {
 public:
-    PlayerEntity(const glm::vec3& position);
-    PlayerEntity(const glm::vec3& position, PlayerClass player_class, PlayerRace race);
-    virtual ~PlayerEntity();
+    Player(int64_t id, const std::string& username);
+    Player(const glm::vec3& position);
+    Player(const glm::vec3& position, PlayerClass player_class, PlayerRace race);
+    virtual ~Player();
+
+    int64_t GetId() const { return id_; }
+    const std::string& GetUsername() const { return username_; }
+
+    void UpdatePosition(float x, float y, float z);
+    void UpdateHeartbeat();
+    bool IsHeartbeatExpired(int timeoutSeconds) const;
+    void ApplyDamage(int damage, int64_t attackerId);
+    void ApplyHealing(int amount, int64_t healerId);
 
     // Player-specific properties
     void SetPlayerClass(PlayerClass player_class) { player_class_ = player_class; }
@@ -168,6 +183,8 @@ public:
     void SetMaxMana(int max_mana);
     int GetMana() const { return stats_.mana; }
     int GetMaxMana() const { return stats_.max_mana; }
+    float GetAttackDamage() const { return stats_.attack_damage; }
+    float GetAttackRange() const { return stats_.attack_range; }
 
     void SetLevel(int level);
     int GetLevel() const { return stats_.level; }
@@ -220,13 +237,10 @@ public:
     // Combat
     void TakeDamage(int amount, uint64_t attacker_id = 0);
     void Heal(int amount, uint64_t healer_id = 0);
+    int CalculateDamage(const std::string& attackType = "melee") const;
     void ApplyBuff(const std::string& buff_id, const nlohmann::json& buff_data, float duration);
     void RemoveBuff(const std::string& buff_id);
     void UpdateBuffs(float delta_time);
-
-    // Serialization
-    virtual nlohmann::json Serialize() const override;
-    virtual void Deserialize(const nlohmann::json& data) override;
 
     // Player state management
     void Update(float delta_time);
@@ -260,7 +274,7 @@ public:
     // Player systems access
     InventorySystem& GetInventorySystem() const { return inventory_system_; }
     SkillSystem& GetSkillSystem() const { return skill_system_; }
-    QuestSystem& GetQuestSystem() const { return quest_system_; }
+    QuestManager& GetQuestManager() const { return quest_manager_; }
 
     // Utility methods
     bool IsAlive() const { return stats_.health > 0; }
@@ -287,6 +301,10 @@ public:
 
     void SetCosmetic(const std::string& slot, const std::string& cosmetic_id);
     std::string GetCosmetic(const std::string& slot) const;
+    float GetDistanceTo(const glm::vec3& other) const;
+    void AddCurrencyGold(int amount);
+    void AddCurrencyGems(int amount);
+    void SetOnline(bool online);
 
     // Player session
     void SetSessionId(uint64_t session_id) { session_id_ = session_id; }
@@ -295,7 +313,27 @@ public:
     void SetConnectionQuality(float quality) { connection_quality_ = quality; }
     float GetConnectionQuality() const { return connection_quality_; }
 
+    // Serialization
+    virtual nlohmann::json Serialize() const override;
+    virtual void Deserialize(const nlohmann::json& data) override;
+    nlohmann::json JsonGetInventory() const;
+    nlohmann::json ToJson() const;
+
 private:
+    int64_t id_;
+    std::string username_;
+
+    //struct Position {float x, y, z;} position_;
+    std::chrono::system_clock::time_point last_movement_;
+
+    bool online_ = false;
+    std::chrono::system_clock::time_point created_at_;
+    std::chrono::system_clock::time_point last_login_;
+    std::chrono::system_clock::time_point last_logout_;
+    std::chrono::system_clock::time_point last_heartbeat_;
+
+    mutable std::shared_mutex mutex_;
+
     PlayerClass player_class_;
     PlayerRace race_;
     PlayerStatus status_;
@@ -317,7 +355,7 @@ private:
         nlohmann::json buff_data;
         float duration;
         float time_remaining;
-        std::chrono::steady_clock::time_point applied_time;
+        std::chrono::system_clock::time_point applied_time;
     };
     std::unordered_map<std::string, ActiveBuff> active_buffs_;
 
@@ -326,7 +364,7 @@ private:
         std::string ability_id;
         float duration;
         float time_remaining;
-        std::chrono::steady_clock::time_point start_time;
+        std::chrono::system_clock::time_point start_time;
     };
     std::unordered_map<std::string, Cooldown> cooldowns_;
 
@@ -353,7 +391,7 @@ private:
     // Systems
     InventorySystem& inventory_system_;
     SkillSystem& skill_system_;
-    QuestSystem& quest_system_;
+    QuestManager& quest_manager_;
 
     // Private methods
     void OnLevelUp();
@@ -380,14 +418,14 @@ private:
     struct DamageSource {
         uint64_t attacker_id;
         int damage;
-        std::chrono::steady_clock::time_point timestamp;
+        std::chrono::system_clock::time_point timestamp;
     };
     std::deque<DamageSource> damage_sources_;
 
     struct HealingSource {
         uint64_t healer_id;
         int healing;
-        std::chrono::steady_clock::time_point timestamp;
+        std::chrono::system_clock::time_point timestamp;
     };
     std::deque<HealingSource> healing_sources_;
 

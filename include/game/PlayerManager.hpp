@@ -9,50 +9,10 @@
 
 #include <nlohmann/json.hpp>
 
-#include "logging/Logger.hpp"
-#include "database/DbManager.hpp"
+//#include "logging/Logger.hpp"
+//#include "database/DbManager.hpp"
 #include "game/RAIIThread.hpp"
-#include "game/PlayerEntity.hpp"
-
-class Player : public PlayerEntity {
-public:
-    Player(int64_t id, const std::string& username);
-
-    nlohmann::json ToJson() const;
-    void AddExperience(int64_t amount);
-
-    int64_t GetId() const { return id_; }
-    const std::string& GetUsername() const { return username_; }
-
-    void UpdatePosition(float x, float y, float z);
-    nlohmann::json GetPosition() const;
-
-    void AddItem(const std::string& itemId, int count = 1);
-    void RemoveItem(const std::string& itemId, int count = 1);
-    nlohmann::json GetInventory() const;
-
-    void SetAttribute(const std::string& key, const nlohmann::json& value);
-    nlohmann::json GetAttributes() const;
-
-    void SetHealth(int health);
-    void SetMana(int mana);
-
-    void SaveToDatabase();
-    bool LoadFromDatabase();
-
-private:
-    int64_t id_;
-    std::string username_;
-
-    struct Position {
-        float x, y, z;
-    } position_;
-
-    std::unordered_map<std::string, int> inventory_;
-    nlohmann::json attributes_;
-
-    mutable std::shared_mutex mutex_;
-};
+#include "game/Player.hpp"
 
 struct GlobalPlayerStats {
     int total_players = 0;

@@ -1,49 +1,35 @@
 #include "game/EntityManager.hpp"
 
-// =============== Singleton Implementation ===============
+// ============================================================================
+// Constructor / Destructor
+// ============================================================================
+
+EntityManager::EntityManager() : nextEntityId_(1) {
+    Logger::Info("EntityManager created");
+}
+
+EntityManager::~EntityManager() {
+    ShutdownPython();
+}
+
+// ============================================================================
+// Singleton access
+// ============================================================================
+
 EntityManager& EntityManager::GetInstance() {
     static EntityManager instance;
     return instance;
 }
 
-// =============== Constructor ===============
-EntityManager::EntityManager() : nextEntityId_(1) {
-    Logger::Info("EntityManager initialized");
-}
-// =============== Entity Lifecycle ===============
+// ============================================================================
+// Entity Lifecycle
+// ============================================================================
+
 uint64_t EntityManager::CreateEntity(EntityType type, const glm::vec3& position) {
     std::lock_guard<std::mutex> lock(mutex_);
 
     uint64_t entityId = nextEntityId_++;
-    std::unique_ptr<GameEntity> entity;
-
-    switch (type) {
-        case EntityType::PLAYER: {
-            auto playerEntity = std::make_unique<PlayerEntity>(position);
-            playerEntities_[entityId] = playerEntity.get();
-            entity = std::move(playerEntity);
-            break;
-        }
-        case EntityType::NPC: {
-            auto npcEntity = std::make_unique<NPCEntity>(NPCType::VILLAGER, position);
-            npcEntities_[entityId] = npcEntity.get();
-            entity = std::move(npcEntity);
-            break;
-        }
-        case EntityType::ITEM:
-        case EntityType::PROJECTILE:
-            entity = std::make_unique<GameEntity>(type, position);
-            break;
-        default:
-            Logger::Error("Unknown entity type: {}", static_cast<int>(type));
-            return 0;
-    }
-
-    if (!entity) {
-        Logger::Error("Failed to create entity of type {}", static_cast<int>(type));
-        return 0;
-    }
-
+    auto entity = std::make_unique<GameEntity>(type, position);
     entity->SetId(entityId);
     entities_[entityId] = std::move(entity);
 
@@ -66,40 +52,45 @@ void EntityManager::DestroyEntity(uint64_t entityId) {
     EntityType type = it->second->GetType();
     pendingDestruction_.push_back({entityId, type, std::chrono::steady_clock::now()});
 
-    if (type == EntityType::PLAYER) {
-        playerEntities_.erase(entityId);
-    } else if (type == EntityType::NPC) {
-        npcEntities_.erase(entityId);
+    // Remove from ownership maps (owner references will be cleaned later)
+    ownership_.erase(entityId);
+    for (auto& [owner, vec] : ownership_) {
+        auto pos = std::find(vec.begin(), vec.end(), entityId);
+        if (pos != vec.end()) {
+            vec.erase(pos);
+            break;
+        }
     }
 
-    ownership_.erase(entityId);
+    // Detach any Python script
+    DetachScript(entityId);
 
     Logger::Debug("Marked entity {} for destruction", entityId);
 }
 
-// =============== Entity Access ===============
+// ============================================================================
+// Entity Access
+// ============================================================================
+
 GameEntity* EntityManager::GetEntity(uint64_t entityId) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = entities_.find(entityId);
     return it != entities_.end() ? it->second.get() : nullptr;
 }
 
-PlayerEntity* EntityManager::GetPlayerEntity(uint64_t playerId) {
+const GameEntity* EntityManager::GetEntity(uint64_t entityId) const {
     std::lock_guard<std::mutex> lock(mutex_);
-    auto it = playerEntities_.find(playerId);
-    return it != playerEntities_.end() ? it->second : nullptr;
+    auto it = entities_.find(entityId);
+    return it != entities_.end() ? it->second.get() : nullptr;
 }
 
-NPCEntity* EntityManager::GetNPCEntity(uint64_t npcId) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    auto it = npcEntities_.find(npcId);
-    return it != npcEntities_.end() ? it->second : nullptr;
-}
+// ============================================================================
+// Spatial Queries
+// ============================================================================
 
-// =============== Spatial Queries ===============
 std::vector<uint64_t> EntityManager::GetEntitiesInRadius(const glm::vec3& position,
                                                          float radius,
-                                                         EntityType filter) {
+                                                         EntityType filter) const {
     std::lock_guard<std::mutex> lock(mutex_);
     std::vector<uint64_t> result;
     float radiusSq = radius * radius;
@@ -115,7 +106,7 @@ std::vector<uint64_t> EntityManager::GetEntitiesInRadius(const glm::vec3& positi
     return result;
 }
 
-std::vector<uint64_t> EntityManager::GetEntitiesInChunk(int chunkX, int chunkZ) {
+std::vector<uint64_t> EntityManager::GetEntitiesInChunk(int chunkX, int chunkZ) const {
     std::lock_guard<std::mutex> lock(mutex_);
     std::vector<uint64_t> result;
     const float CHUNK_SIZE = 32.0f;
@@ -134,16 +125,30 @@ std::vector<uint64_t> EntityManager::GetEntitiesInChunk(int chunkX, int chunkZ) 
     return result;
 }
 
-// =============== Entity Updates ===============
+// ============================================================================
+// Updates
+// ============================================================================
+
 void EntityManager::Update(float deltaTime) {
     std::lock_guard<std::mutex> lock(mutex_);
     CleanupDestroyedEntities();
 
     for (auto& [id, entity] : entities_) {
+        // Basic physics: integrate velocity
         glm::vec3 vel = entity->GetVelocity();
         if (vel.x != 0.0f || vel.y != 0.0f || vel.z != 0.0f) {
             entity->SetPosition(entity->GetPosition() + vel * deltaTime);
         }
+
+        // Call script's on_update if attached
+        if (HasScript(id)) {
+            PyObject* args = Py_BuildValue("(f)", deltaTime);
+            CallScriptMethod(id, "on_update", args, nullptr);
+            Py_XDECREF(args);
+        }
+
+        // Let the entity itself update (C++ side)
+        entity->Update(deltaTime);
     }
 }
 
@@ -153,7 +158,10 @@ void EntityManager::UpdateEntityPosition(uint64_t entityId, const glm::vec3& new
         entity->SetPosition(newPosition);
 }
 
-// =============== Serialization ===============
+// ============================================================================
+// Serialization
+// ============================================================================
+
 nlohmann::json EntityManager::SerializeEntity(uint64_t entityId) const {
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = entities_.find(entityId);
@@ -174,7 +182,10 @@ nlohmann::json EntityManager::SerializeEntitiesInRadius(const glm::vec3& positio
     return arr;
 }
 
-// =============== Ownership Management ===============
+// ============================================================================
+// Ownership Management
+// ============================================================================
+
 void EntityManager::SetEntityOwner(uint64_t entityId, uint64_t ownerId) {
     std::lock_guard<std::mutex> lock(mutex_);
 
@@ -204,86 +215,19 @@ void EntityManager::SetEntityOwner(uint64_t entityId, uint64_t ownerId) {
     }
 }
 
-std::vector<uint64_t> EntityManager::GetOwnedEntities(uint64_t ownerId) {
+std::vector<uint64_t> EntityManager::GetOwnedEntities(uint64_t ownerId) const {
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = ownership_.find(ownerId);
     return it != ownership_.end() ? it->second : std::vector<uint64_t>{};
 }
 
-// =============== Cleanup ===============
-void EntityManager::CleanupDestroyedEntities() {
-    auto now = std::chrono::steady_clock::now();
-    const std::chrono::milliseconds DELAY(100);
-    size_t cleaned = 0;
+// ============================================================================
+// Statistics
+// ============================================================================
 
-    for (auto it = pendingDestruction_.begin(); it != pendingDestruction_.end();) {
-        if (now - it->destructionTime >= DELAY) {
-            uint64_t id = it->entityId;
-
-            // Remove from ownership lists
-            for (auto& [owner, vec] : ownership_) {
-                auto pos = std::find(vec.begin(), vec.end(), id);
-                if (pos != vec.end()) {
-                    vec.erase(pos);
-                    if (vec.empty())
-                        ownership_.erase(owner);
-                    break;
-                }
-            }
-
-            // Type‑specific cleanup (can be extended)
-            switch (it->type) {
-                case EntityType::PLAYER:
-                case EntityType::NPC:
-                case EntityType::ITEM:
-                case EntityType::PROJECTILE:
-                    Logger::Debug("Performing cleanup for entity {} (type {})",
-                                  id, EntityTypeToString(it->type));
-                    break;
-                default: break;
-            }
-
-            entities_.erase(id);
-            cleaned++;
-            it = pendingDestruction_.erase(it);
-        } else {
-            ++it;
-        }
-    }
-
-    CleanupStaleOwnershipReferences();
-    if (cleaned > 0)
-        Logger::Debug("Cleaned up {} destroyed entities", cleaned);
-}
-
-void EntityManager::CleanupStaleOwnershipReferences() {
-    for (auto it = ownership_.begin(); it != ownership_.end();) {
-        it->second.erase(
-            std::remove_if(it->second.begin(), it->second.end(),
-                [this](uint64_t id) { return entities_.find(id) == entities_.end(); }),
-            it->second.end()
-        );
-        if (it->second.empty())
-            it = ownership_.erase(it);
-        else
-            ++it;
-    }
-}
-
-// =============== Statistics ===============
 size_t EntityManager::GetTotalEntities() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return entities_.size();
-}
-
-size_t EntityManager::GetPlayerCount() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return playerEntities_.size();
-}
-
-size_t EntityManager::GetNPCCount() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return npcEntities_.size();
 }
 
 size_t EntityManager::GetPendingDestructionCount() const {
@@ -291,13 +235,14 @@ size_t EntityManager::GetPendingDestructionCount() const {
     return pendingDestruction_.size();
 }
 
-// =============== Debug ===============
+// ============================================================================
+// Debugging
+// ============================================================================
+
 void EntityManager::DumpEntityStats() const {
     std::lock_guard<std::mutex> lock(mutex_);
     Logger::Info("=== Entity Manager Statistics ===");
     Logger::Info("  Total Entities: {}", entities_.size());
-    Logger::Info("  Players: {}", playerEntities_.size());
-    Logger::Info("  NPCs: {}", npcEntities_.size());
     Logger::Info("  Pending Destruction: {}", pendingDestruction_.size());
     Logger::Info("  Ownership Relations: {}", ownership_.size());
 
@@ -317,12 +262,29 @@ const char* EntityManager::EntityTypeToString(EntityType type) const {
         case EntityType::NPC:        return "NPC";
         case EntityType::ITEM:       return "ITEM";
         case EntityType::PROJECTILE: return "PROJECTILE";
+        case EntityType::VEHICLE:    return "VEHICLE";
+        case EntityType::ENVIRONMENT:return "ENVIRONMENT";
+        case EntityType::COLLECTIBLE:return "COLLECTIBLE";
+        case EntityType::CONTAINER:  return "CONTAINER";
+        case EntityType::DOOR:       return "DOOR";
+        case EntityType::TRAP:       return "TRAP";
+        case EntityType::SPAWNER:    return "SPAWNER";
+        case EntityType::DECORATION: return "DECORATION";
+        case EntityType::PARTICLE:   return "PARTICLE";
+        case EntityType::LIGHT:      return "LIGHT";
+        case EntityType::SOUND:      return "SOUND";
+        case EntityType::TRIGGER:    return "TRIGGER";
+        case EntityType::CHECKPOINT: return "CHECKPOINT";
+        case EntityType::WAYPOINT:   return "WAYPOINT";
         case EntityType::ANY:        return "ANY";
         default:                     return "UNKNOWN";
     }
 }
 
-// =============== Advanced Queries ===============
+// ============================================================================
+// Advanced Queries
+// ============================================================================
+
 std::vector<uint64_t> EntityManager::FindEntitiesByCriteria(
     const std::function<bool(const GameEntity&)>& predicate) const {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -349,7 +311,10 @@ std::vector<uint64_t> EntityManager::FindEntitiesInBox(
     return result;
 }
 
-// =============== Entity Pooling ===============
+// ============================================================================
+// Entity Pooling
+// ============================================================================
+
 void EntityManager::PreallocateEntityPool(EntityType type, size_t count) {
     std::lock_guard<std::mutex> lock(mutex_);
     for (size_t i = 0; i < count; ++i) {
@@ -369,12 +334,6 @@ uint64_t EntityManager::ActivatePooledEntity(EntityType type, const glm::vec3& p
             it->second->SetPosition(position);
             entities_[id] = std::move(it->second);
             inactiveEntities_.erase(it);
-
-            if (type == EntityType::PLAYER)
-                playerEntities_[id] = dynamic_cast<PlayerEntity*>(entities_[id].get());
-            else if (type == EntityType::NPC)
-                npcEntities_[id] = dynamic_cast<NPCEntity*>(entities_[id].get());
-
             Logger::Debug("Activated pooled entity {} of type {}", id, EntityTypeToString(type));
             return id;
         }
@@ -390,12 +349,6 @@ void EntityManager::DeactivateEntity(uint64_t entityId) {
         return;
     }
 
-    EntityType type = it->second->GetType();
-    if (type == EntityType::PLAYER)
-        playerEntities_.erase(entityId);
-    else if (type == EntityType::NPC)
-        npcEntities_.erase(entityId);
-
     // Remove from ownership
     ownership_.erase(entityId);
     for (auto& [owner, vec] : ownership_) {
@@ -406,7 +359,222 @@ void EntityManager::DeactivateEntity(uint64_t entityId) {
         }
     }
 
+    // Detach script
+    DetachScript(entityId);
+
     inactiveEntities_[entityId] = std::move(it->second);
     entities_.erase(it);
     Logger::Debug("Deactivated entity {} to pool", entityId);
+}
+
+// ============================================================================
+// Python Scripting
+// ============================================================================
+
+bool EntityManager::InitializePython() {
+    if (pythonInitialized_)
+        return true;
+
+    Py_Initialize();
+    if (!Py_IsInitialized()) {
+        Logger::Error("Failed to initialize Python interpreter");
+        return false;
+    }
+
+    // Optionally add the script directory to sys.path
+    PyRun_SimpleString("import sys\nimport os\nsys.path.append(os.getcwd())");
+
+    pythonInitialized_ = true;
+    Logger::Info("Python interpreter initialized");
+    return true;
+}
+
+void EntityManager::ShutdownPython() {
+    if (!pythonInitialized_)
+        return;
+
+    // Clean up all script instances
+    for (auto& [id, obj] : scriptInstances_) {
+        Py_XDECREF(obj);
+    }
+    scriptInstances_.clear();
+
+    Py_Finalize();
+    pythonInitialized_ = false;
+    Logger::Info("Python interpreter shut down");
+}
+
+PyObject* EntityManager::ImportModuleFromPath(const std::string& path) {
+    // Extract directory and module name
+    std::filesystem::path fsPath(path);
+    std::string moduleName = fsPath.stem().string();
+    std::string dir = fsPath.parent_path().string();
+
+    PyObject* sysPath = PySys_GetObject("path");
+    PyObject* dirObj = PyUnicode_FromString(dir.c_str());
+    PyList_Append(sysPath, dirObj);
+    Py_DECREF(dirObj);
+
+    PyObject* module = PyImport_ImportModule(moduleName.c_str());
+    if (!module) {
+        PyErr_Print();
+        Logger::Error("Failed to import module '{}' from '{}'", moduleName, dir);
+    }
+    return module;
+}
+
+bool EntityManager::AttachScript(uint64_t entityId, const std::string& scriptPath) {
+    if (!pythonInitialized_) {
+        Logger::Error("Python not initialized; call InitializePython() first");
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    // Ensure entity exists
+    if (entities_.find(entityId) == entities_.end()) {
+        Logger::Error("Cannot attach script to non-existent entity {}", entityId);
+        return false;
+    }
+
+    // Detach any existing script
+    DetachScript(entityId);
+
+    // Import the module
+    PyObject* module = ImportModuleFromPath(scriptPath);
+    if (!module)
+        return false;
+
+    // Get the class (assumed to be same as module name)
+    std::string className = std::filesystem::path(scriptPath).stem().string();
+    PyObject* pyClass = PyObject_GetAttrString(module, className.c_str());
+    Py_DECREF(module);
+
+    if (!pyClass || !PyCallable_Check(pyClass)) {
+        Py_XDECREF(pyClass);
+        Logger::Error("Class '{}' not found or not callable in {}", className, scriptPath);
+        return false;
+    }
+
+    // Create an instance: pass entity_id to __init__
+    PyObject* args = Py_BuildValue("(K)", entityId);
+    PyObject* instance = PyObject_CallObject(pyClass, args);
+    Py_DECREF(pyClass);
+    Py_DECREF(args);
+
+    if (!instance) {
+        PyErr_Print();
+        Logger::Error("Failed to instantiate script class '{}'", className);
+        return false;
+    }
+
+    // Store the instance
+    scriptInstances_[entityId] = instance;
+
+    // Call on_create if present
+    CallScriptMethod(entityId, "on_create");
+
+    Logger::Debug("Attached script '{}' to entity {}", scriptPath, entityId);
+    return true;
+}
+
+bool EntityManager::CallScriptMethod(uint64_t entityId, const std::string& methodName,
+                                     PyObject* args, PyObject* kwargs) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    auto it = scriptInstances_.find(entityId);
+    if (it == scriptInstances_.end())
+        return false;
+
+    PyObject* instance = it->second;
+    PyObject* method = PyObject_GetAttrString(instance, methodName.c_str());
+    if (!method) {
+        PyErr_Clear(); // Method not defined, ignore
+        return false;
+    }
+
+    PyObject* result = PyObject_Call(method, args ? args : PyTuple_New(0), kwargs);
+    Py_DECREF(method);
+    Py_XDECREF(args); // args is borrowed if passed in, but we incref? We'll manage carefully.
+
+    if (!result) {
+        PyErr_Print();
+        Logger::Error("Error calling script method '{}' on entity {}", methodName, entityId);
+        return false;
+    }
+
+    Py_DECREF(result);
+    return true;
+}
+
+void EntityManager::DetachScript(uint64_t entityId) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = scriptInstances_.find(entityId);
+    if (it != scriptInstances_.end()) {
+        // Call on_destroy if present
+        CallScriptMethod(entityId, "on_destroy");
+
+        Py_DECREF(it->second);
+        scriptInstances_.erase(it);
+        Logger::Debug("Detached script from entity {}", entityId);
+    }
+}
+
+bool EntityManager::HasScript(uint64_t entityId) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return scriptInstances_.find(entityId) != scriptInstances_.end();
+}
+
+// ============================================================================
+// Cleanup Helpers
+// ============================================================================
+
+void EntityManager::CleanupDestroyedEntities() {
+    auto now = std::chrono::steady_clock::now();
+    const std::chrono::milliseconds DELAY(100);
+    size_t cleaned = 0;
+
+    for (auto it = pendingDestruction_.begin(); it != pendingDestruction_.end();) {
+        if (now - it->destructionTime >= DELAY) {
+            uint64_t id = it->entityId;
+
+            // Remove from ownership lists
+            for (auto& [owner, vec] : ownership_) {
+                auto pos = std::find(vec.begin(), vec.end(), id);
+                if (pos != vec.end()) {
+                    vec.erase(pos);
+                    if (vec.empty())
+                        ownership_.erase(owner);
+                    break;
+                }
+            }
+
+            // Detach script (should already be detached, but just in case)
+            DetachScript(id);
+
+            entities_.erase(id);
+            cleaned++;
+            it = pendingDestruction_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    CleanupStaleOwnershipReferences();
+    if (cleaned > 0)
+        Logger::Debug("Cleaned up {} destroyed entities", cleaned);
+}
+
+void EntityManager::CleanupStaleOwnershipReferences() {
+    for (auto it = ownership_.begin(); it != ownership_.end();) {
+        it->second.erase(
+            std::remove_if(it->second.begin(), it->second.end(),
+                [this](uint64_t id) { return entities_.find(id) == entities_.end(); }),
+            it->second.end()
+        );
+        if (it->second.empty())
+            it = ownership_.erase(it);
+        else
+            ++it;
+    }
 }

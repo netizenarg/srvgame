@@ -21,10 +21,10 @@
 //#include "config/ConfigManager.hpp"
 //#include "logging/Logger.hpp"
 //#include "database/DbManager.hpp"
-#include "game/RAIIThread.hpp"
-#include "game/PlayerManager.hpp"
+//#include "game/RAIIThread.hpp"
 #include "game/LogicWorld.hpp"
 #include "game/LogicEntity.hpp"
+//#include "game/PlayerManager.hpp"
 
 class PythonScripting;
 class ScriptHotReloader;
@@ -85,6 +85,9 @@ public:
     // Utility
     int64_t GetCurrentTimestamp();
     bool CheckRateLimit(uint64_t sessionId);
+    float CalculateDistance(const glm::vec3& a, const glm::vec3& b) {
+        return glm::distance(a, b);
+    }
 
 protected:
 
