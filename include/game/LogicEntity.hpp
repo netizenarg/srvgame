@@ -18,8 +18,7 @@
 
 class LogicEntity {
 public:
-    LogicEntity();
-    ~LogicEntity();
+    static LogicEntity& GetInstance();
 
     // Initialization
     void Initialize();
@@ -46,6 +45,12 @@ public:
     int GetActiveNPCCount() const { return activeNPCCount_; }
 
 private:
+    LogicEntity();
+    ~LogicEntity();
+
+    static std::mutex instanceMutex_;
+    static LogicEntity* instance_;
+
     std::unique_ptr<NPCManager> npcManager_;
     std::unordered_map<uint64_t, std::unique_ptr<NPCEntity>> npcEntities_;
     std::mutex npcMutex_;

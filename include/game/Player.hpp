@@ -25,7 +25,6 @@
 
 class InventorySystem;
 class SkillSystem;
-class QuestSystem;
 
 struct PlayerAttributes {
     int strength = 10;        // Physical power
@@ -159,6 +158,10 @@ public:
     const std::string& GetUsername() const { return username_; }
 
     void UpdatePosition(float x, float y, float z);
+    void UpdateHeartbeat();
+    bool IsHeartbeatExpired(int timeoutSeconds) const;
+    void ApplyDamage(int damage, int64_t attackerId);
+    void ApplyHealing(int amount, int64_t healerId);
 
     // Player-specific properties
     void SetPlayerClass(PlayerClass player_class) { player_class_ = player_class; }
@@ -271,7 +274,7 @@ public:
     // Player systems access
     InventorySystem& GetInventorySystem() const { return inventory_system_; }
     SkillSystem& GetSkillSystem() const { return skill_system_; }
-    QuestSystem& GetQuestSystem() const { return quest_system_; }
+    QuestManager& GetQuestManager() const { return quest_manager_; }
 
     // Utility methods
     bool IsAlive() const { return stats_.health > 0; }
@@ -298,6 +301,10 @@ public:
 
     void SetCosmetic(const std::string& slot, const std::string& cosmetic_id);
     std::string GetCosmetic(const std::string& slot) const;
+    float GetDistanceTo(const glm::vec3& other) const;
+    void AddCurrencyGold(int amount);
+    void AddCurrencyGems(int amount);
+    void SetOnline(bool online);
 
     // Player session
     void SetSessionId(uint64_t session_id) { session_id_ = session_id; }
@@ -310,13 +317,20 @@ public:
     virtual nlohmann::json Serialize() const override;
     virtual void Deserialize(const nlohmann::json& data) override;
     nlohmann::json JsonGetInventory() const;
+    nlohmann::json ToJson() const;
 
 private:
     int64_t id_;
     std::string username_;
 
     //struct Position {float x, y, z;} position_;
-    //nlohmann::json attributes_;
+    std::chrono::system_clock::time_point last_movement_;
+
+    bool online_ = false;
+    std::chrono::system_clock::time_point created_at_;
+    std::chrono::system_clock::time_point last_login_;
+    std::chrono::system_clock::time_point last_logout_;
+    std::chrono::system_clock::time_point last_heartbeat_;
 
     mutable std::shared_mutex mutex_;
 
@@ -341,7 +355,7 @@ private:
         nlohmann::json buff_data;
         float duration;
         float time_remaining;
-        std::chrono::steady_clock::time_point applied_time;
+        std::chrono::system_clock::time_point applied_time;
     };
     std::unordered_map<std::string, ActiveBuff> active_buffs_;
 
@@ -350,7 +364,7 @@ private:
         std::string ability_id;
         float duration;
         float time_remaining;
-        std::chrono::steady_clock::time_point start_time;
+        std::chrono::system_clock::time_point start_time;
     };
     std::unordered_map<std::string, Cooldown> cooldowns_;
 
@@ -377,7 +391,7 @@ private:
     // Systems
     InventorySystem& inventory_system_;
     SkillSystem& skill_system_;
-    QuestSystem& quest_system_;
+    QuestManager& quest_manager_;
 
     // Private methods
     void OnLevelUp();
@@ -404,14 +418,14 @@ private:
     struct DamageSource {
         uint64_t attacker_id;
         int damage;
-        std::chrono::steady_clock::time_point timestamp;
+        std::chrono::system_clock::time_point timestamp;
     };
     std::deque<DamageSource> damage_sources_;
 
     struct HealingSource {
         uint64_t healer_id;
         int healing;
-        std::chrono::steady_clock::time_point timestamp;
+        std::chrono::system_clock::time_point timestamp;
     };
     std::deque<HealingSource> healing_sources_;
 

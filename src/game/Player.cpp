@@ -222,78 +222,33 @@ void PlayerSettings::Deserialize(const nlohmann::json& data) {
 // =============== Player Implementation ===============
 
 Player::Player(int64_t id, const std::string& username)
-: id_(id),
+: GameEntity(EntityType::PLAYER, glm::vec3(0.0f, 0.0f, 0.0f)),
+id_(id),
 username_(username),
-position_({0.0f, 0.0f, 0.0f}),
-health_(100),
-max_health_(100),
-mana_(100),
-max_mana_(100),
-level_(1),
-experience_(0),
-score_(0),
-currency_gold_(100),
-currency_gems_(10),
-online_(false),
-created_at_(std::chrono::system_clock::now()),
-last_login_(std::chrono::system_clock::now()),
-last_logout_(std::chrono::system_clock::now()),
-total_playtime_(0),
-last_heartbeat_(std::chrono::steady_clock::now()),
-attributes_(nlohmann::json::object()),
-inventory_(nlohmann::json::array()),
-equipment_(nlohmann::json::object()),
-quests_(nlohmann::json::object()),
-achievements_(nlohmann::json::array()),
-settings_(nlohmann::json::object()),
-metadata_(nlohmann::json::object()),
-banned_(false),
-ban_expires_(),
-session_id_(0),
-ip_address_(""),
-connection_quality_(100.0f) {
-
-    // Initialize default attributes
-    attributes_ = {
-        {"strength", 10},
-        {"dexterity", 10},
-        {"intelligence", 10},
-        {"vitality", 10},
-        {"luck", 5},
-        {"attack_power", 10},
-        {"defense", 5},
-        {"critical_chance", 0.05},
-        {"critical_damage", 1.5},
-        {"move_speed", 1.0},
-        {"attack_speed", 1.0},
-        {"health_regen", 0.1},
-        {"mana_regen", 0.2}
-    };
-
-    // Initialize default settings
-    settings_ = {
-        {"ui_scale", 1.0},
-        {"sound_volume", 0.8},
-        {"music_volume", 0.6},
-        {"chat_enabled", true},
-        {"combat_text", true},
-        {"auto_loot", false},
-        {"show_damage_numbers", true},
-        {"language", "en"},
-        {"timezone", "UTC"}
-    };
-
+inventory_system_(InventorySystem::GetInstance()),
+skill_system_(SkillSystem::GetInstance()),
+quest_manager_(QuestManager::GetInstance()),
+player_class_(PlayerClass::WARRIOR),
+race_(PlayerRace::HUMAN),
+status_(PlayerStatus::IDLE),
+last_movement_(std::chrono::system_clock::now())
+{
+    ApplyRaceBonuses();
+    ApplyClassBonuses();
+    UpdateDerivedStats();
+    CalculateExperienceToNextLevel();
     Logger::Debug("Player {} created with ID {}", username, id);
 }
 
 Player::Player(const glm::vec3& position)
-    : GameEntity(EntityType::PLAYER, position),
-    inventory_system_(InventorySystem::GetInstance()),
-    skill_system_(SkillSystem::GetInstance()),
-    quest_system_(QuestSystem::GetInstance()),
-    player_class_(PlayerClass::WARRIOR),
-    race_(PlayerRace::HUMAN),
-    status_(PlayerStatus::IDLE) {
+: GameEntity(EntityType::PLAYER, position),
+inventory_system_(InventorySystem::GetInstance()),
+skill_system_(SkillSystem::GetInstance()),
+quest_manager_(QuestManager::GetInstance()),
+player_class_(PlayerClass::WARRIOR),
+race_(PlayerRace::HUMAN),
+status_(PlayerStatus::IDLE)
+{
     // Apply default bonuses
     ApplyRaceBonuses();
     ApplyClassBonuses();
@@ -304,13 +259,14 @@ Player::Player(const glm::vec3& position)
 }
 
 Player::Player(const glm::vec3& position, PlayerClass player_class, PlayerRace race)
-    : GameEntity(EntityType::PLAYER, position),
-    inventory_system_(InventorySystem::GetInstance()),
-    skill_system_(SkillSystem::GetInstance()),
-    quest_system_(QuestSystem::GetInstance()),
-    player_class_(player_class),
-    race_(race),
-    status_(PlayerStatus::IDLE) {
+: GameEntity(EntityType::PLAYER, position),
+inventory_system_(InventorySystem::GetInstance()),
+skill_system_(SkillSystem::GetInstance()),
+quest_manager_(QuestManager::GetInstance()),
+player_class_(player_class),
+race_(race),
+status_(PlayerStatus::IDLE)
+{
     // Apply bonuses based on class and race
     ApplyRaceBonuses();
     ApplyClassBonuses();
@@ -331,10 +287,10 @@ void Player::UpdatePosition(float x, float y, float z) {
     position_.x = x;
     position_.y = y;
     position_.z = z;
-    last_movement_ = std::chrono::steady_clock::now();
+    last_movement_ = std::chrono::system_clock::now();
 }
 
-float Player::GetDistanceTo(const Position& other) const {
+float Player::GetDistanceTo(const glm::vec3& other) const {
     std::shared_lock<std::shared_mutex> lock(mutex_);
     float dx = position_.x - other.x;
     float dy = position_.y - other.y;
@@ -357,14 +313,14 @@ nlohmann::json Player::JsonGetInventory() const {
 
 void Player::AddCurrencyGold(int amount) {
     std::unique_lock<std::shared_mutex> lock(mutex_);
-    currency_gold_ += amount;
-    if (currency_gold_ < 0) currency_gold_ = 0;
+    stats_.currency_gold += amount;
+    if (stats_.currency_gold < 0) stats_.currency_gold = 0;
 }
 
 void Player::AddCurrencyGems(int amount) {
     std::unique_lock<std::shared_mutex> lock(mutex_);
-    currency_gems_ += amount;
-    if (currency_gems_ < 0) currency_gems_ = 0;
+    stats_.currency_gems += amount;
+    if (stats_.currency_gems < 0) stats_.currency_gems = 0;
 }
 
 void Player::SetOnline(bool online) {
@@ -380,18 +336,18 @@ void Player::SetOnline(bool online) {
         // Update total playtime
         auto sessionTime = std::chrono::duration_cast<std::chrono::seconds>(
             now - last_login_);
-        total_playtime_ += sessionTime.count();
+        stats_.total_playtime += sessionTime.count();
     }
 }
 
 void Player::UpdateHeartbeat() {
     std::unique_lock<std::shared_mutex> lock(mutex_);
-    last_heartbeat_ = std::chrono::steady_clock::now();
+    last_heartbeat_ = std::chrono::system_clock::now();
 }
 
 bool Player::IsHeartbeatExpired(int timeoutSeconds) const {
     std::shared_lock<std::shared_mutex> lock(mutex_);
-    auto now = std::chrono::steady_clock::now();
+    auto now = std::chrono::system_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
         now - last_heartbeat_);
     return elapsed.count() > timeoutSeconds;
@@ -401,30 +357,29 @@ void Player::ApplyDamage(int damage, int64_t attackerId) {
     std::unique_lock<std::shared_mutex> lock(mutex_);
 
     // Calculate actual damage (consider defense)
-    int defense = attributes_.value("defense", 5);
-    int actualDamage = std::max(1, damage - defense / 2);
+    int actualDamage = std::max(1, damage - attributes_.defense / 2);
 
-    health_ -= actualDamage;
-    if (health_ < 0) health_ = 0;
+    stats_.health -= actualDamage;
+    if (stats_.health < 0) stats_.health = 0;
 
     // Record damage source
     if (damage_sources_.size() > 10) {
         damage_sources_.pop_front();
     }
-    damage_sources_.push_back({attackerId, actualDamage, std::chrono::steady_clock::now()});
+    damage_sources_.push_back({attackerId, actualDamage, std::chrono::system_clock::now()});
 }
 
 void Player::ApplyHealing(int amount, int64_t healerId) {
     std::unique_lock<std::shared_mutex> lock(mutex_);
 
-    health_ += amount;
-    if (health_ > max_health_) health_ = max_health_;
+    stats_.health += amount;
+    if (stats_.health > stats_.max_health) stats_.health = stats_.max_health;
 
     // Record healing source
     if (healing_sources_.size() > 10) {
         healing_sources_.pop_front();
     }
-    healing_sources_.push_back({healerId, amount, std::chrono::steady_clock::now()});
+    healing_sources_.push_back({healerId, amount, std::chrono::system_clock::now()});
 }
 
 nlohmann::json Player::ToJson() const {
@@ -432,32 +387,32 @@ nlohmann::json Player::ToJson() const {
     nlohmann::json json;
     json["id"] = id_;
     json["username"] = username_;
-    json["level"] = level_;
-    json["experience"] = experience_;
-    json["health"] = health_;
-    json["max_health"] = max_health_;
-    json["mana"] = mana_;
-    json["max_mana"] = max_mana_;
-    json["score"] = score_;
-    json["currency_gold"] = currency_gold_;
-    json["currency_gems"] = currency_gems_;
+    json["level"] = stats_.level;
+    json["experience"] = stats_.experience;
+    json["health"] = stats_.health;
+    json["max_health"] = stats_.max_health;
+    json["mana"] = stats_.mana;
+    json["max_mana"] = stats_.max_mana;
+    json["score"] = stats_.score;
+    json["currency_gold"] = stats_.currency_gold;
+    json["currency_gems"] = stats_.currency_gems;
     json["position"] = {
         {"x", position_.x},
         {"y", position_.y},
         {"z", position_.z}
     };
-    json["attributes"] = attributes_;
+    json["attributes"] = attributes_.Serialize();
     json["inventory"] = inventory_;
-    json["equipment"] = equipment_;
+    json["equipment"] = equipment_.Serialize();
     json["achievements"] = achievements_;
     json["online"] = online_;
-    json["total_playtime"] = total_playtime_;
+    json["total_playtime"] = stats_.total_playtime;
     json["created_at"] = std::chrono::duration_cast<std::chrono::milliseconds>(
         created_at_.time_since_epoch()).count();
-        json["last_login"] = std::chrono::duration_cast<std::chrono::milliseconds>(
-            last_login_.time_since_epoch()).count();
-            json["connection_quality"] = connection_quality_;
-            return json;
+    json["last_login"] = std::chrono::duration_cast<std::chrono::milliseconds>(
+        last_login_.time_since_epoch()).count();
+    json["connection_quality"] = connection_quality_;
+    return json;
 }
 
 // =============== Health and Mana Management ===============
@@ -500,15 +455,6 @@ void Player::SetLevel(int level) {
     UpdateDerivedStats();
 }
 
-void Player::LoseExperience(int64_t amount) {
-    std::unique_lock<std::shared_mutex> lock(mutex_);
-    experience_ = std::max<int64_t>(0, experience_ - amount);
-}
-
-int64_t Player::CalculateExperienceRequired(int level) const {
-    return static_cast<int64_t>(100 * std::pow(1.5, level - 1));
-}
-
 // =============== Experience Management ===============
 void Player::AddExperience(int64_t amount) {
     std::unique_lock<std::shared_mutex> lock(mutex_);
@@ -533,6 +479,7 @@ void Player::LoseExperience(int64_t amount) {
     if (amount <= 0) {
         return;
     }
+    std::unique_lock<std::shared_mutex> lock(mutex_);
     stats_.experience = std::max<int64_t>(0, stats_.experience - amount);
     Logger::Debug("Player {} lost {} experience", GetId(), amount);
 }
@@ -783,49 +730,17 @@ void Player::AddItem(const std::string& item_id, int count) {
     Logger::Debug("Player {} received {} x{}", GetId(), item_id, count);
 }
 
-void Player::JsonAddItem(const std::string& itemId, int count) {
-    std::unique_lock<std::shared_mutex> lock(mutex_);
-    if (inventory_.is_array()) {
-        for (auto& item : inventory_) {
-            if (item["id"] == itemId) {
-                int currentCount = item.value("count", 1);
-                item["count"] = currentCount + count;
-                return;
-            }
-        }
-        nlohmann::json newItem = {
-            {"id", itemId},
-            {"count", count},
-            {"acquired", std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count()}
-        };
-        inventory_.push_back(newItem);
-    }
-}
-
-// void Player::RemoveItem(const std::string& item_id, int count) {
-//     if (count <= 0) return;
-//     std::unique_lock<std::shared_mutex> lock(mutex_);
-//     auto it = inventory_.find(item_id);
-//     if (it != inventory_.end()) {
-//         it->second -= count;
-//         if (it->second <= 0) {
-//             inventory_.erase(it);
-//         }
-//     }
-// }
-
 void Player::RemoveItem(const std::string& itemId, int count) {
     if (count <= 0) return;
     std::unique_lock<std::shared_mutex> lock(mutex_);
-    if (inventory_.is_array()) {
-        for (auto it = inventory_.begin(); it != inventory_.end(); ++it) {
-            if ((*it)["id"] == itemId) {
-                int currentCount = it->value("count", 1);
-                if (currentCount <= count) {
-                    inventory_.erase(it);
+    if(!inventory_.empty())
+    {
+        for(const auto& [k, v] : inventory_) {
+            if (k == itemId) {
+                if (v <= count) {
+                    inventory_.erase(k);
                 } else {
-                    (*it)["count"] = currentCount - count;
+                    inventory_[k] = v - count;
                 }
                 return;
             }
@@ -838,18 +753,6 @@ int Player::GetItemCount(const std::string& item_id) const {
     auto it = inventory_.find(item_id);
     return it != inventory_.end() ? it->second : 0;
 }
-
-// int Player::GetItemCount(const std::string& itemId) const {
-//     std::shared_lock<std::shared_mutex> lock(mutex_);
-//     if (inventory_.is_array()) {
-//         for (const auto& item : inventory_) {
-//             if (item["id"] == itemId) {
-//                 return item.value("count", 1);
-//             }
-//         }
-//     }
-//     return 0;
-// }
 
 bool Player::HasItem(const std::string& item_id, int count) const {
     return GetItemCount(item_id) >= count;
@@ -988,7 +891,7 @@ void Player::TakeDamage(int amount, uint64_t attacker_id) {
     if (damage_sources_.size() > 10) {
         damage_sources_.pop_front();
     }
-    damage_sources_.push_back({attacker_id, actual_damage, std::chrono::steady_clock::now()});
+    damage_sources_.push_back({attacker_id, actual_damage, std::chrono::system_clock::now()});
 
     // Update status
     if (actual_damage > 0) {
@@ -1011,7 +914,7 @@ void Player::Heal(int amount, uint64_t healer_id) {
         if (healing_sources_.size() > 10) {
             healing_sources_.pop_front();
         }
-        healing_sources_.push_back({healer_id, actual_healing, std::chrono::steady_clock::now()});
+        healing_sources_.push_back({healer_id, actual_healing, std::chrono::system_clock::now()});
 
         Logger::Debug("Player {} healed for {} (health: {}/{})", 
                       GetId(), actual_healing, stats_.health, stats_.max_health);
@@ -1047,7 +950,7 @@ void Player::ApplyBuff(const std::string& buff_id, const nlohmann::json& buff_da
     buff.buff_data = buff_data;
     buff.duration = duration;
     buff.time_remaining = duration;
-    buff.applied_time = std::chrono::steady_clock::now();
+    buff.applied_time = std::chrono::system_clock::now();
     active_buffs_[buff_id] = buff;
     for (const auto& [key, value] : buff_data.items()) {
         if (value.is_number()) {
@@ -1076,7 +979,7 @@ void Player::RemoveBuff(const std::string& buff_id) {
 
 void Player::UpdateBuffs(float delta_time) {
     std::unique_lock<std::shared_mutex> lock(mutex_);
-    auto now = std::chrono::steady_clock::now();
+    //auto now = std::chrono::system_clock::now();
     for (auto it = active_buffs_.begin(); it != active_buffs_.end();) {
         it->second.time_remaining -= delta_time;
         if (it->second.time_remaining <= 0.0f) {
@@ -1274,7 +1177,7 @@ void Player::LoadBuffsFromJson(const nlohmann::json& data) {
             buff.time_remaining = buff_json["time_remaining"];
 
             int64_t applied_time_ms = buff_json["applied_time"];
-            buff.applied_time = std::chrono::steady_clock::time_point(
+            buff.applied_time = std::chrono::system_clock::time_point(
                 std::chrono::milliseconds(applied_time_ms));
 
             // Re-apply buff effects
@@ -1318,7 +1221,7 @@ void Player::LoadCooldownsFromJson(const nlohmann::json& data) {
             cd.time_remaining = cd_json["time_remaining"];
 
             int64_t start_time_ms = cd_json["start_time"];
-            cd.start_time = std::chrono::steady_clock::time_point(
+            cd.start_time = std::chrono::system_clock::time_point(
                 std::chrono::milliseconds(start_time_ms));
 
             cooldowns_[cd.ability_id] = cd;
@@ -1397,20 +1300,6 @@ void Player::Regenerate(float delta_time) {
     }
 }
 
-// void Player::Regenerate(float deltaTime) {
-//     std::unique_lock<std::shared_mutex> lock(mutex_);
-//     float healthRegen = attributes_.value("health_regen", 0.1f);
-//     int healthGain = static_cast<int>(healthRegen * deltaTime);
-//     if (healthGain > 0) {
-//         health_ = std::min(max_health_, health_ + healthGain);
-//     }
-//     float manaRegen = attributes_.value("mana_regen", 0.2f);
-//     int manaGain = static_cast<int>(manaRegen * deltaTime);
-//     if (manaGain > 0) {
-//         mana_ = std::min(max_mana_, mana_ + manaGain);
-//     }
-// }
-
 // =============== Player Actions ===============
 void Player::UseSkill(const std::string& skill_id, uint64_t target_id) {
     if (IsDead() || IsCasting()) return;
@@ -1436,7 +1325,7 @@ void Player::UseSkill(const std::string& skill_id, uint64_t target_id) {
     cd.ability_id = skill_id;
     cd.duration = 2.0f;
     cd.time_remaining = 2.0f;
-    cd.start_time = std::chrono::steady_clock::now();
+    cd.start_time = std::chrono::system_clock::now();
     cooldowns_[skill_id] = cd;
 
     Logger::Debug("Player {} used skill {} on target {}", GetId(), skill_id, target_id);
@@ -1685,36 +1574,16 @@ void Player::UnblockPlayer(uint64_t player_id) {
 // =============== Achievements ===============
 void Player::AddAchievement(const std::string& achievement_id) {
     std::unique_lock<std::shared_mutex> lock(mutex_);
-    if (achievements_.is_array()) {
-        for (const auto& ach : achievements_) {
-            if (ach == achievementId) {
-                return;
-            }
-        }
-        if (std::find(achievements_.begin(), achievements_.end(), achievement_id) == achievements_.end()) {
-            achievements_.push_back(achievement_id);
-            Logger::Debug("Player {} earned achievement {}", GetId(), achievement_id);
+    for (const auto& ach : achievements_) {
+        if (ach == achievement_id) {
+            return;
         }
     }
+    if (std::find(achievements_.begin(), achievements_.end(), achievement_id) == achievements_.end()) {
+        achievements_.push_back(achievement_id);
+        Logger::Debug("Player {} earned achievement {}", GetId(), achievement_id);
+    }
 }
-
-// void Player::AddAchievement(const std::string& achievementId) {
-//     std::unique_lock<std::shared_mutex> lock(mutex_);
-//     if (achievements_.is_array()) {
-//         for (const auto& ach : achievements_) {
-//             if (ach == achievementId) {
-//                 return;
-//             }
-//         }
-//         nlohmann::json achievement = {
-//             {"id", achievementId},
-//             {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
-//                 std::chrono::system_clock::now().time_since_epoch()).count()},
-//                 {"points", 10} // Default points
-//         };
-//         achievements_.push_back(achievement);
-//     }
-// }
 
 bool Player::HasAchievement(const std::string& achievement_id) const {
     return std::find(achievements_.begin(), achievements_.end(), achievement_id) != achievements_.end();

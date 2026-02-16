@@ -1,11 +1,13 @@
 #pragma once
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <iomanip>
 #include <memory>
 #include <random>
+#include <shared_mutex>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -200,7 +202,7 @@ public:
     // JSON
     nlohmann::json ToJson() const;
     nlohmann::json JsonGetPosition() const;
-    nlohmann::json JsonGetAttribute() const;
+    nlohmann::json JsonGetAttribute(const std::string& key, const nlohmann::json& defaultValue = {}) const;
     void JsonSetAttribute(const std::string& key, const nlohmann::json& value);
     nlohmann::json JsonGetAttributes() const;
 
@@ -251,6 +253,8 @@ protected:
     static std::atomic<uint64_t> next_entity_id_;
 
 private:
+    mutable std::shared_mutex mutex_;
+    std::chrono::steady_clock::time_point last_movement_;
 
     // Events
     //std::unordered_map<std::string, std::vector<EventCallback>> event_callbacks_;

@@ -51,8 +51,8 @@ void GameLogic::Initialize() {
     SetWorldConfig(worldConfig);
 
     // Initialize component systems
-    worldLogic_.Initialize(worldConfig);
-    entityLogic_.Initialize();
+    LogicWorld::GetInstance().Initialize(worldConfig);
+    LogicEntity::GetInstance().Initialize();
 
     // Load game data
     if (!LoadGameData()) {
@@ -73,78 +73,78 @@ void GameLogic::Shutdown() {
     Logger::Info("Shutting down GameLogic world system...");
 
     // Shutdown component systems
-    entityLogic_.Shutdown();
-    worldLogic_.Shutdown();
+    LogicEntity::GetInstance().Shutdown();
+    LogicWorld::GetInstance().Shutdown();
 
     Logger::Info("GameLogic world system shutdown complete");
 }
 
 // =============== World Configuration ===============
 void GameLogic::SetWorldConfig(const WorldConfig& config) {
-    worldLogic_.SetConfig(config);
+    LogicWorld::GetInstance().SetConfig(config);
 }
 
 const GameLogic::WorldConfig& GameLogic::GetWorldConfig() const {
-    return static_cast<const WorldConfig&>(worldLogic_.GetConfig());
+    return static_cast<const WorldConfig&>(LogicWorld::GetInstance().GetConfig());
 }
 
 // =============== World Methods ===============
 std::shared_ptr<WorldChunk> GameLogic::GetOrCreateChunk(int chunkX, int chunkZ) {
-    return worldLogic_.GetOrCreateChunk(chunkX, chunkZ);
+    return LogicWorld::GetInstance().GetOrCreateChunk(chunkX, chunkZ);
 }
 
 void GameLogic::GenerateWorldAroundPlayer(uint64_t playerId, const glm::vec3& position) {
-    worldLogic_.GenerateWorldAroundPlayer(position, GetWorldConfig().viewDistance);
+    LogicWorld::GetInstance().GenerateWorldAroundPlayer(position, GetWorldConfig().viewDistance);
     
     // Sync entities to player
     SyncNearbyEntitiesToPlayer(GetSessionIdByPlayer(playerId), position);
 }
 
 void GameLogic::PreloadWorldData(float radius) {
-    worldLogic_.PreloadWorldData(radius);
+    LogicWorld::GetInstance().PreloadWorldData(radius);
 }
 
 float GameLogic::GetTerrainHeight(float x, float z) const {
-    return worldLogic_.GetTerrainHeight(x, z);
+    return LogicWorld::GetInstance().GetTerrainHeight(x, z);
 }
 
 BiomeType GameLogic::GetBiomeAt(float x, float z) const {
-    return worldLogic_.GetBiomeAt(x, z);
+    return LogicWorld::GetInstance().GetBiomeAt(x, z);
 }
 
 // =============== Entity Methods ===============
 uint64_t GameLogic::SpawnNPC(NPCType type, const glm::vec3& position, uint64_t ownerId) {
-    return entityLogic_.SpawnNPC(type, position, ownerId);
+    return LogicEntity::GetInstance().SpawnNPC(type, position, ownerId);
 }
 
 void GameLogic::DespawnNPC(uint64_t npcId) {
-    entityLogic_.DespawnNPC(npcId);
+    LogicEntity::GetInstance().DespawnNPC(npcId);
 }
 
 NPCEntity* GameLogic::GetNPCEntity(uint64_t npcId) {
-    return entityLogic_.GetNPCEntity(npcId);
+    return LogicEntity::GetInstance().GetNPCEntity(npcId);
 }
 
 GameEntity* GameLogic::GetEntity(uint64_t entityId) {
-    return entityLogic_.GetEntity(entityId);
+    return LogicEntity::GetInstance().GetEntity(entityId);
 }
 
-Player* GameLogic::GetPlayer(uint64_t playerId) {
-    return entityLogic_.GetPlayer(playerId);
+std::shared_ptr<Player> GameLogic::GetPlayer(uint64_t playerId) {
+    return PlayerManager::GetInstance().GetPlayer(playerId);
 }
 
 // =============== Collision Methods ===============
 CollisionResult GameLogic::CheckCollision(const glm::vec3& position, float radius, uint64_t excludeEntityId) {
-    return entityLogic_.CheckCollision(position, radius, excludeEntityId);
+    return LogicEntity::GetInstance().CheckCollision(position, radius, excludeEntityId);
 }
 
 bool GameLogic::Raycast(const glm::vec3& origin, const glm::vec3& direction, float maxDistance, RaycastHit& hit) {
-    return entityLogic_.Raycast(origin, direction, maxDistance, hit);
+    return LogicEntity::GetInstance().Raycast(origin, direction, maxDistance, hit);
 }
 
 // =============== Loot Methods ===============
 void GameLogic::CreateLootEntity(const glm::vec3& position, std::shared_ptr<LootItem> item, int quantity) {
-    entityLogic_.CreateLootEntity(position, item, quantity);
+    LogicEntity::GetInstance().CreateLootEntity(position, item, quantity);
 }
 
 void GameLogic::HandleLootPickup(uint64_t sessionId, const nlohmann::json& data) {
@@ -163,7 +163,7 @@ void GameLogic::HandleLootPickup(uint64_t sessionId, const nlohmann::json& data)
             return;
         }
 
-        Player* player = GetPlayer(playerId);
+        std::shared_ptr<Player> player = PlayerManager::GetInstance().GetPlayer(playerId);
         if (!player) {
             SendError(sessionId, "Player not found");
             return;
@@ -356,7 +356,7 @@ void GameLogic::HandlePlayerPositionUpdate(uint64_t sessionId, const nlohmann::j
             return;
         }
 
-        Player* player = GetPlayer(playerId);
+        std::shared_ptr<Player> player = GetPlayer(playerId);
         if (player) {
             float collisionRadius = 0.5f;
             CollisionResult collision = CheckCollision(position, collisionRadius, playerId);
@@ -409,8 +409,7 @@ void GameLogic::HandleNPCInteraction(uint64_t sessionId, const nlohmann::json& d
         }
 
         uint64_t playerId = GetPlayerIdBySession(sessionId);
-        Player* player = GetPlayer(playerId);
-
+        std::shared_ptr<Player> player = GetPlayer(playerId);
         if (!player) {
             SendError(sessionId, "Player not found", 404);
             return;
@@ -596,8 +595,8 @@ void GameLogic::GameLoop() {
             
             // Update systems
             UpdateWorld(deltaTime);
-            entityLogic_.UpdateNPCs(deltaTime);
-            entityLogic_.UpdateCollisions(deltaTime);
+            LogicEntity::GetInstance().UpdateNPCs(deltaTime);
+            LogicEntity::GetInstance().UpdateCollisions(deltaTime);
             
             // Process game logic
             ProcessGameTick(deltaTime);
@@ -649,14 +648,14 @@ void GameLogic::UpdateWorld(float deltaTime) {
     
     std::lock_guard<std::mutex> lock(sessionMutex_);
     for (const auto& [playerId, sessionId] : playerToSessionMap_) {
-        Player* player = GetPlayer(playerId);
+        std::shared_ptr<Player> player = GetPlayer(playerId);
         if (player) {
             playerPositions.push_back(player->GetPosition());
         }
     }
     
     for (const auto& position : playerPositions) {
-        worldLogic_.UnloadDistantChunks(position, GetWorldConfig().chunkUnloadDistance);
+        LogicWorld::GetInstance().UnloadDistantChunks(position, GetWorldConfig().chunkUnloadDistance);
     }
 }
 
@@ -673,8 +672,8 @@ void GameLogic::SaveGameState() {
         nlohmann::json gameState = {
             {"server_time", GetCurrentTimestamp()},
             {"world_seed", GetWorldConfig().seed},
-            {"active_chunks", worldLogic_.GetActiveChunkCount()},
-            {"active_npcs", 0}, // entityLogic_.GetActiveNPCCount() if exposed
+            {"active_chunks", LogicWorld::GetInstance().GetActiveChunkCount()},
+            {"active_npcs", 0}, // LogicEntity::GetInstance().GetActiveNPCCount() if exposed
             {"world_config", {
                 {"view_distance", GetWorldConfig().viewDistance},
                 {"chunk_size", GetWorldConfig().chunkSize},
@@ -692,7 +691,7 @@ void GameLogic::SaveGameState() {
 }
 
 void GameLogic::SaveChunkData() {
-    worldLogic_.SaveChunkData();
+    LogicWorld::GetInstance().SaveChunkData();
 }
 
 void GameLogic::CleanupOldData() {

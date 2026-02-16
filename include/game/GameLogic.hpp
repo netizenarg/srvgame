@@ -14,6 +14,7 @@
 // #include "game/ChunkLOD.hpp"
 // #include "game/CollisionSystem.hpp"
 #include "game/LogicCore.hpp"
+#include "game/PlayerManager.hpp"
 
 class GameLogic : public LogicCore
 {
@@ -63,7 +64,7 @@ public:
     void DespawnNPC(uint64_t npcId);
     NPCEntity* GetNPCEntity(uint64_t npcId);
     GameEntity* GetEntity(uint64_t entityId);
-    Player* GetPlayer(uint64_t playerId);
+    std::shared_ptr<Player> GetPlayer(uint64_t playerId);
 
     // Collision methods
     CollisionResult CheckCollision(const glm::vec3& position, float radius, uint64_t excludeEntityId = 0);
@@ -112,8 +113,6 @@ private:
     static GameLogic* instance_;
 
     // Component systems
-    LogicWorld worldLogic_;
-    LogicEntity entityLogic_;
     //PlayerManager& playerManager_;
 
     // Database backend

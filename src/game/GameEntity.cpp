@@ -715,7 +715,7 @@ uint64_t GameEntity::GenerateEntityId() {
 
 nlohmann::json GameEntity::JsonGetPosition() const {
     std::shared_lock<std::shared_mutex> lock(mutex_);
-    return {
+    return nlohmann::json{
         {"x", position_.x},
         {"y", position_.y},
         {"z", position_.z},
@@ -726,15 +726,15 @@ nlohmann::json GameEntity::JsonGetPosition() const {
 
 void GameEntity::JsonSetAttribute(const std::string& key, const nlohmann::json& value) {
     std::unique_lock<std::shared_mutex> lock(mutex_);
-    attributes_[key] = value;
+    properties_[key] = value;
 }
 
 nlohmann::json GameEntity::JsonGetAttribute(const std::string& key, const nlohmann::json& defaultValue) const {
     std::shared_lock<std::shared_mutex> lock(mutex_);
-    return attributes_.value(key, defaultValue);
+    return properties_.value(key, defaultValue);
 }
 
 nlohmann::json GameEntity::JsonGetAttributes() const {
     std::shared_lock<std::shared_mutex> lock(mutex_);
-    return attributes_;
+    return properties_;
 }
