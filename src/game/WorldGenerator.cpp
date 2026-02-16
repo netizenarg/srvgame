@@ -1,12 +1,8 @@
-#include <cmath>
-#include <algorithm>
-#include <glm/gtc/noise.hpp>
-
 #include "game/WorldGenerator.hpp"
 
 // Initialize static members
-const float WorldChunk::BLOCK_SIZE = 1.0f;
-const float WorldChunk::CHUNK_WIDTH = WorldChunk::CHUNK_SIZE * WorldChunk::BLOCK_SIZE;
+//const float WorldChunk::BLOCK_SIZE = 1.0f;
+//const float WorldChunk::CHUNK_WIDTH = WorldChunk::CHUNK_SIZE * WorldChunk::BLOCK_SIZE;
 
 WorldGenerator::WorldGenerator(const GenerationConfig& config)
     : config_(config), rng_(config.seed), dist_(-1.0f, 1.0f) {

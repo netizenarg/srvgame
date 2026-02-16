@@ -1,10 +1,13 @@
 #pragma once
 
-#include <vector>
+#include <algorithm>
+#include <cmath>
 #include <memory>
 #include <random>
+#include <vector>
 
 #include <glm/glm.hpp>
+#include <glm/gtc/noise.hpp>
 
 #include "game/WorldChunk.hpp"
 
