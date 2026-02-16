@@ -1,147 +1,31 @@
 #include "game/EntityManager.hpp"
 
-#include <mutex>
-#include <chrono>
-#include <unordered_map>
-#include <vector>
-#include <memory>
-#include <string>
-#include <filesystem>
-#include <cassert>
-
-// ============================================================================
-// Concrete implementation of EntityManager with Python scripting support
-// ============================================================================
-
-class EntityManagerImpl : public EntityManager {
-public:
-    EntityManagerImpl();
-    ~EntityManagerImpl() override;
-
-    // ----- Singleton access -----
-    static EntityManagerImpl& GetInstance();
-
-    // ----- Entity lifecycle -----
-    uint64_t CreateEntity(EntityType type, const glm::vec3& position) override;
-    void DestroyEntity(uint64_t entityId) override;
-
-    // ----- Entity access -----
-    GameEntity* GetEntity(uint64_t entityId) override;
-    const GameEntity* GetEntity(uint64_t entityId) const override;
-
-    // ----- Spatial queries -----
-    std::vector<uint64_t> GetEntitiesInRadius(const glm::vec3& position,
-                                              float radius,
-                                              EntityType filter) const override;
-    std::vector<uint64_t> GetEntitiesInChunk(int chunkX, int chunkZ) const override;
-
-    // ----- Updates -----
-    void Update(float deltaTime) override;
-    void UpdateEntityPosition(uint64_t entityId, const glm::vec3& newPosition) override;
-
-    // ----- Serialization -----
-    nlohmann::json SerializeEntity(uint64_t entityId) const override;
-    nlohmann::json SerializeEntitiesInRadius(const glm::vec3& position,
-                                             float radius) const override;
-
-    // ----- Ownership -----
-    void SetEntityOwner(uint64_t entityId, uint64_t ownerId) override;
-    std::vector<uint64_t> GetOwnedEntities(uint64_t ownerId) const override;
-
-    // ----- Statistics -----
-    size_t GetTotalEntities() const override;
-    size_t GetPendingDestructionCount() const override;
-
-    // ----- Debugging -----
-    void DumpEntityStats() const override;
-    const char* EntityTypeToString(EntityType type) const override;
-
-    // ----- Advanced queries -----
-    std::vector<uint64_t> FindEntitiesByCriteria(
-        const std::function<bool(const GameEntity&)>& predicate) const override;
-    std::vector<uint64_t> FindEntitiesInBox(const glm::vec3& minBounds,
-                                            const glm::vec3& maxBounds,
-                                            EntityType filter) const override;
-
-    // ----- Entity pooling -----
-    void PreallocateEntityPool(EntityType type, size_t count) override;
-    uint64_t ActivatePooledEntity(EntityType type, const glm::vec3& position) override;
-    void DeactivateEntity(uint64_t entityId) override;
-
-    // ----- Python scripting -----
-    bool InitializePython() override;
-    void ShutdownPython() override;
-    bool AttachScript(uint64_t entityId, const std::string& scriptPath) override;
-    bool CallScriptMethod(uint64_t entityId, const std::string& methodName,
-                          PyObject* args, PyObject* kwargs) override;
-    void DetachScript(uint64_t entityId) override;
-    bool HasScript(uint64_t entityId) const override;
-
-private:
-    // Internal helper for delayed destruction
-    struct PendingDestruction {
-        uint64_t entityId;
-        EntityType type;
-        std::chrono::steady_clock::time_point destructionTime;
-    };
-
-    // Core containers
-    std::unordered_map<uint64_t, std::unique_ptr<GameEntity>> entities_;
-    std::unordered_map<uint64_t, std::vector<uint64_t>> ownership_;   // owner -> list of owned entities
-    std::unordered_map<uint64_t, std::unique_ptr<GameEntity>> inactiveEntities_; // pool
-
-    // Destruction queue
-    std::vector<PendingDestruction> pendingDestruction_;
-
-    // Python scripting
-    bool pythonInitialized_ = false;
-    // Maps entity ID to a Python object representing the script instance
-    std::unordered_map<uint64_t, PyObject*> scriptInstances_;
-
-    uint64_t nextEntityId_;
-    mutable std::mutex mutex_;
-
-    // Helpers
-    void CleanupDestroyedEntities();
-    void CleanupStaleOwnershipReferences();
-
-    // Python helper: import a module from a file path
-    PyObject* ImportModuleFromPath(const std::string& path);
-};
-
-// ============================================================================
-// Singleton implementation
-// ============================================================================
-
-EntityManagerImpl& EntityManagerImpl::GetInstance() {
-    static EntityManagerImpl instance;
-    return instance;
-}
-
-// For backward compatibility with existing code that calls EntityManager::GetInstance()
-EntityManager& EntityManager::GetInstance() {
-    return EntityManagerImpl::GetInstance();
-}
-
 // ============================================================================
 // Constructor / Destructor
 // ============================================================================
 
-EntityManagerImpl::EntityManagerImpl() : nextEntityId_(1) {
-    Logger::Info("EntityManagerImpl created");
+EntityManager::EntityManager() : nextEntityId_(1) {
+    Logger::Info("EntityManager created");
 }
 
-EntityManagerImpl::~EntityManagerImpl() {
+EntityManager::~EntityManager() {
     ShutdownPython();
 }
 
-EntityManager::~EntityManager() = default;
+// ============================================================================
+// Singleton access
+// ============================================================================
+
+EntityManager& EntityManager::GetInstance() {
+    static EntityManager instance;
+    return instance;
+}
 
 // ============================================================================
 // Entity Lifecycle
 // ============================================================================
 
-uint64_t EntityManagerImpl::CreateEntity(EntityType type, const glm::vec3& position) {
+uint64_t EntityManager::CreateEntity(EntityType type, const glm::vec3& position) {
     std::lock_guard<std::mutex> lock(mutex_);
 
     uint64_t entityId = nextEntityId_++;
@@ -156,7 +40,7 @@ uint64_t EntityManagerImpl::CreateEntity(EntityType type, const glm::vec3& posit
     return entityId;
 }
 
-void EntityManagerImpl::DestroyEntity(uint64_t entityId) {
+void EntityManager::DestroyEntity(uint64_t entityId) {
     std::lock_guard<std::mutex> lock(mutex_);
 
     auto it = entities_.find(entityId);
@@ -188,13 +72,13 @@ void EntityManagerImpl::DestroyEntity(uint64_t entityId) {
 // Entity Access
 // ============================================================================
 
-GameEntity* EntityManagerImpl::GetEntity(uint64_t entityId) {
+GameEntity* EntityManager::GetEntity(uint64_t entityId) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = entities_.find(entityId);
     return it != entities_.end() ? it->second.get() : nullptr;
 }
 
-const GameEntity* EntityManagerImpl::GetEntity(uint64_t entityId) const {
+const GameEntity* EntityManager::GetEntity(uint64_t entityId) const {
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = entities_.find(entityId);
     return it != entities_.end() ? it->second.get() : nullptr;
@@ -204,9 +88,9 @@ const GameEntity* EntityManagerImpl::GetEntity(uint64_t entityId) const {
 // Spatial Queries
 // ============================================================================
 
-std::vector<uint64_t> EntityManagerImpl::GetEntitiesInRadius(const glm::vec3& position,
-                                                             float radius,
-                                                             EntityType filter) const {
+std::vector<uint64_t> EntityManager::GetEntitiesInRadius(const glm::vec3& position,
+                                                         float radius,
+                                                         EntityType filter) const {
     std::lock_guard<std::mutex> lock(mutex_);
     std::vector<uint64_t> result;
     float radiusSq = radius * radius;
@@ -222,7 +106,7 @@ std::vector<uint64_t> EntityManagerImpl::GetEntitiesInRadius(const glm::vec3& po
     return result;
 }
 
-std::vector<uint64_t> EntityManagerImpl::GetEntitiesInChunk(int chunkX, int chunkZ) const {
+std::vector<uint64_t> EntityManager::GetEntitiesInChunk(int chunkX, int chunkZ) const {
     std::lock_guard<std::mutex> lock(mutex_);
     std::vector<uint64_t> result;
     const float CHUNK_SIZE = 32.0f;
@@ -245,7 +129,7 @@ std::vector<uint64_t> EntityManagerImpl::GetEntitiesInChunk(int chunkX, int chun
 // Updates
 // ============================================================================
 
-void EntityManagerImpl::Update(float deltaTime) {
+void EntityManager::Update(float deltaTime) {
     std::lock_guard<std::mutex> lock(mutex_);
     CleanupDestroyedEntities();
 
@@ -268,7 +152,7 @@ void EntityManagerImpl::Update(float deltaTime) {
     }
 }
 
-void EntityManagerImpl::UpdateEntityPosition(uint64_t entityId, const glm::vec3& newPosition) {
+void EntityManager::UpdateEntityPosition(uint64_t entityId, const glm::vec3& newPosition) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (auto* entity = GetEntity(entityId))
         entity->SetPosition(newPosition);
@@ -278,14 +162,14 @@ void EntityManagerImpl::UpdateEntityPosition(uint64_t entityId, const glm::vec3&
 // Serialization
 // ============================================================================
 
-nlohmann::json EntityManagerImpl::SerializeEntity(uint64_t entityId) const {
+nlohmann::json EntityManager::SerializeEntity(uint64_t entityId) const {
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = entities_.find(entityId);
     return it != entities_.end() ? it->second->Serialize() : nlohmann::json{};
 }
 
-nlohmann::json EntityManagerImpl::SerializeEntitiesInRadius(const glm::vec3& position,
-                                                            float radius) const {
+nlohmann::json EntityManager::SerializeEntitiesInRadius(const glm::vec3& position,
+                                                        float radius) const {
     std::lock_guard<std::mutex> lock(mutex_);
     nlohmann::json arr = nlohmann::json::array();
     float radiusSq = radius * radius;
@@ -302,7 +186,7 @@ nlohmann::json EntityManagerImpl::SerializeEntitiesInRadius(const glm::vec3& pos
 // Ownership Management
 // ============================================================================
 
-void EntityManagerImpl::SetEntityOwner(uint64_t entityId, uint64_t ownerId) {
+void EntityManager::SetEntityOwner(uint64_t entityId, uint64_t ownerId) {
     std::lock_guard<std::mutex> lock(mutex_);
 
     if (entities_.find(entityId) == entities_.end()) {
@@ -331,7 +215,7 @@ void EntityManagerImpl::SetEntityOwner(uint64_t entityId, uint64_t ownerId) {
     }
 }
 
-std::vector<uint64_t> EntityManagerImpl::GetOwnedEntities(uint64_t ownerId) const {
+std::vector<uint64_t> EntityManager::GetOwnedEntities(uint64_t ownerId) const {
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = ownership_.find(ownerId);
     return it != ownership_.end() ? it->second : std::vector<uint64_t>{};
@@ -341,12 +225,12 @@ std::vector<uint64_t> EntityManagerImpl::GetOwnedEntities(uint64_t ownerId) cons
 // Statistics
 // ============================================================================
 
-size_t EntityManagerImpl::GetTotalEntities() const {
+size_t EntityManager::GetTotalEntities() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return entities_.size();
 }
 
-size_t EntityManagerImpl::GetPendingDestructionCount() const {
+size_t EntityManager::GetPendingDestructionCount() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return pendingDestruction_.size();
 }
@@ -355,7 +239,7 @@ size_t EntityManagerImpl::GetPendingDestructionCount() const {
 // Debugging
 // ============================================================================
 
-void EntityManagerImpl::DumpEntityStats() const {
+void EntityManager::DumpEntityStats() const {
     std::lock_guard<std::mutex> lock(mutex_);
     Logger::Info("=== Entity Manager Statistics ===");
     Logger::Info("  Total Entities: {}", entities_.size());
@@ -372,7 +256,7 @@ void EntityManagerImpl::DumpEntityStats() const {
     Logger::Info("=================================");
 }
 
-const char* EntityManagerImpl::EntityTypeToString(EntityType type) const {
+const char* EntityManager::EntityTypeToString(EntityType type) const {
     switch (type) {
         case EntityType::PLAYER:     return "PLAYER";
         case EntityType::NPC:        return "NPC";
@@ -401,7 +285,7 @@ const char* EntityManagerImpl::EntityTypeToString(EntityType type) const {
 // Advanced Queries
 // ============================================================================
 
-std::vector<uint64_t> EntityManagerImpl::FindEntitiesByCriteria(
+std::vector<uint64_t> EntityManager::FindEntitiesByCriteria(
     const std::function<bool(const GameEntity&)>& predicate) const {
     std::lock_guard<std::mutex> lock(mutex_);
     std::vector<uint64_t> result;
@@ -411,7 +295,7 @@ std::vector<uint64_t> EntityManagerImpl::FindEntitiesByCriteria(
     return result;
 }
 
-std::vector<uint64_t> EntityManagerImpl::FindEntitiesInBox(
+std::vector<uint64_t> EntityManager::FindEntitiesInBox(
     const glm::vec3& minBounds, const glm::vec3& maxBounds, EntityType filter) const {
     std::lock_guard<std::mutex> lock(mutex_);
     std::vector<uint64_t> result;
@@ -431,7 +315,7 @@ std::vector<uint64_t> EntityManagerImpl::FindEntitiesInBox(
 // Entity Pooling
 // ============================================================================
 
-void EntityManagerImpl::PreallocateEntityPool(EntityType type, size_t count) {
+void EntityManager::PreallocateEntityPool(EntityType type, size_t count) {
     std::lock_guard<std::mutex> lock(mutex_);
     for (size_t i = 0; i < count; ++i) {
         uint64_t id = nextEntityId_++;
@@ -442,7 +326,7 @@ void EntityManagerImpl::PreallocateEntityPool(EntityType type, size_t count) {
     Logger::Info("Preallocated {} entities of type {}", count, EntityTypeToString(type));
 }
 
-uint64_t EntityManagerImpl::ActivatePooledEntity(EntityType type, const glm::vec3& position) {
+uint64_t EntityManager::ActivatePooledEntity(EntityType type, const glm::vec3& position) {
     std::lock_guard<std::mutex> lock(mutex_);
     for (auto it = inactiveEntities_.begin(); it != inactiveEntities_.end(); ++it) {
         if (it->second->GetType() == type) {
@@ -457,7 +341,7 @@ uint64_t EntityManagerImpl::ActivatePooledEntity(EntityType type, const glm::vec
     return CreateEntity(type, position);
 }
 
-void EntityManagerImpl::DeactivateEntity(uint64_t entityId) {
+void EntityManager::DeactivateEntity(uint64_t entityId) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = entities_.find(entityId);
     if (it == entities_.end()) {
@@ -487,7 +371,7 @@ void EntityManagerImpl::DeactivateEntity(uint64_t entityId) {
 // Python Scripting
 // ============================================================================
 
-bool EntityManagerImpl::InitializePython() {
+bool EntityManager::InitializePython() {
     if (pythonInitialized_)
         return true;
 
@@ -505,7 +389,7 @@ bool EntityManagerImpl::InitializePython() {
     return true;
 }
 
-void EntityManagerImpl::ShutdownPython() {
+void EntityManager::ShutdownPython() {
     if (!pythonInitialized_)
         return;
 
@@ -520,7 +404,7 @@ void EntityManagerImpl::ShutdownPython() {
     Logger::Info("Python interpreter shut down");
 }
 
-PyObject* EntityManagerImpl::ImportModuleFromPath(const std::string& path) {
+PyObject* EntityManager::ImportModuleFromPath(const std::string& path) {
     // Extract directory and module name
     std::filesystem::path fsPath(path);
     std::string moduleName = fsPath.stem().string();
@@ -539,7 +423,7 @@ PyObject* EntityManagerImpl::ImportModuleFromPath(const std::string& path) {
     return module;
 }
 
-bool EntityManagerImpl::AttachScript(uint64_t entityId, const std::string& scriptPath) {
+bool EntityManager::AttachScript(uint64_t entityId, const std::string& scriptPath) {
     if (!pythonInitialized_) {
         Logger::Error("Python not initialized; call InitializePython() first");
         return false;
@@ -594,8 +478,8 @@ bool EntityManagerImpl::AttachScript(uint64_t entityId, const std::string& scrip
     return true;
 }
 
-bool EntityManagerImpl::CallScriptMethod(uint64_t entityId, const std::string& methodName,
-                                         PyObject* args, PyObject* kwargs) {
+bool EntityManager::CallScriptMethod(uint64_t entityId, const std::string& methodName,
+                                     PyObject* args, PyObject* kwargs) {
     std::lock_guard<std::mutex> lock(mutex_);
 
     auto it = scriptInstances_.find(entityId);
@@ -623,7 +507,7 @@ bool EntityManagerImpl::CallScriptMethod(uint64_t entityId, const std::string& m
     return true;
 }
 
-void EntityManagerImpl::DetachScript(uint64_t entityId) {
+void EntityManager::DetachScript(uint64_t entityId) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = scriptInstances_.find(entityId);
     if (it != scriptInstances_.end()) {
@@ -636,7 +520,7 @@ void EntityManagerImpl::DetachScript(uint64_t entityId) {
     }
 }
 
-bool EntityManagerImpl::HasScript(uint64_t entityId) const {
+bool EntityManager::HasScript(uint64_t entityId) const {
     std::lock_guard<std::mutex> lock(mutex_);
     return scriptInstances_.find(entityId) != scriptInstances_.end();
 }
@@ -645,7 +529,7 @@ bool EntityManagerImpl::HasScript(uint64_t entityId) const {
 // Cleanup Helpers
 // ============================================================================
 
-void EntityManagerImpl::CleanupDestroyedEntities() {
+void EntityManager::CleanupDestroyedEntities() {
     auto now = std::chrono::steady_clock::now();
     const std::chrono::milliseconds DELAY(100);
     size_t cleaned = 0;
@@ -681,7 +565,7 @@ void EntityManagerImpl::CleanupDestroyedEntities() {
         Logger::Debug("Cleaned up {} destroyed entities", cleaned);
 }
 
-void EntityManagerImpl::CleanupStaleOwnershipReferences() {
+void EntityManager::CleanupStaleOwnershipReferences() {
     for (auto it = ownership_.begin(); it != ownership_.end();) {
         it->second.erase(
             std::remove_if(it->second.begin(), it->second.end(),
