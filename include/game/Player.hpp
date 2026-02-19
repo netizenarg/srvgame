@@ -149,19 +149,19 @@ struct PlayerSettings {
 
 class Player : public GameEntity {
 public:
-    Player(int64_t id, const std::string& username);
+    Player(uint64_t id, const std::string& username);
     Player(const glm::vec3& position);
     Player(const glm::vec3& position, PlayerClass player_class, PlayerRace race);
     virtual ~Player();
 
-    int64_t GetId() const { return id_; }
+    uint64_t GetId() const { return id_; }
     const std::string& GetUsername() const { return username_; }
 
     void UpdatePosition(float x, float y, float z);
     void UpdateHeartbeat();
     bool IsHeartbeatExpired(int timeoutSeconds) const;
-    void ApplyDamage(int damage, int64_t attackerId);
-    void ApplyHealing(int amount, int64_t healerId);
+    void ApplyDamage(int damage, uint64_t attackerId);
+    void ApplyHealing(int amount, uint64_t healerId);
 
     // Player-specific properties
     void SetPlayerClass(PlayerClass player_class) { player_class_ = player_class; }
@@ -320,7 +320,7 @@ public:
     nlohmann::json ToJson() const;
 
 private:
-    int64_t id_;
+    uint64_t id_;
     std::string username_;
 
     //struct Position {float x, y, z;} position_;

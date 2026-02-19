@@ -11,10 +11,8 @@ ConnectionManager& ConnectionManager::GetInstance() {
     return *instance_;
 }
 
-inline std::shared_ptr<ConnectionManager> ConnectionManager::GetInstancePtr() {
-    // Return a shared_ptr with a custom deleter that doesn't delete the singleton
+std::shared_ptr<ConnectionManager> ConnectionManager::GetInstancePtr() {
     static std::weak_ptr<ConnectionManager> weakInstance;
-
     auto shared = weakInstance.lock();
     if (!shared) {
         shared = std::shared_ptr<ConnectionManager>(
@@ -30,7 +28,7 @@ inline std::shared_ptr<ConnectionManager> ConnectionManager::GetInstancePtr() {
 
 ConnectionManager::ConnectionManager() {
     Logger::Info("ConnectionManager initialized");
-    lastCleanup_ = std::chrono::steady_clock::now();
+    lastCleanup_ = std::chrono::system_clock::now();
 }
 
 ConnectionManager::~ConnectionManager() {
@@ -64,14 +62,14 @@ void ConnectionManager::Start(std::shared_ptr<GameSession> session) {
 
     // Record session start time for statistics
     std::lock_guard<std::mutex> statsLock(statsMutex_);
-    sessionStats_[sessionId] = SessionStatsInfo{
-        .start_time = std::chrono::steady_clock::now(),
-        .last_activity = std::chrono::steady_clock::now(),
-        .messages_sent = 0,
-        .messages_received = 0,
-        .bytes_sent = 0,
-        .bytes_received = 0
-    };
+    sessionStats_[sessionId] = SessionStatsInfo{std::chrono::system_clock::now(),std::chrono::system_clock::now(),0,0,0,0};
+    //     .start_time = std::chrono::system_clock::now(),
+    //     .last_activity = std::chrono::system_clock::now(),
+    //     .messages_sent = 0,
+    //     .messages_received = 0,
+    //     .bytes_sent = 0,
+    //     .bytes_received = 0
+    // };
 
     Logger::Info("Session {} started. Total connections: {}",
                  sessionId, totalConnections_.load());
@@ -110,7 +108,7 @@ void ConnectionManager::Stop(std::shared_ptr<GameSession> session) {
             auto statsIt = sessionStats_.find(sessionId);
             if (statsIt != sessionStats_.end()) {
                 auto duration = std::chrono::duration_cast<std::chrono::seconds>(
-                    std::chrono::steady_clock::now() - statsIt->second.start_time);
+                    std::chrono::system_clock::now() - statsIt->second.start_time);
                 totalConnectionTime_ += duration.count();
                 sessionStats_.erase(statsIt);
             }
@@ -467,7 +465,7 @@ void ConnectionManager::UpdateSessionStats(uint64_t sessionId,
 
     auto it = sessionStats_.find(sessionId);
     if (it != sessionStats_.end()) {
-        it->second.last_activity = std::chrono::steady_clock::now();
+        it->second.last_activity = std::chrono::system_clock::now();
         it->second.bytes_received += bytesReceived;
         it->second.bytes_sent += bytesSent;
 
@@ -485,7 +483,7 @@ ConnectionManager::GlobalStats ConnectionManager::GetGlobalStats() const {
     stats.total_connection_time_seconds = totalConnectionTime_;
 
     // Calculate averages from current sessions
-    auto now = std::chrono::steady_clock::now();
+    auto now = std::chrono::system_clock::now();
     for (const auto& [sessionId, sessionStat] : sessionStats_) {
         stats.total_bytes_received += sessionStat.bytes_received;
         stats.total_bytes_sent += sessionStat.bytes_sent;
@@ -571,7 +569,7 @@ void ConnectionManager::PrintGlobalStats() const {
 // =============== Connection Maintenance ===============
 
 void ConnectionManager::CleanupInactiveSessions(int timeoutSeconds) {
-    auto now = std::chrono::steady_clock::now();
+    auto now = std::chrono::system_clock::now();
 
     // Only run cleanup every minute
     if (std::chrono::duration_cast<std::chrono::seconds>(
@@ -802,10 +800,10 @@ return result;
 // =============== Rate Limiting Enforcement ===============
 
 void ConnectionManager::EnforceGlobalRateLimit(int maxMessagesPerSecond) {
-    static auto lastCheck = std::chrono::steady_clock::now();
+    static auto lastCheck = std::chrono::system_clock::now();
     static int messageCount = 0;
 
-    auto now = std::chrono::steady_clock::now();
+    auto now = std::chrono::system_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - lastCheck);
 
     if (elapsed.count() >= 1) {
@@ -878,7 +876,7 @@ std::shared_ptr<GameSession> newSession) {
 // =============== Session Monitoring ===============
 
 void ConnectionManager::MonitorConnections() {
-    auto now = std::chrono::steady_clock::now();
+    auto now = std::chrono::system_clock::now();
 
     // Only monitor every 30 seconds
     if (std::chrono::duration_cast<std::chrono::seconds>(

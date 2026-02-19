@@ -654,7 +654,7 @@ void QuestManager::OnItemCollected(uint64_t entity_id, const std::string& item_i
     }
 }
 
-void QuestManager::OnNPCTalkedTo(uint64_t entity_id, const std::string& npc_id) {
+void QuestManager::OnNPCTalkedTo(uint64_t entity_id, uint64_t npc_id) {
     std::vector<std::pair<uint64_t, std::string>> updates;
     {
         std::shared_lock<std::shared_mutex> lock(mutex_);
@@ -1033,7 +1033,7 @@ uint64_t QuestManager::GetTrackedQuest(uint64_t entity_id) const {
 
 // =============== NPC Interaction ===============
 
-std::vector<uint64_t> QuestManager::GetQuestsFromNPC(uint64_t entity_id, const std::string& npc_id) const {
+std::vector<uint64_t> QuestManager::GetQuestsFromNPC(uint64_t entity_id, uint64_t npc_id) const {
     std::vector<uint64_t> result;
     std::shared_lock<std::shared_mutex> lock(mutex_);
     for (const auto& [qid, def] : quest_definitions_) {
@@ -1044,7 +1044,7 @@ std::vector<uint64_t> QuestManager::GetQuestsFromNPC(uint64_t entity_id, const s
     return result;
 }
 
-std::vector<uint64_t> QuestManager::GetQuestsToTurnIn(uint64_t entity_id, const std::string& npc_id) const {
+std::vector<uint64_t> QuestManager::GetQuestsToTurnIn(uint64_t entity_id, uint64_t npc_id) const {
     std::vector<uint64_t> result;
     std::shared_lock<std::shared_mutex> lock(mutex_);
     auto it = entity_quests_.find(entity_id);

@@ -10,11 +10,15 @@
 // #include "logging/Logger.hpp"
 // #include "network/ConnectionManager.hpp"
 // #include "database/DbManager.hpp"
-//
-// #include "game/ChunkLOD.hpp"
-// #include "game/CollisionSystem.hpp"
+
 #include "game/LogicCore.hpp"
 #include "game/PlayerManager.hpp"
+#include "game/InventorySystem.hpp"
+#include "game/LootTableManager.hpp"
+#include "game/MobSystem.hpp"
+#include "game/SkillSystem.hpp"
+#include "game/QuestManager.hpp"
+#include "game/EntityManager.hpp"
 
 class GameLogic : public LogicCore
 {

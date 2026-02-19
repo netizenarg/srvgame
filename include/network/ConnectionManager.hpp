@@ -68,8 +68,8 @@ public:
 
     // Statistics
     struct SessionStatsInfo {
-        std::chrono::steady_clock::time_point start_time;
-        std::chrono::steady_clock::time_point last_activity;
+        std::chrono::system_clock::time_point start_time;
+        std::chrono::system_clock::time_point last_activity;
         uint64_t messages_sent = 0;
         uint64_t messages_received = 0;
         uint64_t bytes_sent = 0;
@@ -157,8 +157,8 @@ private:
     std::unordered_map<std::string, std::vector<EventHandler>> eventHandlers_;
 
     // Maintenance
-    std::chrono::steady_clock::time_point lastCleanup_;
-    std::chrono::steady_clock::time_point lastMonitor_;
+    std::chrono::system_clock::time_point lastCleanup_;
+    std::chrono::system_clock::time_point lastMonitor_;
 
     // Internal methods
     void AddToGroupInternal(const std::string& groupId, uint64_t sessionId);
