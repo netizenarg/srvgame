@@ -1,16 +1,18 @@
 #include "network/GameServer.hpp"
 
 GameServer::GameServer(const ConfigManager& config)
-: config_(config),
-ioContext_(config.GetIoThreads()),
+: ioContext_(config.GetIoThreads()),
 acceptor_(ioContext_),
-signals_(ioContext_) {
-
+signals_(ioContext_),
+config_(config)
+{
     host_ = config.GetServerHost();
     port_ = config.GetServerPort();
     reusePort_ = config.GetReusePort();
     ioThreads_ = config.GetIoThreads();
 }
+
+GameServer::~GameServer() = default;
 
 bool GameServer::Initialize() {
     try {
@@ -119,4 +121,8 @@ void GameServer::Shutdown() {
     }
 
     Logger::Info("GameServer shutdown complete");
+}
+
+void GameServer::SetSessionFactory(std::function<std::shared_ptr<GameSession>(asio::ip::tcp::socket)> factory) {
+    sessionFactory_ = std::move(factory);
 }

@@ -26,7 +26,7 @@ public:
 
     // Inventory management
     bool AddItem(uint64_t playerId, const LootItem& item, int quantity = 1);
-    bool RemoveItem(uint64_t playerId, const std::string& itemId, int quantity = 1);
+    bool RemoveItem(uint64_t playerId, uint64_t itemId, int quantity = 1);
     bool MoveItem(uint64_t playerId, int fromSlot, int toSlot);
     bool SwapItems(uint64_t playerId, int slot1, int slot2);
     bool SplitStack(uint64_t playerId, int slot, int splitQuantity);
@@ -35,12 +35,12 @@ public:
     // Equipment management
     bool EquipItem(uint64_t playerId, int inventorySlot);
     bool UnequipItem(uint64_t playerId, int equipmentSlot);
-    bool AutoEquip(uint64_t playerId, const std::string& itemId);
+    bool AutoEquip(uint64_t playerId, uint64_t itemId);
 
     // Query methods
     std::shared_ptr<LootItem> GetItem(uint64_t playerId, int slot);
-    int GetItemCount(uint64_t playerId, const std::string& itemId) const;
-    bool HasItem(uint64_t playerId, const std::string& itemId, int quantity = 1) const;
+    int GetItemCount(uint64_t playerId, uint64_t itemId) const;
+    bool HasItem(uint64_t playerId, uint64_t itemId, int quantity = 1) const;
     std::vector<InventorySlot> GetInventory(uint64_t playerId) const;
     std::vector<InventorySlot> GetEquipment(uint64_t playerId) const;
 
@@ -50,8 +50,8 @@ public:
     bool HasSpaceFor(uint64_t playerId, const LootItem& item, int quantity = 1) const;
 
     // Trading
-    bool CanTradeItem(uint64_t playerId, const std::string& itemId) const;
-    bool TransferItem(uint64_t fromPlayerId, uint64_t toPlayerId, const std::string& itemId, int quantity);
+    bool CanTradeItem(uint64_t playerId, uint64_t itemId) const;
+    bool TransferItem(uint64_t fromPlayerId, uint64_t toPlayerId, uint64_t itemId, int quantity);
 
     // Serialization
     bool LoadInventory(uint64_t playerId);
@@ -97,7 +97,7 @@ private:
 
     // Helper methods
     bool ValidateSlot(uint64_t playerId, int slot) const;
-    int FindItemSlot(uint64_t playerId, const std::string& itemId) const;
+    int FindItemSlot(uint64_t playerId, uint64_t itemId) const;
     int FindFreeSlot(uint64_t playerId) const;
     bool CanStackWithSlot(const InventorySlot& slot, const LootItem& item) const;
     bool IsEquipmentSlot(int slot) const;

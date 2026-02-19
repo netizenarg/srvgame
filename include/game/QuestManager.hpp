@@ -234,7 +234,7 @@ public:
                          const std::string& objective_id, int delta = 1);
     void OnMonsterKilled(uint64_t entity_id, const std::string& monster_id);
     void OnItemCollected(uint64_t entity_id, const std::string& item_id, int count = 1);
-    void OnNPCTalkedTo(uint64_t entity_id, const std::string& npc_id);
+    void OnNPCTalkedTo(uint64_t entity_id, uint64_t npc_id);
     void OnLocationVisited(uint64_t entity_id, const glm::vec3& location, float radius = 10.0f);
     void OnDungeonCompleted(uint64_t entity_id, const std::string& dungeon_id);
     void OnLevelGained(uint64_t entity_id, int new_level);
@@ -274,8 +274,8 @@ public:
     uint64_t GetTrackedQuest(uint64_t entity_id) const;
 
     // --- NPC Interaction ---
-    std::vector<uint64_t> GetQuestsFromNPC(uint64_t entity_id, const std::string& npc_id) const;
-    std::vector<uint64_t> GetQuestsToTurnIn(uint64_t entity_id, const std::string& npc_id) const;
+    std::vector<uint64_t> GetQuestsFromNPC(uint64_t entity_id, uint64_t npc_id) const;
+    std::vector<uint64_t> GetQuestsToTurnIn(uint64_t entity_id, uint64_t npc_id) const;
 
     // --- Statistics ---
     int GetTotalQuestsCompleted(uint64_t entity_id) const;

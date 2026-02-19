@@ -80,7 +80,7 @@ bool InventorySystem::AddItem(uint64_t playerId, const LootItem& item, int quant
     return true;
 }
 
-bool InventorySystem::RemoveItem(uint64_t playerId, const std::string& itemId, int quantity) {
+bool InventorySystem::RemoveItem(uint64_t playerId, uint64_t itemId, int quantity) {
     std::lock_guard<std::mutex> lock(mutex_);
 
     if (quantity <= 0) return false;

@@ -18,11 +18,9 @@ void ItemStat::Deserialize(const nlohmann::json& data) {
     maxValue = data["maxValue"];
 }
 
-LootItem::LootItem() : id_(""), name_(""), type_(ItemType::MATERIAL), rarity_(LootRarity::COMMON) {}
-
-LootItem::LootItem(const std::string& id, const std::string& name, ItemType type, LootRarity rarity)
+LootItem::LootItem() : id_(0), name_(""), type_(ItemType::MATERIAL), rarity_(LootRarity::COMMON) {}
+LootItem::LootItem(uint64_t id, const std::string& name, ItemType type, LootRarity rarity)
     : id_(id), name_(name), type_(type), rarity_(rarity) {
-    // Set default icon colors based on rarity
     switch (rarity) {
         case LootRarity::COMMON: iconColor_ = glm::vec3(0.8f, 0.8f, 0.8f); break;
         case LootRarity::UNCOMMON: iconColor_ = glm::vec3(0.2f, 0.8f, 0.2f); break;

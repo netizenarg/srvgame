@@ -46,10 +46,10 @@ struct ItemModifier {
 class LootItem {
 public:
     LootItem();
-    LootItem(const std::string& id, const std::string& name, ItemType type, LootRarity rarity);
+    LootItem(uint64_t id, const std::string& name = "", ItemType type = ItemType::MATERIAL, LootRarity rarity = LootRarity::COMMON);
 
     // Getters
-    const std::string& GetId() const { return id_; }
+    uint64_t GetId() const { return id_; }
     const std::string& GetName() const { return name_; }
     ItemType GetType() const { return type_; }
     LootRarity GetRarity() const { return rarity_; }
@@ -83,7 +83,7 @@ public:
     bool IsConsumable() const;
 
 private:
-    std::string id_;
+    uint64_t id_;
     std::string name_;
     std::string description_;
     ItemType type_;

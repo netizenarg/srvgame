@@ -4,6 +4,8 @@ project(GameServer)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+find_package(fmt REQUIRED)
+
 if(NOT TARGET asio::asio)
     message(STATUS "ASIO not found via find_package, using manual configuration")
     set(ASIO_DIR "${CMAKE_SOURCE_DIR}/thirdparty/asio")
@@ -169,6 +171,8 @@ target_link_libraries(gameserver PRIVATE
     OpenSSL::SSL
     OpenSSL::Crypto
     Python3::Python
+    fmt::fmt
+    spdlog::spdlog
 )
 
 # Compiler flags
@@ -177,6 +181,8 @@ if(MSVC)
 else()
     target_compile_options(gameserver PRIVATE -Wall -Wextra -pedantic)
 endif()
+
+target_link_options(gameserver PRIVATE -Wl,-Bsymbolic)
 
 # Installation
 install(TARGETS gameserver DESTINATION bin)

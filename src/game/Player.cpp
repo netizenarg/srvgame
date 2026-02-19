@@ -221,17 +221,17 @@ void PlayerSettings::Deserialize(const nlohmann::json& data) {
 
 // =============== Player Implementation ===============
 
-Player::Player(int64_t id, const std::string& username)
+Player::Player(uint64_t id, const std::string& username)
 : GameEntity(EntityType::PLAYER, glm::vec3(0.0f, 0.0f, 0.0f)),
 id_(id),
 username_(username),
-inventory_system_(InventorySystem::GetInstance()),
-skill_system_(SkillSystem::GetInstance()),
-quest_manager_(QuestManager::GetInstance()),
+last_movement_(std::chrono::system_clock::now()),
 player_class_(PlayerClass::WARRIOR),
 race_(PlayerRace::HUMAN),
 status_(PlayerStatus::IDLE),
-last_movement_(std::chrono::system_clock::now())
+inventory_system_(InventorySystem::GetInstance()),
+skill_system_(SkillSystem::GetInstance()),
+quest_manager_(QuestManager::GetInstance())
 {
     ApplyRaceBonuses();
     ApplyClassBonuses();
@@ -242,14 +242,16 @@ last_movement_(std::chrono::system_clock::now())
 
 Player::Player(const glm::vec3& position)
 : GameEntity(EntityType::PLAYER, position),
-inventory_system_(InventorySystem::GetInstance()),
-skill_system_(SkillSystem::GetInstance()),
-quest_manager_(QuestManager::GetInstance()),
+id_(0),
+username_(""),
+last_movement_(std::chrono::system_clock::now()),
 player_class_(PlayerClass::WARRIOR),
 race_(PlayerRace::HUMAN),
-status_(PlayerStatus::IDLE)
+status_(PlayerStatus::IDLE),
+inventory_system_(InventorySystem::GetInstance()),
+skill_system_(SkillSystem::GetInstance()),
+quest_manager_(QuestManager::GetInstance())
 {
-    // Apply default bonuses
     ApplyRaceBonuses();
     ApplyClassBonuses();
     UpdateDerivedStats();
@@ -260,14 +262,16 @@ status_(PlayerStatus::IDLE)
 
 Player::Player(const glm::vec3& position, PlayerClass player_class, PlayerRace race)
 : GameEntity(EntityType::PLAYER, position),
-inventory_system_(InventorySystem::GetInstance()),
-skill_system_(SkillSystem::GetInstance()),
-quest_manager_(QuestManager::GetInstance()),
+id_(0),
+username_(""),
+last_movement_(std::chrono::system_clock::now()),
 player_class_(player_class),
 race_(race),
-status_(PlayerStatus::IDLE)
+status_(PlayerStatus::IDLE),
+inventory_system_(InventorySystem::GetInstance()),
+skill_system_(SkillSystem::GetInstance()),
+quest_manager_(QuestManager::GetInstance())
 {
-    // Apply bonuses based on class and race
     ApplyRaceBonuses();
     ApplyClassBonuses();
     UpdateDerivedStats();
@@ -353,7 +357,7 @@ bool Player::IsHeartbeatExpired(int timeoutSeconds) const {
     return elapsed.count() > timeoutSeconds;
 }
 
-void Player::ApplyDamage(int damage, int64_t attackerId) {
+void Player::ApplyDamage(int damage, uint64_t attackerId) {
     std::unique_lock<std::shared_mutex> lock(mutex_);
 
     // Calculate actual damage (consider defense)
@@ -369,7 +373,7 @@ void Player::ApplyDamage(int damage, int64_t attackerId) {
     damage_sources_.push_back({attackerId, actualDamage, std::chrono::system_clock::now()});
 }
 
-void Player::ApplyHealing(int amount, int64_t healerId) {
+void Player::ApplyHealing(int amount, uint64_t healerId) {
     std::unique_lock<std::shared_mutex> lock(mutex_);
 
     stats_.health += amount;
