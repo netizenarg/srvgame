@@ -365,17 +365,17 @@ bool QuestManager::CanStartQuest(uint64_t entity_id, uint64_t quest_id) const {
     return true;
 }
 
-void QuestManager::StartQuest(uint64_t entity_id, uint64_t quest_id) {
+bool QuestManager::StartQuest(uint64_t entity_id, uint64_t quest_id) {
     if (!CanStartQuest(entity_id, quest_id)) {
         Logger::Warn("QuestManager: Entity {} cannot start quest {}", entity_id, quest_id);
-        return;
+        return false;
     }
 
     std::unique_lock<std::shared_mutex> lock(mutex_);
     auto& data = entity_quests_[entity_id];
     if (data.active_quests.size() >= MAX_ACTIVE_QUESTS) {
         Logger::Warn("QuestManager: Entity {} has too many active quests", entity_id);
-        return;
+        return false;
     }
 
     const auto& def = quest_definitions_[quest_id];
@@ -399,6 +399,7 @@ void QuestManager::StartQuest(uint64_t entity_id, uint64_t quest_id) {
     lock.unlock();
     FireQuestEvent("quest_started", entity_id, quest_id);
     Logger::Debug("QuestManager: Entity {} started quest {}", entity_id, quest_id);
+    return true;
 }
 
 bool QuestManager::AbandonQuest(uint64_t entity_id, uint64_t quest_id) {
@@ -655,17 +656,25 @@ void QuestManager::OnItemCollected(uint64_t entity_id, const std::string& item_i
 }
 
 void QuestManager::OnNPCTalkedTo(uint64_t entity_id, uint64_t npc_id) {
+    auto to_uint64 = [](const std::string& s) -> uint64_t {
+        try { return std::stoull(s); } catch (...) { return 0; }
+    };
+
     std::vector<std::pair<uint64_t, std::string>> updates;
     {
         std::shared_lock<std::shared_mutex> lock(mutex_);
         auto entity_it = entity_quests_.find(entity_id);
         if (entity_it == entity_quests_.end()) return;
+
         for (const auto& [qid, progress] : entity_it->second.active_quests) {
             if (progress.state != QuestState::IN_PROGRESS) continue;
             const auto& def = quest_definitions_.at(qid);
             for (const auto& obj : def.objectives) {
-                if (obj.type == ObjectiveType::TALK_TO_NPC && obj.target == npc_id) {
-                    updates.emplace_back(qid, obj.id);
+                if (obj.type == ObjectiveType::TALK_TO_NPC) {
+                    // Convert the objective's target (string) to uint64_t and compare
+                    if (to_uint64(obj.target) == npc_id) {
+                        updates.emplace_back(qid, obj.id);
+                    }
                 }
             }
         }
@@ -674,14 +683,16 @@ void QuestManager::OnNPCTalkedTo(uint64_t entity_id, uint64_t npc_id) {
         UpdateObjective(entity_id, qid, obj_id, 1);
     }
 
-    // Also handle quest discovery from NPC
+    // Quest discovery from NPC
     std::vector<uint64_t> possible_quests;
     {
         std::shared_lock<std::shared_mutex> lock(mutex_);
         for (const auto& [qid, def] : quest_definitions_) {
-            if (def.giver_npc_id == npc_id && def.is_discoverable &&
-                !HasQuest(entity_id, qid) && CanStartQuest(entity_id, qid)) {
-                possible_quests.push_back(qid);
+            if (def.is_discoverable && !HasQuest(entity_id, qid) && CanStartQuest(entity_id, qid)) {
+                // Convert giver_npc_id (string) to uint64_t and compare
+                if (to_uint64(def.giver_npc_id) == npc_id) {
+                    possible_quests.push_back(qid);
+                }
             }
         }
     }
@@ -1034,10 +1045,14 @@ uint64_t QuestManager::GetTrackedQuest(uint64_t entity_id) const {
 // =============== NPC Interaction ===============
 
 std::vector<uint64_t> QuestManager::GetQuestsFromNPC(uint64_t entity_id, uint64_t npc_id) const {
+    auto to_uint64 = [](const std::string& s) -> uint64_t {
+        try { return std::stoull(s); } catch (...) { return 0; }
+    };
+
     std::vector<uint64_t> result;
     std::shared_lock<std::shared_mutex> lock(mutex_);
     for (const auto& [qid, def] : quest_definitions_) {
-        if (def.giver_npc_id == npc_id && !HasQuest(entity_id, qid) && CanStartQuest(entity_id, qid)) {
+        if (to_uint64(def.giver_npc_id) == npc_id && !HasQuest(entity_id, qid) && CanStartQuest(entity_id, qid)) {
             result.push_back(qid);
         }
     }
@@ -1045,14 +1060,19 @@ std::vector<uint64_t> QuestManager::GetQuestsFromNPC(uint64_t entity_id, uint64_
 }
 
 std::vector<uint64_t> QuestManager::GetQuestsToTurnIn(uint64_t entity_id, uint64_t npc_id) const {
+    auto to_uint64 = [](const std::string& s) -> uint64_t {
+        try { return std::stoull(s); } catch (...) { return 0; }
+    };
+
     std::vector<uint64_t> result;
     std::shared_lock<std::shared_mutex> lock(mutex_);
     auto it = entity_quests_.find(entity_id);
     if (it == entity_quests_.end()) return result;
+
     for (const auto& [qid, progress] : it->second.active_quests) {
         if (progress.state == QuestState::COMPLETED) {
             auto def_it = quest_definitions_.find(qid);
-            if (def_it != quest_definitions_.end() && def_it->second.turn_in_npc_id == npc_id) {
+            if (def_it != quest_definitions_.end() && to_uint64(def_it->second.turn_in_npc_id) == npc_id) {
                 result.push_back(qid);
             }
         }

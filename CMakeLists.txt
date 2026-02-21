@@ -111,6 +111,7 @@ set(LOGIC_CORE_SOURCES
     src/game/EntityManager.cpp
     src/game/Player.cpp
     src/game/PlayerManager.cpp
+    src/game/QuestManager.cpp
     src/game/NPCEntity.cpp
 )
 

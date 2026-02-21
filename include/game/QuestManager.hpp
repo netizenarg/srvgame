@@ -18,6 +18,7 @@
 
 #include "logging/Logger.hpp"
 #include "config/ConfigManager.hpp"
+#include "game/LogicCore.hpp"
 
 // =============== Enums ===============
 
@@ -222,7 +223,7 @@ public:
 
     // --- Entity Quest Management ---
     bool CanStartQuest(uint64_t entity_id, uint64_t quest_id) const;
-    void StartQuest(uint64_t entity_id, uint64_t quest_id);
+    bool StartQuest(uint64_t entity_id, uint64_t quest_id);
     bool AbandonQuest(uint64_t entity_id, uint64_t quest_id);
     bool CanCompleteQuest(uint64_t entity_id, uint64_t quest_id) const;
     bool CompleteQuest(uint64_t entity_id, uint64_t quest_id);

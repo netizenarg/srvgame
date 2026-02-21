@@ -24,7 +24,7 @@
 //#include "game/RAIIThread.hpp"
 #include "game/LogicWorld.hpp"
 #include "game/LogicEntity.hpp"
-//#include "game/PlayerManager.hpp"
+#include "game/PlayerManager.hpp"
 
 class PythonScripting;
 class ScriptHotReloader;
