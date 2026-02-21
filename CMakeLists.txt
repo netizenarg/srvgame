@@ -85,7 +85,10 @@ set(PROCESS_SOURCES
 # Scripting system
 set(SCRIPTING_SOURCES
     src/scripting/PythonAPI.cpp
+    #src/scripting/PythonEvent.cpp
+    src/scripting/PythonModule.cpp
     src/scripting/PythonScripting.cpp
+    src/scripting/ScriptHotReloader.cpp
 )
 
 # Network system

@@ -1,16 +1,18 @@
 #pragma once
 
-#include <queue>
-#include <condition_variable>
-#include <thread>
 #include <atomic>
-#include <string>
-#include <vector>
+#include <condition_variable>
 #include <functional>
-#include <unordered_map>
-#include <nlohmann/json.hpp>
 #include <memory>
 #include <mutex>
+#include <queue>
+#include <thread>
+#include <shared_mutex>
+#include <string>
+#include <vector>
+#include <unordered_map>
+
+#include <nlohmann/json.hpp>
 
 // Event handler interface
 class IEventHandler {
