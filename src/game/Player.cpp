@@ -1252,7 +1252,7 @@ void Player::Update(float delta_time) {
     stats_.total_playtime += delta_time;
 }
 
-void Player::SaveToDatabase() {
+bool Player::SaveToDatabase() {
     try {
         auto& dbClient = CitusClient::GetInstance();
 
@@ -1264,8 +1264,10 @@ void Player::SaveToDatabase() {
         dbClient.SavePlayerData(GetId(), player_json);
 
         Logger::Debug("Player {} data saved to database", GetId());
+        return true;
     } catch (const std::exception& e) {
         Logger::Error("Failed to save player {} to database: {}", GetId(), e.what());
+        return false;
     }
 }
 

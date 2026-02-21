@@ -54,6 +54,13 @@ public:
     nlohmann::json Query(const std::string& sql) { return backend_->Query(sql); };
     nlohmann::json GetPlayer(uint64_t playerId){ return backend_->GetPlayer(playerId); };
 
+    bool UpdatePlayerPosition(uint64_t playerId, float x, float y, float z) {
+        if (backend_) {
+            return backend_->UpdatePlayerPosition(playerId, x, y, z);
+        }
+        return false;
+    }
+
     // Configuration
     bool LoadConfiguration(const std::string& configPath = "");
     nlohmann::json GetConfiguration() const { return config_; }
