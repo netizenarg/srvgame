@@ -58,6 +58,12 @@ find_package(ZLIB REQUIRED)
 # Find OpenSSL for encryption
 find_package(OpenSSL REQUIRED)
 
+# Find UUID library
+find_library(UUID_LIBRARY NAMES uuid)
+if(NOT UUID_LIBRARY)
+    message(FATAL_ERROR "libuuid not found - install libuuid-dev or equivalent")
+endif()
+
 # Add GLM include directory
 include_directories(${glm_INCLUDE_DIRS})
 
@@ -101,6 +107,7 @@ set(LOGIC_CORE_SOURCES
     src/game/GameLogic.cpp
     src/game/EntityManager.cpp
     src/game/Player.cpp
+    src/game/PlayerManager.cpp
     src/game/NPCEntity.cpp
 )
 
@@ -173,6 +180,7 @@ target_link_libraries(gameserver PRIVATE
     Python3::Python
     fmt::fmt
     spdlog::spdlog
+    ${UUID_LIBRARY}
 )
 
 # Compiler flags
