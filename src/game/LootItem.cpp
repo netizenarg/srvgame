@@ -1,5 +1,3 @@
-#include <algorithm>
-
 #include "game/LootItem.hpp"
 
 nlohmann::json ItemStat::Serialize() const {

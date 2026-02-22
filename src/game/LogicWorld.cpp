@@ -21,13 +21,13 @@ LogicWorld::~LogicWorld() {
 
 void LogicWorld::Initialize(const WorldConfig& config) {
     worldConfig_ = config;
-    
+
     GenerationConfig genConfig;
     genConfig.seed = worldConfig_.seed;
     genConfig.terrainScale = worldConfig_.terrainScale;
     genConfig.terrainHeight = worldConfig_.maxTerrainHeight;
     genConfig.waterLevel = worldConfig_.waterLevel;
-    
+
     worldGenerator_ = std::make_unique<WorldGenerator>(genConfig);
     Logger::Info("LogicWorld initialized with seed: {}", worldConfig_.seed);
 }
@@ -80,13 +80,13 @@ std::shared_ptr<WorldChunk> LogicWorld::GetOrCreateChunk(int chunkX, int chunkZ)
 
 void LogicWorld::UnloadDistantChunks(const glm::vec3& centerPosition, float keepRadius) {
     std::lock_guard<std::mutex> lock(chunksMutex_);
-    
+
     auto it = loadedChunks_.begin();
     while (it != loadedChunks_.end()) {
         WorldChunk* chunk = it->second.get();
         glm::vec3 chunkCenter = chunk->GetCenter();
         float distance = glm::distance(centerPosition, chunkCenter);
-        
+
         if (distance > keepRadius) {
             it = loadedChunks_.erase(it);
             activeChunkCount_--;
@@ -99,7 +99,7 @@ void LogicWorld::UnloadDistantChunks(const glm::vec3& centerPosition, float keep
 void LogicWorld::GenerateWorldAroundPlayer(const glm::vec3& position, int viewDistance) {
     int playerChunkX = static_cast<int>(std::floor(position.x / worldConfig_.chunkSize));
     int playerChunkZ = static_cast<int>(std::floor(position.z / worldConfig_.chunkSize));
-    
+
     for (int dx = -viewDistance; dx <= viewDistance; ++dx) {
         for (int dz = -viewDistance; dz <= viewDistance; ++dz) {
             int chunkX = playerChunkX + dx;
@@ -111,15 +111,15 @@ void LogicWorld::GenerateWorldAroundPlayer(const glm::vec3& position, int viewDi
 
 void LogicWorld::PreloadWorldData(float radius) {
     Logger::Info("Preloading world data within radius {}...", radius);
-    
+
     int chunksToLoad = static_cast<int>((radius / worldConfig_.chunkSize) * 2) + 1;
-    
+
     for (int x = -chunksToLoad; x <= chunksToLoad; ++x) {
         for (int z = -chunksToLoad; z <= chunksToLoad; ++z) {
             GetOrCreateChunk(x, z);
         }
     }
-    
+
     Logger::Info("Preloaded {} chunks", (chunksToLoad * 2 + 1) * (chunksToLoad * 2 + 1));
 }
 
@@ -177,4 +177,20 @@ void LogicWorld::UpdateEntities(float deltaTime) {
     for (auto& [id, entity] : entities_) {
         entity->Update(deltaTime);
     }
+}
+
+void LogicWorld::SetTimeOfDay(float time) {
+    // Clamp to [0,1] to avoid invalid values
+    if (time < 0.0f) time = 0.0f;
+    if (time > 1.0f) time = 1.0f;
+    currentTimeOfDay_.store(time, std::memory_order_relaxed);
+
+    // Optionally propagate to other systems that depend on time
+    // e.g., update global lighting, weather, or mob spawn rates
+    // LightManager::GetInstance().SetTimeOfDay(time);
+    // WeatherSystem::GetInstance().UpdateDayCycle(time);
+}
+
+float LogicWorld::GetTimeOfDay() const {
+    return currentTimeOfDay_.load(std::memory_order_relaxed);
 }

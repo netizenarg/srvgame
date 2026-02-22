@@ -1,9 +1,11 @@
 #pragma once
 
+#include <algorithm>
 #include <string>
 #include <vector>
-#include <nlohmann/json.hpp>
+
 #include <glm/glm.hpp>
+#include <nlohmann/json.hpp>
 
 enum class LootRarity {
     COMMON = 0,

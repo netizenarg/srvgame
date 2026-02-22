@@ -122,12 +122,35 @@ uint64_t PlayerManager::GetSessionIdByPlayerId(int64_t playerId) const {
 
 // =============== Authentication / Connection ===============
 
+
 bool PlayerManager::AuthenticatePlayer(const std::string& username, const std::string& password) {
-    // Simplified – in production use proper password hashing
     try {
-        auto& dbClient = CitusClient::GetInstance();
-        auto result = dbClient.Query("SELECT password_hash FROM players WHERE username = '" + username + "'");
-        return !result.empty(); // dummy
+        // Safely escape the username to prevent SQL injection.
+        // Assume dbManager_ has an EscapeString method (or use a dedicated escaping function).
+        std::string escapedUsername = dbManager_.EscapeString(username);
+
+        // Use the existing Query method with escaped input.
+        auto result = dbManager_.Query(
+            "SELECT password_hash FROM players WHERE username = '" + escapedUsername + "'"
+        );
+
+        if (result.empty()) {
+            Logger::Debug("Authentication failed: username '{}' not found", username);
+            return false;
+        }
+
+        std::string storedHash = result[0]["password_hash"].get<std::string>();
+
+        // Verify the password using a secure hashing algorithm.
+        // Replace with your actual password verification function.
+        if (Passwords::VerifyPassword(password, storedHash)) {
+            Logger::Debug("Authentication successful for user '{}'", username);
+            return true;
+        } else {
+            Logger::Debug("Authentication failed: invalid password for user '{}'", username);
+            return false;
+        }
+
     } catch (const std::exception& e) {
         Logger::Error("Authentication error for {}: {}", username, e.what());
         return false;
@@ -251,8 +274,7 @@ void PlayerManager::SaveAllPlayers() {
 
 std::shared_ptr<Player> PlayerManager::LoadPlayer(int64_t playerId) {
     try {
-        auto& dbClient = CitusClient::GetInstance();
-        auto playerData = dbClient.GetPlayer(playerId);
+        auto playerData = dbManager_.GetPlayer(playerId);
         if (playerData.empty()) {
             Logger::Warn("Player {} not found in database", playerId);
             return nullptr;
@@ -282,8 +304,7 @@ std::shared_ptr<Player> PlayerManager::LoadPlayer(int64_t playerId) {
 
 std::shared_ptr<Player> PlayerManager::LoadPlayerByUsername(const std::string& username) {
     try {
-        auto& dbClient = CitusClient::GetInstance();
-        auto result = dbClient.Query("SELECT player_id FROM players WHERE username = '" + username + "'");
+        auto result = dbManager_.Query("SELECT player_id FROM players WHERE username = '" + username + "'");
         if (result.empty()) return nullptr;
         int64_t playerId = result[0]["player_id"].get<int64_t>();
         return LoadPlayer(playerId);

@@ -19,6 +19,7 @@
 #include "logging/Logger.hpp"
 #include "network/ConnectionManager.hpp"
 #include "network/GameSession.hpp"
+#include "utils/Passwords.hpp"
 
 #include "database/DbManager.hpp"
 #include "game/RAIIThread.hpp"

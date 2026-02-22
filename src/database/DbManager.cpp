@@ -259,6 +259,18 @@ bool DbManager::SetBackend(DatabaseType type, const nlohmann::json& config) {
     return true;
 }
 
+std::string DbManager::EscapeString(const std::string& input) {
+    // Use your database client's escaping function.
+    // For PostgreSQL via libpq, you might use PQescapeLiteral.
+    // For simplicity, this example doubles single quotes.
+    std::string escaped;
+    for (char c : input) {
+        if (c == '\'') escaped += "''";
+        else escaped += c;
+    }
+    return escaped;
+}
+
 bool DbManager::SaveGameState(const std::string& key, const nlohmann::json& state) {
     return backend_->SaveGameState(key, state);
 }

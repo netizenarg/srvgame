@@ -46,6 +46,8 @@ public:
     void Shutdown();
     bool IsInitialized() const { return initialized_; }
 
+    std::string EscapeString(const std::string& input);
+
     // Backend Management
     bool SaveGameState(const std::string& key, const nlohmann::json& state);
     bool SetBackend(DatabaseType type, const nlohmann::json& config);

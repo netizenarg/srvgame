@@ -23,8 +23,8 @@
 #include "game/SkillSystem.hpp"
 #include "game/QuestManager.hpp"
 
-class InventorySystem;
-class SkillSystem;
+//class InventorySystem;
+//class SkillSystem;
 
 struct PlayerAttributes {
     int strength = 10;        // Physical power

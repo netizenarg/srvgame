@@ -1,5 +1,8 @@
 #include "game/QuestManager.hpp"
 
+//TODO: we need refactor architecture, else it do cyclic include in .hpp file
+#include "game/LogicCore.hpp"
+
 namespace fs = std::filesystem;
 
 // =============== Singleton ===============
@@ -919,7 +922,7 @@ bool QuestManager::AdvanceQuestChain(uint64_t entity_id, const std::string& chai
     if (chain.is_completed) return false;
 
     chain.current_quest_index++;
-    if (chain.current_quest_index >= chain.quests_in_order.size()) {
+    if ((uint64_t)chain.current_quest_index >= chain.quests_in_order.size()) {
         chain.is_completed = true;
         // Optionally give chain completion reward
         return true;
@@ -1381,7 +1384,7 @@ void QuestReward::Deserialize(const nlohmann::json& data) {
 
 nlohmann::json QuestDefinition::Serialize() const {
     nlohmann::json j;
-    j["id"] = id;                     // will be a number in JSON
+    j["id"] = id;
     j["name"] = name;
     j["description"] = description;
     j["completion_text"] = completion_text;
@@ -1413,7 +1416,83 @@ nlohmann::json QuestDefinition::Serialize() const {
 }
 
 void QuestDefinition::Deserialize(const nlohmann::json& data) {
-    // Not used directly in this implementation; we parse via ParseQuestDefinition.
+    // Parse id – can be number or string
+    if (data.at("id").is_number())
+        id = data.at("id").get<uint64_t>();
+    else
+        id = std::stoull(data.at("id").get<std::string>());
+
+    name = data.value("name", name);
+    description = data.value("description", "");
+    completion_text = data.value("completion_text", "");
+    failure_text = data.value("failure_text", "");
+
+    type = static_cast<QuestType>(data.value("type", 1));
+    difficulty = static_cast<QuestDifficulty>(data.value("difficulty", 2));
+
+    giver_npc_id = data.value("giver_npc_id", "");
+    turn_in_npc_id = data.value("turn_in_npc_id", "");
+
+    if (data.contains("giver_location") && data["giver_location"].is_array()) {
+        auto& arr = data["giver_location"];
+        giver_location = glm::vec3(arr[0], arr[1], arr[2]);
+    }
+    if (data.contains("turn_in_location") && data["turn_in_location"].is_array()) {
+        auto& arr = data["turn_in_location"];
+        turn_in_location = glm::vec3(arr[0], arr[1], arr[2]);
+    }
+
+    if (data.contains("prerequisite_quests")) {
+        auto& prereq_array = data["prerequisite_quests"];
+        std::vector<uint64_t> prereq_ids;
+        for (const auto& val : prereq_array) {
+            if (val.is_number())
+                prereq_ids.push_back(val.get<uint64_t>());
+            else
+                prereq_ids.push_back(std::stoull(val.get<std::string>()));
+        }
+        prerequisite_quests = std::move(prereq_ids);
+    }
+
+    // Objectives
+    if (data.contains("objectives") && data["objectives"].is_array()) {
+        objectives.clear();
+        for (const auto& obj_j : data["objectives"]) {
+            QuestObjective obj;
+            obj.Deserialize(obj_j);
+            objectives.push_back(std::move(obj));
+        }
+    }
+
+    // Rewards
+    if (data.contains("rewards")) {
+        reward.Deserialize(data["rewards"]);
+    }
+
+    if (data.contains("next_quests")) {
+        auto& next_array = data["next_quests"];
+        std::vector<uint64_t> next_ids;
+        for (const auto& val : next_array) {
+            if (val.is_number())
+                next_ids.push_back(val.get<uint64_t>());
+            else
+                next_ids.push_back(std::stoull(val.get<std::string>()));
+        }
+        next_quests = std::move(next_ids);
+    }
+
+    is_repeatable = data.value("repeatable", false);
+    repeat_cooldown_hours = data.value("repeat_cooldown_hours", 24);
+    is_shareable = data.value("shareable", false);
+    is_discoverable = data.value("discoverable", false);
+    auto_complete = data.value("auto_complete", false);
+    min_level = data.value("min_level", 1);
+    max_level = data.value("max_level", 100);
+    suggested_party_size = data.value("suggested_party_size", 1);
+    zone = data.value("zone", "");
+    if (data.contains("tags")) {
+        tags = data["tags"].get<std::vector<std::string>>();
+    }
 }
 
 nlohmann::json ObjectiveProgress::Serialize() const {

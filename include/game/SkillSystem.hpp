@@ -14,12 +14,11 @@
 
 #include <nlohmann/json.hpp>
 
-#include "game/PlayerTypes.hpp"
 #include "logging/Logger.hpp"
 #include "config/ConfigManager.hpp"
-
-
 #include "database/DbManager.hpp"
+
+#include "game/PlayerTypes.hpp"
 
 enum class SkillType {
     ACTIVE = 0,

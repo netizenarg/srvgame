@@ -18,7 +18,9 @@
 
 #include "logging/Logger.hpp"
 #include "config/ConfigManager.hpp"
-#include "game/LogicCore.hpp"
+
+//TODO: we need refactor architecture, else it do cyclic include there
+//#include "game/LogicCore.hpp"
 
 // =============== Enums ===============
 
