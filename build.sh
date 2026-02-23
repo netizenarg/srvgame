@@ -47,13 +47,15 @@ else
 fi
 
 #rm -rf build
-#rm -f CMakeCache.txt Makefile cmake_install.cmake
-#rm -rf CMakeFiles
+rm -f CMakeCache.txt Makefile cmake_install.cmake
+rm -rf CMakeFiles
 
 # Build
-#mkdir -p build
+mkdir -p build
+cp -fr config build/config
 cd build
-cmake .. -B . -DUSE_CITUS=${USE_CITUS:-OFF} -DCMAKE_BUILD_TYPE=Release
+#cmake .. -B . -DUSE_CITUS=${USE_CITUS:-OFF} -DCMAKE_BUILD_TYPE=Release
+cmake .. -B . -DUSE_CITUS=${USE_CITUS:-OFF} -DCMAKE_BUILD_TYPE=Debug
 make -j$(nproc)
 
 if [ -f "gameserver" ]; then

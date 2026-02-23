@@ -11,9 +11,6 @@
 #include "database/DbManager.hpp"
 #include "game/GameLogic.hpp"
 
-//class GameSession;
-//class ConnectionManager;
-//class PlayerManager;
 
 std::atomic<bool> g_shutdown(false);
 
@@ -27,7 +24,7 @@ void WorkerMain(int workerId, ProcessPool* processPool = nullptr) {
     auto& config = ConfigManager::GetInstance();
     
     // Use worker-specific logger initialization
-    Logger::Initialize("Worker" + std::to_string(workerId));
+    Logger::InitializeWithWorkerId(workerId);
     Logger::Info("Worker {} starting game world system", workerId);
 
     // Initialize configuration
@@ -278,14 +275,20 @@ int main(int argc, char* argv[]) {
     std::signal(SIGINT, SignalHandler);
     std::signal(SIGTERM, SignalHandler);
 
+    // Initialize a default logger (no config needed)
+    Logger::InitializeDefaults();
+
     // Load configuration
     auto& config = ConfigManager::GetInstance();
-    if (!config.LoadConfig("config/server_config.json")) {
+    if (!config.LoadConfig("config/core.json")) {
         std::cerr << "Failed to load configuration" << std::endl;
         return 1;
     }
+    else {
+        std::cout << "Success to load configuration" << std::endl;
+    }
 
-    // Initialize logging
+    // Initialize logger with the actual config settings
     Logger::Initialize();
 
     Logger::Info("Starting Game Server v0.0.1 with LogicCore System");

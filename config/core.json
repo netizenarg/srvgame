@@ -4,6 +4,7 @@
     "receive_timeout_ms": 1000
   },
   "server": {
+    "host": "127.0.0.1",
     "port": 8080,
     "maxConnections": 1000,
     "processCount": 4,
@@ -107,5 +108,9 @@
     "enabled": true,
     "scriptDirectory": "scripts",
     "hotReload": true
+  },
+
+  "game": {
+    "max_players_per_session": 1
   }
 }

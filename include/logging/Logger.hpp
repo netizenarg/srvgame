@@ -10,10 +10,14 @@
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
+#include "config/ConfigManager.hpp"
+
 class Logger {
 public:
-    static void Initialize(const std::string& configPath = "");
+    static void Initialize();
+    static void InitializeDefaults();
     static void InitializeWithWorkerId(int workerId);
+
     static std::shared_ptr<spdlog::logger> GetLogger(const std::string& name = "GameServer");
 
     template<typename... Args>
@@ -48,7 +52,6 @@ public:
 
 private:
     static std::shared_ptr<spdlog::logger> logger_;
-    static std::string configPath_;
-    
+
     static void SetupLogger(const std::string& loggerName = "GameServer");
 };

@@ -1,9 +1,19 @@
-#include "config/ConfigManager.hpp"
 #include "logging/Logger.hpp"
 
 // Static member initialization (no longer inline in header)
 std::shared_ptr<spdlog::logger> Logger::logger_;
-std::string Logger::configPath_;
+
+void Logger::InitializeDefaults() {
+    auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+    console_sink->set_level(spdlog::level::info);
+    console_sink->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] %v");
+
+    logger_ = std::make_shared<spdlog::logger>("GameServer", console_sink);
+    logger_->set_level(spdlog::level::info);
+    spdlog::set_default_logger(logger_);
+
+    logger_->info("Early logger initialized with default settings");
+}
 
 void Logger::SetupLogger(const std::string& loggerName) {
     auto& config = ConfigManager::GetInstance();
@@ -86,9 +96,9 @@ void Logger::SetupLogger(const std::string& loggerName) {
     }
 }
 
-void Logger::Initialize(const std::string& configPath) {
-    configPath_ = configPath;
-    SetupLogger("GameServer");
+void Logger::Initialize() {
+    // Create the logger using the now-loaded config
+    SetupLogger("WorkerMain");
 }
 
 void Logger::InitializeWithWorkerId(int workerId) {
@@ -103,7 +113,7 @@ std::shared_ptr<spdlog::logger> Logger::GetLogger(const std::string& name) {
         try {
             auto& config = ConfigManager::GetInstance();
             if (config.HasKey("logging")) {
-                Initialize("");
+                Initialize();
             } else {
                 // No config available, use defaults
                 logger_ = spdlog::stdout_color_mt(name);

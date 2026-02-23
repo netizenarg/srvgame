@@ -1,7 +1,3 @@
-#include <cmath>
-#include <sstream>
-#include <iomanip>
-
 #include "network/NetworkQualityMonitor.hpp"
 
 NetworkQualityMonitor::NetworkQualityMonitor(size_t max_samples)
@@ -33,6 +29,7 @@ void NetworkQualityMonitor::RecordPacketReceived(uint64_t packet_id, size_t size
     std::lock_guard<std::mutex> lock(metrics_mutex_);
     current_metrics_.packets_received++;
     current_metrics_.bytes_received += size;
+    Logger::Debug("NetworkQualityMonitor.RecordPacketReceived({}, {})", packet_id, size);
 }
 
 void NetworkQualityMonitor::RecordAcknowledgment(uint64_t packet_id, uint64_t rtt_ms) {
