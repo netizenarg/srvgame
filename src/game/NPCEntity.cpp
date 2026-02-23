@@ -732,6 +732,15 @@ void NPCEntity::ChangeToDead() {
 void NPCEntity::Update(float delta_time) {
     GameEntity::Update(delta_time);
 
+    // Auto-stop when close to move target
+    if (has_move_target_) {
+        float distance = glm::distance(GetPosition(), move_target_);
+        if (distance < 0.5f) { // Threshold – can be a constant or configurable
+            Stop();
+            has_move_target_ = false;
+        }
+    }
+
     // Update AI if active and not dead
     if (IsActive() && ai_state_ != NPCAIState::DEAD && ai_state_ != NPCAIState::DESPAWNING) {
         UpdateAI(delta_time);
@@ -1502,4 +1511,22 @@ void NPCEntity::FixedUpdate(float delta_time) {
     // (Could include pathfinding, collision avoidance, etc.)
 }
 
+void NPCEntity::MoveTo(const glm::vec3& destination, float speed_multiplier) {
+    move_target_ = destination;
+    move_speed_multiplier_ = speed_multiplier;
+    has_move_target_ = true;
 
+    // Calculate direction and set velocity
+    glm::vec3 direction = destination - GetPosition();
+    float distance = glm::length(direction);
+    if (distance > 0.01f) {
+        direction /= distance;
+        // Use npc_stats_.move_speed as base speed multiplied by multiplier
+        float base_speed = npc_stats_.move_speed;
+        SetVelocity(direction * base_speed * speed_multiplier);
+    } else {
+        // Already at target
+        Stop();
+        has_move_target_ = false;
+    }
+}

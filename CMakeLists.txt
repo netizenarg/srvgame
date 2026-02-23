@@ -18,8 +18,10 @@ else()
     message(STATUS "ASIO found via find_package")
 endif()
 
+# Add GLM include directory
 set(GLM_DIR "${CMAKE_SOURCE_DIR}/thirdparty/glm")
 set(GLM_INCLUDE_DIRS "${GLM_DIR}")
+include_directories(${glm_INCLUDE_DIRS})
 
 find_package(nlohmann_json 3.2.0 QUIET)
 if(NOT nlohmann_json_FOUND)
@@ -64,8 +66,7 @@ if(NOT UUID_LIBRARY)
     message(FATAL_ERROR "libuuid not found - install libuuid-dev or equivalent")
 endif()
 
-# Add GLM include directory
-include_directories(${glm_INCLUDE_DIRS})
+find_library(CRYPT_LIB crypt)
 
 # Config system
 set(CONFIG_SOURCES
@@ -102,38 +103,36 @@ set(NETWORK_SOURCES
     src/network/WebSocketProtocol.cpp
 )
 
-# Core logic system
-set(LOGIC_CORE_SOURCES
-    src/game/LootItem.cpp
-    src/game/LootTable.cpp
-    src/game/LootTableManager.cpp
-    src/game/MobSystem.cpp
-    src/game/LogicCore.cpp
-    src/game/LogicWorld.cpp
-    src/game/LogicEntity.cpp
-    src/game/GameLogic.cpp
-    src/game/EntityManager.cpp
-    src/game/Player.cpp
-    src/game/PlayerManager.cpp
-    src/game/QuestManager.cpp
-    src/game/NPCEntity.cpp
-)
-
 # Loot system source files
 set(LOOT_SOURCES
     src/game/LootItem.cpp
     src/game/InventorySystem.cpp
     src/game/LootTable.cpp
+    src/game/LootTableManager.cpp
 )
 
 # 3D world system
 set(WORLD_SOURCES
     src/game/WorldChunk.cpp
     src/game/WorldGenerator.cpp
+    src/game/NPCEntity.cpp
     src/game/NPCSystem.cpp
     src/game/MobSystem.cpp
     src/game/GameEntity.cpp
     src/game/CollisionSystem.cpp
+    src/game/LogicWorld.cpp
+)
+
+# Core logic system
+set(LOGIC_CORE_SOURCES
+    src/game/LogicCore.cpp
+    src/game/LogicEntity.cpp
+    src/game/GameLogic.cpp
+    src/game/EntityManager.cpp
+    src/game/SkillSystem.cpp
+    src/game/Player.cpp
+    src/game/PlayerManager.cpp
+    src/game/QuestManager.cpp
 )
 
 # Database system
@@ -145,10 +144,9 @@ set(DATABASE_SOURCES
 if(USE_CITUS)
     message(STATUS "Building with Citus support")
     list(APPEND DATABASE_SOURCES src/database/CitusClient.cpp)
-    add_definitions(-DUSE_CITUS=1)
 else()
     message(STATUS "Building without Citus (PostgreSQL only)")
-    add_definitions(-DUSE_CITUS=0)
+    # No definition added here – Citus code is completely excluded
 endif()
 
 # Include directories
@@ -175,6 +173,11 @@ add_executable(gameserver
     ${DATABASE_SOURCES}
 )
 
+# Add target-specific preprocessor definitions
+if(USE_CITUS)
+    target_compile_definitions(gameserver PRIVATE USE_CITUS=1)
+endif()
+
 # Link libraries
 target_link_libraries(gameserver PRIVATE
     ${OPENGL_LIBRARIES}
@@ -189,6 +192,7 @@ target_link_libraries(gameserver PRIVATE
     fmt::fmt
     spdlog::spdlog
     ${UUID_LIBRARY}
+    ${CRYPT_LIB}
 )
 
 # Compiler flags

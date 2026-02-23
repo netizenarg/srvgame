@@ -403,6 +403,10 @@ private:
     NPCLootTable loot_table_;
     NPCDialogue dialogue_;
 
+    glm::vec3 move_target_;
+    bool has_move_target_ = false;
+    float move_speed_multiplier_ = 1.0f;
+
     // Targeting
     uint64_t target_id_ = 0;
     std::vector<uint64_t> hate_list_; // Ordered by hate/damage dealt
@@ -411,8 +415,6 @@ private:
     // AI state tracking
     float state_timer_ = 0.0f;
     float idle_timer_ = 0.0f;
-    float patrol_index_ = 0.0f;
-    bool patrol_direction_ = true; // true = forward, false = backward
 
     // Combat tracking
     float attack_cooldown_ = 0.0f;
@@ -421,6 +423,8 @@ private:
     float summon_cooldown_ = 0.0f;
 
     // Patrol and movement
+    float patrol_index_ = 0.0f;
+    bool patrol_direction_ = true; // true = forward, false = backward
     float patrol_wait_timer_ = 0.0f;
     bool waiting_at_patrol_point_ = false;
     glm::vec3 spawn_position_;
