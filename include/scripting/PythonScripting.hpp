@@ -15,6 +15,7 @@
 #include <nlohmann/json.hpp>
 
 #include "scripting/PythonAPI.hpp"
+#include "scripting/PythonModule.hpp"
 
 // Forward declarations
 //class Player;
@@ -34,16 +35,6 @@ public:
 
 private:
     PyObject* obj_;
-};
-
-// Python GIL helper
-class PyGILGuard {
-public:
-    PyGILGuard() : state_(PyGILState_Ensure()) {}
-    ~PyGILGuard() { PyGILState_Release(state_); }
-
-private:
-    PyGILState_STATE state_;
 };
 
 // Event types that can be handled by Python
@@ -110,40 +101,6 @@ struct GameEvent {
 // Callback from Python to C++
 using PyCallback = std::function<void(const nlohmann::json&)>;
 
-// Python module definition
-class PythonModule {
-public:
-    PythonModule(const std::string& moduleName, const std::string& filePath);
-    PythonModule(PythonModule&& other) noexcept;
-    ~PythonModule();
-    PythonModule& operator=(PythonModule&& other) noexcept;
-
-    bool Load();
-    bool Reload();
-    void Unload();
-
-    bool CallFunction(const std::string& funcName, const nlohmann::json& args = {});
-    nlohmann::json CallFunctionWithResult(const std::string& funcName,
-                                            const nlohmann::json& args = {});
-
-    bool HasFunction(const std::string& funcName) const;
-    std::string GetLastError() const;
-    void SetError(const std::string& error);
-    void ClearError();
-    bool CheckPythonError();
-
-private:
-    std::string moduleName_;
-    std::string filePath_;
-    PyObject* module_;
-    mutable std::mutex mutex_;
-    std::string lastError_;
-
-    PyObject* CreatePyArgs(const nlohmann::json& args);
-    nlohmann::json PyObjectToJson(PyObject* obj);
-    PyObject* JsonToPyObject(const nlohmann::json& json);
-    std::string PyObjectToString(PyObject* obj);
-};
 
 // Main Python scripting engine
 class PythonScripting {

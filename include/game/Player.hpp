@@ -16,15 +16,15 @@
 
 #include "logging/Logger.hpp"
 #include "config/ConfigManager.hpp"
-#include "database/DbManager.hpp"
+//#include "database/DbManager.hpp"
 
 #include "game/GameEntity.hpp"
 #include "game/InventorySystem.hpp"
 #include "game/SkillSystem.hpp"
 #include "game/QuestManager.hpp"
 
-class InventorySystem;
-class SkillSystem;
+//class InventorySystem;
+//class SkillSystem;
 
 struct PlayerAttributes {
     int strength = 10;        // Physical power
@@ -88,6 +88,9 @@ struct PlayerStats {
 
     float total_playtime = 0.0f;
     float session_playtime = 0.0f;
+    int connection_count = 0;
+    std::chrono::system_clock::time_point last_connect{};
+    std::chrono::system_clock::time_point last_disconnect{};
 
     nlohmann::json Serialize() const;
     void Deserialize(const nlohmann::json& data);
@@ -244,7 +247,7 @@ public:
 
     // Player state management
     void Update(float delta_time);
-    void SaveToDatabase();
+    bool SaveToDatabase();
     bool LoadFromDatabase();
     void Regenerate(float delta_time);
 
@@ -309,9 +312,16 @@ public:
     // Player session
     void SetSessionId(uint64_t session_id) { session_id_ = session_id; }
     uint64_t GetSessionId() const { return session_id_; }
-
     void SetConnectionQuality(float quality) { connection_quality_ = quality; }
     float GetConnectionQuality() const { return connection_quality_; }
+    bool IsOnline() const { return online_; }
+
+    void SetBanned(bool banned) { banned_ = banned; }
+    bool IsBanned() const { return banned_; }
+    void SetBanReason(const std::string& reason) { ban_reason_ = reason; }
+    const std::string& GetBanReason() const { return ban_reason_; }
+    void SetBanExpires(std::chrono::system_clock::time_point expires) { ban_expires_ = expires; };
+    std::chrono::system_clock::time_point GetBanExpires() const { return ban_expires_; }
 
     // Serialization
     virtual nlohmann::json Serialize() const override;
@@ -327,10 +337,13 @@ private:
     std::chrono::system_clock::time_point last_movement_;
 
     bool online_ = false;
+    bool banned_ = false;
+    std::string ban_reason_;
     std::chrono::system_clock::time_point created_at_;
     std::chrono::system_clock::time_point last_login_;
     std::chrono::system_clock::time_point last_logout_;
     std::chrono::system_clock::time_point last_heartbeat_;
+    std::chrono::system_clock::time_point ban_expires_;
 
     mutable std::shared_mutex mutex_;
 

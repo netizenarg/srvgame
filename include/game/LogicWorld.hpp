@@ -60,6 +60,9 @@ public:
     int GetActiveChunkCount() const { return activeChunkCount_; }
     void SaveChunkData();
 
+    void SetTimeOfDay(float time); // 0.0 to 1.0
+    float GetTimeOfDay() const;
+
 private:
     LogicWorld();
     ~LogicWorld();
@@ -80,4 +83,5 @@ private:
     // Entity storage
     std::unordered_map<uint64_t, std::shared_ptr<GameEntity>> entities_;
     mutable std::mutex entitiesMutex_;
+    std::atomic<float> currentTimeOfDay_{0.0f};  // 0.0 to 1.0
 };

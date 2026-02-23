@@ -22,6 +22,8 @@
 #include <sys/prctl.h>
 #include <sys/socket.h>
 
+#include "logging/Logger.hpp"
+
 class ProcessPool {
 public:
     enum class ProcessRole {
@@ -45,7 +47,7 @@ public:
     pid_t GetMasterPid() const { return masterPid_; }
 
     // Callback for worker process
-    void SetWorkerMain(std::function<void(int workerId)> workerMain);
+    void SetWorkerMain(std::function<void(int workerId)> workerMainFunc);
 
     // Inter-process communication with message length prefix
     bool SendToWorker(int workerId, const std::string& message);
@@ -84,7 +86,7 @@ private:
     std::atomic<bool> shutdownRequested_{false};
 
     std::vector<pid_t> workerPids_;
-    std::function<void(int workerId)> workerMain_;
+    std::function<void(int workerId)> workerMainFunc_;
 
     // IPC mechanisms
     std::vector<int> workerPipes_;  // [read_fd, write_fd] for each worker

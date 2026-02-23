@@ -490,6 +490,68 @@ void LogicCore::HandleLogin(uint64_t sessionId, const nlohmann::json& data) {
         });
 }
 
+void LogicCore::HandleChat(uint64_t sessionId, const nlohmann::json& data) {
+    uint64_t playerId = GetPlayerIdBySession(sessionId);
+    if (playerId == 0) {
+        SendError(sessionId, "Player not authenticated", 401);
+        return;
+    }
+
+    if (!data.contains("message") || !data["message"].is_string()) {
+        SendError(sessionId, "Missing or invalid message", 400);
+        return;
+    }
+
+    std::string chatMessage = data["message"];
+    if (chatMessage.empty()) {
+        SendError(sessionId, "Message cannot be empty", 400);
+        return;
+    }
+
+    // Optional: handle commands (starting with '/')
+    if (chatMessage[0] == '/') {
+        // Delegate to a command handler if desired
+        // For now, just treat as normal chat
+    }
+
+    auto player = playerManager_.GetPlayer(playerId);
+    if (!player) {
+        SendError(sessionId, "Player not found", 500);
+        return;
+    }
+
+    Logger::Info("Chat from player {} ({}): {}", playerId, player->GetName(), chatMessage);
+
+    nlohmann::json chatJson = {
+        {"type", "chat"},
+        {"playerId", playerId},
+        {"playerName", player->GetName()},
+        {"message", chatMessage},
+        {"timestamp", GetCurrentTimestamp()}
+    };
+
+    std::string channel = data.value("channel", "local");
+    if (channel == "global") {
+        // Broadcast to all online players
+        auto& connMgr = ConnectionManager::GetInstance();
+        auto sessions = connMgr.GetAllSessions();
+        for (auto& session : sessions) {
+            if (session && session->IsConnected()) {
+                session->Send(chatJson);
+            }
+        }
+    } else {
+        // Default to local broadcast (nearby players)
+        playerManager_.BroadcastToNearbyPlayers(playerId, chatJson);
+    }
+
+    FirePythonEvent("player_chat", {
+        {"playerId", playerId},
+        {"message", chatMessage},
+        {"channel", channel}
+    });
+}
+
 void LogicCore::HandleCombat(uint64_t sessionId, const nlohmann::json& data) {
     uint64_t playerId = GetPlayerIdBySession(sessionId);
     if (playerId == 0) {

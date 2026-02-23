@@ -10,6 +10,9 @@ LootTableManager::LootTableManager() {
     rng_.seed(rd());
 }
 
+LootTableManager::~LootTableManager() {
+}
+
 LootTableManager& LootTableManager::GetInstance() {
     std::call_once(initFlag_, []() {
         instance_ = std::make_unique<LootTableManager>();
@@ -406,33 +409,34 @@ std::shared_ptr<LootItem> LootTableManager::CreateItemFromEntry(
     int playerLevel,
     float luckMultiplier
 ) const {
+    (void)playerLevel; // suppress unused parameter warning
+
     // Determine item level
     int itemLevel = GetRandomInt(entry.minLevel, entry.maxLevel);
-    
+
     // Generate rarity
     LootRarity rarity = GenerateRarity(entry.minRarity, entry.maxRarity, luckMultiplier);
-    
+
     // Create base item
     auto item = std::make_shared<LootItem>();
-    
-    // Set basic properties
     item->SetId(entry.itemId);
-    item->SetName(entry.itemId); // This should be replaced with proper name lookup
+    item->SetName(entry.name);
+    item->SetRarity(rarity);
     item->SetLevelRequirement(itemLevel);
-    
+
     // Apply rarity-based modifications
     ApplyRarityStats(item, rarity);
-    
+
     // Generate random stats if applicable
     if (item->GetType() == ItemType::WEAPON || item->GetType() == ItemType::ARMOR) {
         GenerateRandomStats(item, itemLevel);
     }
-    
+
     // Apply enchantments for rare+ items
     if (static_cast<int>(rarity) >= static_cast<int>(LootRarity::RARE)) {
         ApplyRandomEnchantment(item, rarity);
     }
-    
+
     return item;
 }
 

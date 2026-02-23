@@ -1,12 +1,9 @@
-#include <fstream>
-#include <algorithm>
-
 #include "game/LootTable.hpp"
-#include "logging/Logger.hpp"
 
 nlohmann::json LootEntry::Serialize() const {
     return {
         {"itemId", itemId},
+        {"name", name},
         {"dropChance", dropChance},
         {"minQuantity", minQuantity},
         {"maxQuantity", maxQuantity},
@@ -22,6 +19,7 @@ nlohmann::json LootEntry::Serialize() const {
 
 void LootEntry::Deserialize(const nlohmann::json& data) {
     itemId = data["itemId"];
+    name = data["name"];
     dropChance = data["dropChance"];
     minQuantity = data["minQuantity"];
     maxQuantity = data["maxQuantity"];

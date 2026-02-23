@@ -1,5 +1,4 @@
 #include "process/ProcessPool.hpp"
-#include "logging/Logger.hpp"
 
 ProcessPool::ProcessPool(int numProcesses)
     : numProcesses_(numProcesses > 0 ? numProcesses : 1) {
@@ -90,8 +89,8 @@ void ProcessPool::MasterProcess() {
 
             Logger::Info("Worker process {} started (PID: {})", i, getpid());
 
-            if (workerMain_) {
-                workerMain_(i);
+            if (workerMainFunc_) {
+                workerMainFunc_(i);
             }
 
             // Cleanup before exit
@@ -167,8 +166,8 @@ void ProcessPool::WorkerProcess(int workerId) {
     });
     signal(SIGINT, SIG_IGN);
 
-    if (workerMain_) {
-        workerMain_(workerId);
+    if (workerMainFunc_) {
+        workerMainFunc_(workerId);
     }
 }
 
@@ -219,8 +218,8 @@ void ProcessPool::RestartWorker(int workerId) {
 
         Logger::Info("Restarted worker {} (PID: {})", workerId, getpid());
 
-        if (workerMain_) {
-            workerMain_(workerId);
+        if (workerMainFunc_) {
+            workerMainFunc_(workerId);
         }
 
         close(workerPipes_[workerId * 2]);
@@ -511,4 +510,8 @@ bool ProcessPool::IsWorkerAlive(int workerId) const {
 void ProcessPool::SetupSignalHandlers() {
     signal(SIGCHLD, SIG_IGN);  // We'll handle child processes with waitpid
     signal(SIGPIPE, SIG_IGN);  // Ignore broken pipes
+}
+
+void ProcessPool::SetWorkerMain(std::function<void(int)> workerMainFunc) {
+    workerMainFunc_ = std::move(workerMainFunc);
 }

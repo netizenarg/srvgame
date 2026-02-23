@@ -1,10 +1,22 @@
 #pragma once
 
-#include <Python.h>
-#include <string>
-#include <nlohmann/json.hpp>
 #include <mutex>
+#include <shared_mutex>
+#include <string>
 
+#include <nlohmann/json.hpp>
+#include <Python.h>
+
+
+// Python GIL helper
+class PyGILGuard {
+public:
+    PyGILGuard() : state_(PyGILState_Ensure()) {}
+    ~PyGILGuard() { PyGILState_Release(state_); }
+
+private:
+    PyGILState_STATE state_;
+};
 
 class PythonModule {
 public:

@@ -59,7 +59,7 @@ bool InventorySystem::AddItem(uint64_t playerId, const LootItem& item, int quant
 
     // Need new slots
     while (quantity > 0) {
-        if (inventory.inventorySlots.size() >= inventory.maxInventorySize) {
+        if (inventory.inventorySlots.size() >= (uint64_t)inventory.maxInventorySize) {
             Logger::Error("Inventory full for player {}", playerId);
             SaveInventory(playerId);
             return false;
@@ -75,6 +75,38 @@ bool InventorySystem::AddItem(uint64_t playerId, const LootItem& item, int quant
         inventory.inventorySlots.push_back(newSlot);
         quantity -= stackSize;
     }
+
+    SaveInventory(playerId);
+    return true;
+}
+
+bool InventorySystem::MoveItem(uint64_t playerId, int fromSlot, int toSlot) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    auto it = playerInventories_.find(playerId);
+    if (it == playerInventories_.end())
+        return false;
+
+    auto& inventory = it->second;
+    // Validate slot indices
+    if (fromSlot < 0 || fromSlot >= static_cast<int>(inventory.inventorySlots.size()) ||
+        toSlot < 0 || toSlot >= static_cast<int>(inventory.inventorySlots.size()))
+        return false;
+
+    if (fromSlot == toSlot)
+        return true;   // Nothing to do
+
+    auto& slotFrom = inventory.inventorySlots[fromSlot];
+    auto& slotTo = inventory.inventorySlots[toSlot];
+
+    // Swap the contents
+    std::swap(slotFrom.item, slotTo.item);
+    std::swap(slotFrom.quantity, slotTo.quantity);
+    std::swap(slotFrom.equipped, slotTo.equipped);
+
+    // Update position fields to match their new indices
+    slotFrom.position = fromSlot;
+    slotTo.position = toSlot;
 
     SaveInventory(playerId);
     return true;
@@ -137,7 +169,7 @@ bool InventorySystem::EquipItem(uint64_t playerId, int inventorySlot) {
     auto& inventory = it->second;
 
     if (!ValidateSlot(playerId, inventorySlot) || 
-        inventorySlot >= inventory.inventorySlots.size()) {
+        (uint64_t)inventorySlot >= inventory.inventorySlots.size()) {
         return false;
     }
 
@@ -151,7 +183,7 @@ bool InventorySystem::EquipItem(uint64_t playerId, int inventorySlot) {
     }
 
     int equipSlot = GetEquipmentSlotForItem(*slot.item);
-    if (equipSlot == -1 || equipSlot >= inventory.equipmentSlots.size()) {
+    if (equipSlot == -1 || (uint64_t)equipSlot >= inventory.equipmentSlots.size()) {
         return false;
     }
 
@@ -296,6 +328,73 @@ bool InventorySystem::AddGold(uint64_t playerId, int64_t amount) {
     return true;
 }
 
+bool InventorySystem::RemoveGold(uint64_t playerId, int64_t amount) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    auto it = playerInventories_.find(playerId);
+    if (it == playerInventories_.end()) {
+        return false;   // No inventory → cannot remove gold
+    }
+
+    if (amount < 0) return false;           // Cannot remove negative amount
+    if (it->second.gold < amount) return false;  // Insufficient funds
+
+    it->second.gold -= amount;
+    SaveInventory(playerId);
+    return true;
+}
+
+bool InventorySystem::TransferGold(uint64_t fromPlayerId, uint64_t toPlayerId, int64_t amount) {
+    if (fromPlayerId == toPlayerId || amount <= 0)
+        return false;
+
+    std::lock_guard<std::mutex> lock(mutex_); // Lock once for atomicity
+
+    auto fromIt = playerInventories_.find(fromPlayerId);
+    auto toIt   = playerInventories_.find(toPlayerId);
+
+    if (fromIt == playerInventories_.end() || toIt == playerInventories_.end())
+        return false;                         // Both players must have inventories
+
+    if (fromIt->second.gold < amount)
+        return false;                         // Insufficient funds
+
+    // Perform transfer
+    fromIt->second.gold -= amount;
+    toIt->second.gold += amount;
+
+    // Cap at max (though gold is int64_t, addition could overflow, but unlikely)
+    if (toIt->second.gold < 0) toIt->second.gold = INT64_MAX;
+
+    // Save both inventories (optional – SaveInventory already writes to DB)
+    SaveInventory(fromPlayerId);
+    SaveInventory(toPlayerId);
+    return true;
+}
+
+std::shared_ptr<LootItem> InventorySystem::GetItem(uint64_t playerId, int slot) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    auto it = playerInventories_.find(playerId);
+    if (it == playerInventories_.end())
+        return nullptr;
+
+    if (slot < 0 || slot >= static_cast<int>(it->second.inventorySlots.size()))
+        return nullptr;
+
+    const auto& slotData = it->second.inventorySlots[slot];
+    return slotData.item; // may be nullptr if slot empty
+}
+
+std::vector<InventorySlot> InventorySystem::GetInventory(uint64_t playerId) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = playerInventories_.find(playerId);
+    if (it == playerInventories_.end()) {
+        return {};
+    }
+    return it->second.inventorySlots;
+}
+
 // Helper method implementations
 bool InventorySystem::ValidateSlot(uint64_t playerId, int slot) const {
     auto it = playerInventories_.find(playerId);
@@ -318,6 +417,8 @@ int InventorySystem::GetEquipmentSlotForItem(const LootItem& item) const {
 }
 
 bool InventorySystem::MeetsRequirements(uint64_t playerId, const LootItem& item) const {
+    (void)playerId;
+    (void)item;
     // TODO: Implement player level and other requirement checks
     // For now, just check level requirement
     // This would need access to player stats/level

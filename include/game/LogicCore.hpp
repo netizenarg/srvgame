@@ -20,14 +20,17 @@
 #include "network/BinaryProtocol.hpp"
 //#include "config/ConfigManager.hpp"
 //#include "logging/Logger.hpp"
-//#include "database/DbManager.hpp"
-//#include "game/RAIIThread.hpp"
+#include "database/DbManager.hpp"
+
+#include "game/RAIIThread.hpp"
 #include "game/LogicWorld.hpp"
 #include "game/LogicEntity.hpp"
-//#include "game/PlayerManager.hpp"
 
-class PythonScripting;
-class ScriptHotReloader;
+//class PlayerManager;
+#include "game/PlayerManager.hpp"
+
+//class PythonScripting;
+//class ScriptHotReloader;
 #include "scripting/PythonScripting.hpp"
 
 class LogicCore {

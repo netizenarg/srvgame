@@ -12,7 +12,7 @@ uint64_t NPCManager::SpawnNPC(NPCType type, const glm::vec3& position, uint64_t 
     uint64_t npcId = nextNPCId_++;
     npc->SetId(npcId);
 
-    NPCEntity* npcPtr = npc.get();
+    //NPCEntity* npcPtr = npc.get();
     npcs_[npcId] = std::move(npc);
 
     return npcId;
@@ -85,6 +85,7 @@ void NPCManager::ProcessNPCAI(NPCEntity* npc, float deltaTime) {
 }
 
 void NPCManager::HandleCombat(NPCEntity* npc, float deltaTime) {
+    (void)deltaTime;
     if (npc->GetAIState() == NPCAIState::COMBAT) {
         // Check if target is in attack range
         // If yes, attack

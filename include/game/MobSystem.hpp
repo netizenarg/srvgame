@@ -1,19 +1,24 @@
 // MobSystem.hpp
 #pragma once
 
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <random>
 #include <vector>
 #include <unordered_map>
-#include <chrono>
-#include <random>
 
 #include <glm/glm.hpp>
 
-#include "game/WorldChunk.hpp"
-#include "game/LootTable.hpp"
+#include "logging/Logger.hpp"
+#include "config/ConfigManager.hpp"
 
-//#include "game/NPCEntity.hpp"
-enum class NPCType;
-class NPCEntity;
+//#include "game/WorldChunk.hpp"
+//#include "game/LootTable.hpp"
+//#include "game/PlayerManager.hpp"
+//#include "game/EntityManager.hpp"
+//#include "game/LootTableManager.hpp"
+#include "game/NPCEntity.hpp"
 
 // Mob spawn zone
 struct MobSpawnZone {
@@ -25,7 +30,7 @@ struct MobSpawnZone {
     int maxMobs = 10;
     float respawnTime = 30.0f; // seconds
     std::string name;
-    std::string lootTableId;  // Add loot table reference
+    std::string lootTableId;
 };
 
 // Mob variant (leveled version of a mob type)
@@ -35,7 +40,7 @@ struct MobVariant {
     float healthMultiplier = 1.0f;
     float damageMultiplier = 1.0f;
     float experienceReward = 10.0f;
-    std::string lootTableId;  // Reference to loot table
+    std::string lootTableId;
 };
 
 // Mob death info for rewards

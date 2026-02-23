@@ -1,5 +1,8 @@
 #include "game/QuestManager.hpp"
 
+//TODO: we need refactor architecture, else it do cyclic include in .hpp file
+#include "game/LogicCore.hpp"
+
 namespace fs = std::filesystem;
 
 // =============== Singleton ===============
@@ -365,17 +368,17 @@ bool QuestManager::CanStartQuest(uint64_t entity_id, uint64_t quest_id) const {
     return true;
 }
 
-void QuestManager::StartQuest(uint64_t entity_id, uint64_t quest_id) {
+bool QuestManager::StartQuest(uint64_t entity_id, uint64_t quest_id) {
     if (!CanStartQuest(entity_id, quest_id)) {
         Logger::Warn("QuestManager: Entity {} cannot start quest {}", entity_id, quest_id);
-        return;
+        return false;
     }
 
     std::unique_lock<std::shared_mutex> lock(mutex_);
     auto& data = entity_quests_[entity_id];
     if (data.active_quests.size() >= MAX_ACTIVE_QUESTS) {
         Logger::Warn("QuestManager: Entity {} has too many active quests", entity_id);
-        return;
+        return false;
     }
 
     const auto& def = quest_definitions_[quest_id];
@@ -399,6 +402,7 @@ void QuestManager::StartQuest(uint64_t entity_id, uint64_t quest_id) {
     lock.unlock();
     FireQuestEvent("quest_started", entity_id, quest_id);
     Logger::Debug("QuestManager: Entity {} started quest {}", entity_id, quest_id);
+    return true;
 }
 
 bool QuestManager::AbandonQuest(uint64_t entity_id, uint64_t quest_id) {
@@ -655,17 +659,25 @@ void QuestManager::OnItemCollected(uint64_t entity_id, const std::string& item_i
 }
 
 void QuestManager::OnNPCTalkedTo(uint64_t entity_id, uint64_t npc_id) {
+    auto to_uint64 = [](const std::string& s) -> uint64_t {
+        try { return std::stoull(s); } catch (...) { return 0; }
+    };
+
     std::vector<std::pair<uint64_t, std::string>> updates;
     {
         std::shared_lock<std::shared_mutex> lock(mutex_);
         auto entity_it = entity_quests_.find(entity_id);
         if (entity_it == entity_quests_.end()) return;
+
         for (const auto& [qid, progress] : entity_it->second.active_quests) {
             if (progress.state != QuestState::IN_PROGRESS) continue;
             const auto& def = quest_definitions_.at(qid);
             for (const auto& obj : def.objectives) {
-                if (obj.type == ObjectiveType::TALK_TO_NPC && obj.target == npc_id) {
-                    updates.emplace_back(qid, obj.id);
+                if (obj.type == ObjectiveType::TALK_TO_NPC) {
+                    // Convert the objective's target (string) to uint64_t and compare
+                    if (to_uint64(obj.target) == npc_id) {
+                        updates.emplace_back(qid, obj.id);
+                    }
                 }
             }
         }
@@ -674,14 +686,16 @@ void QuestManager::OnNPCTalkedTo(uint64_t entity_id, uint64_t npc_id) {
         UpdateObjective(entity_id, qid, obj_id, 1);
     }
 
-    // Also handle quest discovery from NPC
+    // Quest discovery from NPC
     std::vector<uint64_t> possible_quests;
     {
         std::shared_lock<std::shared_mutex> lock(mutex_);
         for (const auto& [qid, def] : quest_definitions_) {
-            if (def.giver_npc_id == npc_id && def.is_discoverable &&
-                !HasQuest(entity_id, qid) && CanStartQuest(entity_id, qid)) {
-                possible_quests.push_back(qid);
+            if (def.is_discoverable && !HasQuest(entity_id, qid) && CanStartQuest(entity_id, qid)) {
+                // Convert giver_npc_id (string) to uint64_t and compare
+                if (to_uint64(def.giver_npc_id) == npc_id) {
+                    possible_quests.push_back(qid);
+                }
             }
         }
     }
@@ -908,7 +922,7 @@ bool QuestManager::AdvanceQuestChain(uint64_t entity_id, const std::string& chai
     if (chain.is_completed) return false;
 
     chain.current_quest_index++;
-    if (chain.current_quest_index >= chain.quests_in_order.size()) {
+    if ((uint64_t)chain.current_quest_index >= chain.quests_in_order.size()) {
         chain.is_completed = true;
         // Optionally give chain completion reward
         return true;
@@ -1034,10 +1048,14 @@ uint64_t QuestManager::GetTrackedQuest(uint64_t entity_id) const {
 // =============== NPC Interaction ===============
 
 std::vector<uint64_t> QuestManager::GetQuestsFromNPC(uint64_t entity_id, uint64_t npc_id) const {
+    auto to_uint64 = [](const std::string& s) -> uint64_t {
+        try { return std::stoull(s); } catch (...) { return 0; }
+    };
+
     std::vector<uint64_t> result;
     std::shared_lock<std::shared_mutex> lock(mutex_);
     for (const auto& [qid, def] : quest_definitions_) {
-        if (def.giver_npc_id == npc_id && !HasQuest(entity_id, qid) && CanStartQuest(entity_id, qid)) {
+        if (to_uint64(def.giver_npc_id) == npc_id && !HasQuest(entity_id, qid) && CanStartQuest(entity_id, qid)) {
             result.push_back(qid);
         }
     }
@@ -1045,14 +1063,19 @@ std::vector<uint64_t> QuestManager::GetQuestsFromNPC(uint64_t entity_id, uint64_
 }
 
 std::vector<uint64_t> QuestManager::GetQuestsToTurnIn(uint64_t entity_id, uint64_t npc_id) const {
+    auto to_uint64 = [](const std::string& s) -> uint64_t {
+        try { return std::stoull(s); } catch (...) { return 0; }
+    };
+
     std::vector<uint64_t> result;
     std::shared_lock<std::shared_mutex> lock(mutex_);
     auto it = entity_quests_.find(entity_id);
     if (it == entity_quests_.end()) return result;
+
     for (const auto& [qid, progress] : it->second.active_quests) {
         if (progress.state == QuestState::COMPLETED) {
             auto def_it = quest_definitions_.find(qid);
-            if (def_it != quest_definitions_.end() && def_it->second.turn_in_npc_id == npc_id) {
+            if (def_it != quest_definitions_.end() && to_uint64(def_it->second.turn_in_npc_id) == npc_id) {
                 result.push_back(qid);
             }
         }
@@ -1361,7 +1384,7 @@ void QuestReward::Deserialize(const nlohmann::json& data) {
 
 nlohmann::json QuestDefinition::Serialize() const {
     nlohmann::json j;
-    j["id"] = id;                     // will be a number in JSON
+    j["id"] = id;
     j["name"] = name;
     j["description"] = description;
     j["completion_text"] = completion_text;
@@ -1393,7 +1416,83 @@ nlohmann::json QuestDefinition::Serialize() const {
 }
 
 void QuestDefinition::Deserialize(const nlohmann::json& data) {
-    // Not used directly in this implementation; we parse via ParseQuestDefinition.
+    // Parse id – can be number or string
+    if (data.at("id").is_number())
+        id = data.at("id").get<uint64_t>();
+    else
+        id = std::stoull(data.at("id").get<std::string>());
+
+    name = data.value("name", name);
+    description = data.value("description", "");
+    completion_text = data.value("completion_text", "");
+    failure_text = data.value("failure_text", "");
+
+    type = static_cast<QuestType>(data.value("type", 1));
+    difficulty = static_cast<QuestDifficulty>(data.value("difficulty", 2));
+
+    giver_npc_id = data.value("giver_npc_id", "");
+    turn_in_npc_id = data.value("turn_in_npc_id", "");
+
+    if (data.contains("giver_location") && data["giver_location"].is_array()) {
+        auto& arr = data["giver_location"];
+        giver_location = glm::vec3(arr[0], arr[1], arr[2]);
+    }
+    if (data.contains("turn_in_location") && data["turn_in_location"].is_array()) {
+        auto& arr = data["turn_in_location"];
+        turn_in_location = glm::vec3(arr[0], arr[1], arr[2]);
+    }
+
+    if (data.contains("prerequisite_quests")) {
+        auto& prereq_array = data["prerequisite_quests"];
+        std::vector<uint64_t> prereq_ids;
+        for (const auto& val : prereq_array) {
+            if (val.is_number())
+                prereq_ids.push_back(val.get<uint64_t>());
+            else
+                prereq_ids.push_back(std::stoull(val.get<std::string>()));
+        }
+        prerequisite_quests = std::move(prereq_ids);
+    }
+
+    // Objectives
+    if (data.contains("objectives") && data["objectives"].is_array()) {
+        objectives.clear();
+        for (const auto& obj_j : data["objectives"]) {
+            QuestObjective obj;
+            obj.Deserialize(obj_j);
+            objectives.push_back(std::move(obj));
+        }
+    }
+
+    // Rewards
+    if (data.contains("rewards")) {
+        reward.Deserialize(data["rewards"]);
+    }
+
+    if (data.contains("next_quests")) {
+        auto& next_array = data["next_quests"];
+        std::vector<uint64_t> next_ids;
+        for (const auto& val : next_array) {
+            if (val.is_number())
+                next_ids.push_back(val.get<uint64_t>());
+            else
+                next_ids.push_back(std::stoull(val.get<std::string>()));
+        }
+        next_quests = std::move(next_ids);
+    }
+
+    is_repeatable = data.value("repeatable", false);
+    repeat_cooldown_hours = data.value("repeat_cooldown_hours", 24);
+    is_shareable = data.value("shareable", false);
+    is_discoverable = data.value("discoverable", false);
+    auto_complete = data.value("auto_complete", false);
+    min_level = data.value("min_level", 1);
+    max_level = data.value("max_level", 100);
+    suggested_party_size = data.value("suggested_party_size", 1);
+    zone = data.value("zone", "");
+    if (data.contains("tags")) {
+        tags = data["tags"].get<std::vector<std::string>>();
+    }
 }
 
 nlohmann::json ObjectiveProgress::Serialize() const {

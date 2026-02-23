@@ -1,14 +1,5 @@
-// MobSystem.cpp
-#include <algorithm>
-#include <cmath>
-
 #include "game/MobSystem.hpp"
 #include "game/GameLogic.hpp"
-#include "game/PlayerManager.hpp"
-#include "game/EntityManager.hpp"
-#include "game/LootTableManager.hpp"
-#include "logging/Logger.hpp"
-#include "config/ConfigManager.hpp"
 
 MobSystem& MobSystem::GetInstance() {
     static MobSystem instance;
@@ -131,6 +122,7 @@ void MobSystem::CreateLootEntity(const glm::vec3& position, std::shared_ptr<Loot
 void MobSystem::OnMobDeath(uint64_t mobId, uint64_t killerId) {
     NPCEntity* mob = GetMob(mobId);
     if (!mob) {
+        Logger::Warn("MobSystem::OnMobDeath: mob {} not found", mobId);
         return;
     }
 
@@ -147,7 +139,8 @@ void MobSystem::OnMobDeath(uint64_t mobId, uint64_t killerId) {
     deathInfo.mobType = mob->GetNPCType();
     deathInfo.deathPosition = mob->GetPosition();
     deathInfo.deathTime = std::chrono::steady_clock::now();
-    deathInfo.level = 1; // TODO: Get level from mob
+    // TODO: Get level from mob (needs to be stored in NPCEntity)
+    deathInfo.level = 1;
     deathInfo.lootTableId = GetLootTableIdForMob(mob->GetNPCType(), zoneName);
 
     // Award experience
@@ -164,15 +157,18 @@ void MobSystem::OnMobDeath(uint64_t mobId, uint64_t killerId) {
 
     // Check if mob belongs to a spawn zone
     if (!zoneName.empty()) {
-        const MobSpawnZone& zone = spawnZones_[zoneName];
+        auto zoneIt2 = spawnZones_.find(zoneName);
+        if (zoneIt2 != spawnZones_.end()) {
+            const MobSpawnZone& zone = zoneIt2->second;
 
-        // Schedule respawn
-        PendingRespawn respawn;
-        respawn.zoneName = zoneName;
-        respawn.respawnTime = deathInfo.deathTime + std::chrono::seconds(static_cast<int>(zone.respawnTime));
-        respawn.mobType = zone.mobType;
-        respawn.level = deathInfo.level;
-        pendingRespawns_.push_back(respawn);
+            // Schedule respawn
+            PendingRespawn respawn;
+            respawn.zoneName = zoneName;
+            respawn.respawnTime = deathInfo.deathTime + std::chrono::seconds(static_cast<int>(zone.respawnTime));
+            respawn.mobType = zone.mobType;
+            respawn.level = deathInfo.level;
+            pendingRespawns_.push_back(respawn);
+        }
     }
 
     // Despawn the mob
@@ -184,13 +180,13 @@ void MobSystem::OnMobDeath(uint64_t mobId, uint64_t killerId) {
         {"mobId", mobId},
         {"killerId", killerId},
         {"mobType", static_cast<int>(mob->GetNPCType())},
-                              {"level", deathInfo.level},
-                              {"experience", experience},
-                              {"deathPosition", {
-                                  deathInfo.deathPosition.x,
-                                  deathInfo.deathPosition.y,
-                                  deathInfo.deathPosition.z
-                              }}
+        {"level", deathInfo.level},
+        {"experience", experience},
+        {"deathPosition", {
+            deathInfo.deathPosition.x,
+            deathInfo.deathPosition.y,
+            deathInfo.deathPosition.z
+        }}
     });
 
     Logger::Info("Mob {} killed by player {}", mobId, killerId);
@@ -243,4 +239,252 @@ void MobSystem::LoadMobConfig(const nlohmann::json& config) {
             SetMobLootTable(type, tableId.get<std::string>());
         }
     }
+}
+
+// ==================== Missing Function Implementations ====================
+
+void MobSystem::InitializeDefaultVariants() {
+    // Register default mob variants based on NPC type and level
+    // For now, we register a few common variants
+    Logger::Debug("MobSystem::InitializeDefaultVariants() called");
+
+    // Example: Goblin variants for levels 1-5
+    for (int level = 1; level <= 5; ++level) {
+        MobVariant v;
+        v.baseType = NPCType::GOBLIN;
+        v.level = level;
+        v.healthMultiplier = 1.0f + (level * 0.1f);
+        v.damageMultiplier = 1.0f + (level * 0.1f);
+        v.experienceReward = 10.0f * level;
+        v.lootTableId = "goblin_loot";
+        RegisterMobVariant(v);
+    }
+
+    // Orc variants
+    for (int level = 5; level <= 10; ++level) {
+        MobVariant v;
+        v.baseType = NPCType::ORC;
+        v.level = level;
+        v.healthMultiplier = 1.2f + (level * 0.1f);
+        v.damageMultiplier = 1.1f + (level * 0.1f);
+        v.experienceReward = 15.0f * level;
+        v.lootTableId = "orc_loot";
+        RegisterMobVariant(v);
+    }
+
+    // Dragon (boss) variants
+    MobVariant dragon;
+    dragon.baseType = NPCType::DRAGON;
+    dragon.level = 20;
+    dragon.healthMultiplier = 5.0f;
+    dragon.damageMultiplier = 3.0f;
+    dragon.experienceReward = 500.0f;
+    dragon.lootTableId = "dragon_loot";
+    RegisterMobVariant(dragon);
+}
+
+void MobSystem::UpdateSpawnZones(float deltaTime) {
+    (void)deltaTime;
+    // This function should check each spawn zone and spawn mobs if needed
+    // For now, we'll implement a simple timer-based spawning
+    for (auto& [zoneName, zone] : spawnZones_) {
+        // Check if we need to spawn more mobs
+        auto& mobIds = zoneMobs_[zoneName];
+        if (static_cast<int>(mobIds.size()) < zone.maxMobs) {
+            // Check last spawn time
+            auto now = std::chrono::steady_clock::now();
+            auto& lastSpawn = zoneLastSpawn_[zoneName];
+            if (std::chrono::duration_cast<std::chrono::seconds>(now - lastSpawn).count() >= zone.respawnTime) {
+                // Spawn a new mob
+                uint64_t mobId = SpawnMobInZone(zoneName);
+                if (mobId != 0) {
+                    mobIds.push_back(mobId);
+                    mobToZone_[mobId] = zoneName;
+                    lastSpawn = now;
+                }
+            }
+        }
+    }
+}
+
+void MobSystem::ProcessRespawns(float deltaTime) {
+    (void)deltaTime;
+    // Check pending respawns and spawn mobs when time is reached
+    auto now = std::chrono::steady_clock::now();
+    for (auto it = pendingRespawns_.begin(); it != pendingRespawns_.end(); ) {
+        if (now >= it->respawnTime) {
+            // Spawn the mob in its zone
+            uint64_t mobId = SpawnMob(it->mobType, GetRandomSpawnPosition(spawnZones_[it->zoneName]), it->level);
+            if (mobId != 0) {
+                zoneMobs_[it->zoneName].push_back(mobId);
+                mobToZone_[mobId] = it->zoneName;
+            }
+            it = pendingRespawns_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+uint64_t MobSystem::SpawnMob(NPCType type, const glm::vec3& position, int level) {
+    // TODO: Create and register a new NPCEntity using EntityManager
+    Logger::Warn("MobSystem::SpawnMob not fully implemented – returning mock ID");
+    // Simulate a new mob ID (in real implementation, use EntityManager to create an entity)
+    static uint64_t nextId = 1000;
+    uint64_t newId = ++nextId;
+    Logger::Debug("Spawned mob {} of type {} at ({:.1f},{:.1f},{:.1f}) level {}",
+                  newId, static_cast<int>(type), position.x, position.y, position.z, level);
+    return newId;
+}
+
+uint64_t MobSystem::SpawnMobInZone(const std::string& zoneName) {
+    auto it = spawnZones_.find(zoneName);
+    if (it == spawnZones_.end()) {
+        Logger::Error("MobSystem::SpawnMobInZone: zone '{}' not found", zoneName);
+        return 0;
+    }
+    const MobSpawnZone& zone = it->second;
+    glm::vec3 spawnPos = GetRandomSpawnPosition(zone);
+    int level = CalculateMobLevel(spawnPos);
+    return SpawnMob(zone.mobType, spawnPos, level);
+}
+
+void MobSystem::DespawnMob(uint64_t mobId) {
+    // Remove from zone tracking and entity manager
+    auto zoneIt = mobToZone_.find(mobId);
+    if (zoneIt != mobToZone_.end()) {
+        auto& mobIds = zoneMobs_[zoneIt->second];
+        mobIds.erase(std::remove(mobIds.begin(), mobIds.end(), mobId), mobIds.end());
+        mobToZone_.erase(zoneIt);
+    }
+    // TODO: Also remove from EntityManager
+    Logger::Debug("Despawned mob {}", mobId);
+}
+
+void MobSystem::RegisterSpawnZone(const MobSpawnZone& zone) {
+    spawnZones_[zone.name] = zone;
+    zoneMobs_[zone.name] = {}; // initialize empty mob list
+    zoneLastSpawn_[zone.name] = std::chrono::steady_clock::now(); // set last spawn to now
+    Logger::Debug("Registered spawn zone '{}'", zone.name);
+}
+
+void MobSystem::UnregisterSpawnZone(const std::string& zoneName) {
+    auto it = spawnZones_.find(zoneName);
+    if (it != spawnZones_.end()) {
+        // Despawn all mobs in this zone
+        for (uint64_t mobId : zoneMobs_[zoneName]) {
+            DespawnMob(mobId);
+        }
+        spawnZones_.erase(it);
+        zoneMobs_.erase(zoneName);
+        zoneLastSpawn_.erase(zoneName);
+        Logger::Debug("Unregistered spawn zone '{}'", zoneName);
+    }
+}
+
+void MobSystem::RegisterMobVariant(const MobVariant& variant) {
+    std::string key = GetVariantKey(variant.baseType, variant.level);
+    mobVariants_[key] = variant;
+    Logger::Debug("Registered mob variant: {} level {}", static_cast<int>(variant.baseType), variant.level);
+}
+
+MobVariant MobSystem::GetMobVariant(NPCType type, int level) const {
+    std::string key = GetVariantKey(type, level);
+    auto it = mobVariants_.find(key);
+    if (it != mobVariants_.end()) {
+        return it->second;
+    }
+    // Return default variant (fallback)
+    MobVariant v;
+    v.baseType = type;
+    v.level = level;
+    v.healthMultiplier = 1.0f + (level * 0.1f);
+    v.damageMultiplier = 1.0f + (level * 0.1f);
+    v.experienceReward = 10.0f * level;
+    v.lootTableId = GetLootTableIdForMob(type);
+    return v;
+}
+
+float MobSystem::GetExperienceReward(NPCType type, int level) const {
+    // Use variant if available, otherwise calculate simple formula
+    auto variant = GetMobVariant(type, level);
+    return variant.experienceReward;
+}
+
+void MobSystem::AwardExperience(uint64_t playerId, float experience) {
+    // TODO: Add experience to player using PlayerManager
+    Logger::Debug("Award {} experience to player {}", experience, playerId);
+}
+
+std::vector<uint64_t> MobSystem::GetMobsInRadius(const glm::vec3& position, float radius) const {
+    (void)position;
+    // TODO: Query entity manager for nearby mobs
+    // For now, return empty vector
+    Logger::Warn("MobSystem::GetMobsInRadius not implemented {}", radius);
+    return {};
+}
+
+NPCEntity* MobSystem::GetMob(uint64_t mobId) const {
+    // TODO: Retrieve from entity manager
+    // For now, return nullptr
+    Logger::Warn("MobSystem::GetMob not implemented {}", mobId);
+    return nullptr;
+}
+
+bool MobSystem::IsHostileMob(NPCType type) const {
+    // Define hostility based on type
+    switch (type) {
+        case NPCType::GOBLIN:
+        case NPCType::ORC:
+        case NPCType::TROLL:
+        case NPCType::OGRE:
+        case NPCType::SKELETON:
+        case NPCType::ZOMBIE:
+        case NPCType::GHOST:
+        case NPCType::VAMPIRE:
+        case NPCType::WEREWOLF:
+        case NPCType::DRAGON:
+        case NPCType::SLIME:
+        case NPCType::SPIDER:
+        case NPCType::BAT:
+        case NPCType::RAT:
+        case NPCType::WOLF:
+        case NPCType::BEAR:
+        case NPCType::BOAR:
+        case NPCType::DRAGON_LORD:
+        case NPCType::LICH_KING:
+        case NPCType::DEMON_LORD:
+        case NPCType::ANCIENT_TREANT:
+        case NPCType::SEA_SERPENT:
+        case NPCType::PHOENIX:
+        case NPCType::GOLEM:
+        case NPCType::HYDRA:
+        case NPCType::ELITE:
+        case NPCType::RARE:
+        case NPCType::LEGENDARY:
+        case NPCType::WORLD_BOSS:
+            return true;
+        default:
+            return false;
+    }
+}
+
+std::string MobSystem::GetVariantKey(NPCType type, int level) const {
+    return std::to_string(static_cast<int>(type)) + "_" + std::to_string(level);
+}
+
+int MobSystem::CalculateMobLevel(const glm::vec3& position) const {
+    (void)position;
+    // TODO: Determine level based on zone difficulty, distance from spawn, etc.
+    // For now, return a random level between 1 and 10
+    std::uniform_int_distribution<int> dist(1, 10);
+    return dist(rng_);
+}
+
+glm::vec3 MobSystem::GetRandomSpawnPosition(const MobSpawnZone& zone) const {
+    std::uniform_real_distribution<float> angleDist(0.0f, 2.0f * 3.14159f);
+    std::uniform_real_distribution<float> radiusDist(0.0f, zone.radius);
+    float angle = angleDist(rng_);
+    float r = radiusDist(rng_);
+    return zone.center + glm::vec3(r * cos(angle), 0.0f, r * sin(angle));
 }

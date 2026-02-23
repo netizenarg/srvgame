@@ -893,20 +893,49 @@ void GameLogic::ProcessGameTick(float deltaTime) {
 }
 
 void GameLogic::UpdateWorld(float deltaTime) {
-    // Unload distant chunks based on player positions
-    std::vector<glm::vec3> playerPositions;
+    // 1. Update world time (e.g., day/night cycle)
+    static float worldTime = 0.0f;
+    worldTime += deltaTime;
+    // Example: 24-hour cycle every 30 minutes real time (1800 seconds)
+    const float dayLength = 1800.0f; // in seconds
+    float timeOfDay = fmod(worldTime, dayLength) / dayLength; // 0.0 to 1.0
+    // Notify world systems or update lighting via some manager
+    LogicWorld::GetInstance().SetTimeOfDay(timeOfDay);
 
-    std::lock_guard<std::mutex> lock(sessionMutex_);
-    for (const auto& [playerId, sessionId] : playerToSessionMap_) {
-        std::shared_ptr<Player> player = GetPlayer(playerId);
-        if (player) {
-            playerPositions.push_back(player->GetPosition());
+    // 2. Throttled chunk unloading – only run every N seconds
+    static float timeSinceLastUnload = 0.0f;
+    timeSinceLastUnload += deltaTime;
+    const float unloadInterval = 1.0f; // unload check every second
+    if (timeSinceLastUnload >= unloadInterval) {
+        timeSinceLastUnload = 0.0f;
+
+        // Collect player positions safely
+        std::vector<glm::vec3> playerPositions;
+        {
+            std::lock_guard<std::mutex> lock(sessionMutex_);
+            for (const auto& [playerId, sessionId] : playerToSessionMap_) {
+                if (auto player = GetPlayer(playerId)) {
+                    playerPositions.push_back(player->GetPosition());
+                }
+            }
+        }
+
+        // Unload distant chunks for each player
+        float unloadDistance = GetWorldConfig().chunkUnloadDistance;
+        for (const auto& pos : playerPositions) {
+            LogicWorld::GetInstance().UnloadDistantChunks(pos, unloadDistance);
         }
     }
 
-    for (const auto& position : playerPositions) {
-        LogicWorld::GetInstance().UnloadDistantChunks(position, GetWorldConfig().chunkUnloadDistance);
-    }
+    // 3. Update dynamic world objects (if any)
+    // e.g., moving platforms, floating items, environmental animations
+    // LogicWorld::GetInstance().UpdateDynamicObjects(deltaTime);
+
+    // 4. Update weather system
+    // WeatherSystem::GetInstance().Update(deltaTime);
+
+    // (Optional) Log or debug info using deltaTime
+    Logger::Trace("UpdateWorld processed with deltaTime = {} ms", deltaTime * 1000.0f);
 }
 
 // =============== Data Management ===============
@@ -923,7 +952,7 @@ void GameLogic::SaveGameState() {
             {"server_time", GetCurrentTimestamp()},
             {"world_seed", GetWorldConfig().seed},
             {"active_chunks", LogicWorld::GetInstance().GetActiveChunkCount()},
-            {"active_npcs", 0}, // LogicEntity::GetInstance().GetActiveNPCCount() if exposed
+            {"active_npcs", 0}, // TODO: expose from LogicEntity if needed
             {"world_config", {
                 {"view_distance", GetWorldConfig().viewDistance},
                 {"chunk_size", GetWorldConfig().chunkSize},
@@ -931,10 +960,12 @@ void GameLogic::SaveGameState() {
             }}
         };
 
-        auto& dbClient = CitusClient::GetInstance();
-        dbClient.SaveGameState("current_game", gameState);
-
-        Logger::Debug("game state saved");
+        // Use DbManager instead of direct CitusClient
+        if (!DbManager::GetInstance().SaveGameState("current_game", gameState)) {
+            Logger::Error("Failed to save game state: DbManager returned false");
+        } else {
+            Logger::Debug("Game state saved");
+        }
     } catch (const std::exception& e) {
         Logger::Error("Failed to save game state: {}", e.what());
     }

@@ -1252,39 +1252,67 @@ void Player::Update(float delta_time) {
     stats_.total_playtime += delta_time;
 }
 
-void Player::SaveToDatabase() {
+bool Player::SaveToDatabase() {
     try {
-        auto& dbClient = CitusClient::GetInstance();
+        auto& dbManager = DbManager::GetInstance();
+        auto* backend = dbManager.GetBackend();
+        if (!backend) {
+            Logger::Error("No database backend available for player {}", GetId());
+            return false;
+        }
 
-        // Serialize player data
+        // Serialize player data to JSON
         nlohmann::json player_data = Serialize();
         std::string player_json = player_data.dump();
+        std::string escaped = backend->EscapeString(player_json);
 
-        // Save to database
-        dbClient.SavePlayerData(GetId(), player_json);
+        int shardId = dbManager.GetShardId(GetId());
+        std::string query =
+        "INSERT INTO player_data (player_id, data) "
+        "VALUES (" + std::to_string(GetId()) + ", '" + escaped + "') "
+        "ON CONFLICT (player_id) DO UPDATE SET "
+        "data = EXCLUDED.data, "
+        "last_updated = NOW()";
 
-        Logger::Debug("Player {} data saved to database", GetId());
+        bool success = backend->ExecuteShard(shardId, query);
+        if (success) {
+            Logger::Debug("Player {} data saved to database", GetId());
+        } else {
+            Logger::Error("Failed to save player {} data to database", GetId());
+        }
+        return success;
     } catch (const std::exception& e) {
         Logger::Error("Failed to save player {} to database: {}", GetId(), e.what());
+        return false;
     }
 }
 
 bool Player::LoadFromDatabase() {
     try {
-        auto& dbClient = CitusClient::GetInstance();
+        auto& dbManager = DbManager::GetInstance();
+        auto* backend = dbManager.GetBackend();
+        if (!backend) {
+            Logger::Error("No database backend available for player {}", GetId());
+            return false;
+        }
 
-        // Load from database
-        nlohmann::json player_data = dbClient.LoadPlayerData(GetId());
+        int shardId = dbManager.GetShardId(GetId());
+        std::string query =
+        "SELECT data FROM player_data WHERE player_id = " +
+        std::to_string(GetId());
 
-        if (!player_data.empty()) {
-            Deserialize(player_data);
+        nlohmann::json result = backend->QueryShard(shardId, query);
+
+        if (!result.empty() && result[0].contains("data")) {
+            std::string player_json = result[0]["data"];
+            nlohmann::json data = nlohmann::json::parse(player_json);
+            Deserialize(data);
             Logger::Debug("Player {} data loaded from database", GetId());
             return true;
         }
 
         Logger::Warn("No data found for player {}", GetId());
         return false;
-
     } catch (const std::exception& e) {
         Logger::Error("Failed to load player {} from database: {}", GetId(), e.what());
         return false;
