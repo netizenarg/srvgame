@@ -1,11 +1,16 @@
 #pragma once
 
-#include <deque>
-#include <chrono>
-#include <mutex>
-#include <atomic>
-#include <vector>
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cmath>
+#include <deque>
+#include <iomanip>
+#include <mutex>
+#include <vector>
+#include <sstream>
+
+#include "logging/Logger.hpp"
 
 struct NetworkMetrics {
     uint64_t average_latency_ms{0};

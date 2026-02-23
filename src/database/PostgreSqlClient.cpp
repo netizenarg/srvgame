@@ -180,7 +180,7 @@ bool PostgreSqlClient::CheckHealth() {
 
     std::lock_guard<std::mutex> lock(poolMutex_);
 
-    int healthyConnections = 0;
+    size_t healthyConnections = 0;
     for (const auto& conn : connections_) {
         if (TestConnection(conn.conn)) {
             healthyConnections++;
@@ -740,24 +740,24 @@ nlohmann::json PostgreSqlClient::ResultToJson(PGresult* result) const {
 
 // =============== Shard Operations ===============
 nlohmann::json PostgreSqlClient::QueryShard(int shardId, const std::string& sql) {
-    // In standard PostgreSQL, we ignore shardId
+    (void)shardId; // In standard PostgreSQL, we ignore shardId
     return Query(sql);
 }
 
 nlohmann::json PostgreSqlClient::QueryShardWithParams(int shardId, const std::string& sql,
                                                      const std::vector<std::string>& params) {
-    // In standard PostgreSQL, we ignore shardId
+    (void)shardId; // In standard PostgreSQL, we ignore shardId
     return QueryWithParams(sql, params);
 }
 
 bool PostgreSqlClient::ExecuteShard(int shardId, const std::string& sql) {
-    // In standard PostgreSQL, we ignore shardId
+    (void)shardId; // In standard PostgreSQL, we ignore shardId
     return Execute(sql);
 }
 
 bool PostgreSqlClient::ExecuteShardWithParams(int shardId, const std::string& sql,
                                              const std::vector<std::string>& params) {
-    // In standard PostgreSQL, we ignore shardId
+    (void)shardId; // In standard PostgreSQL, we ignore shardId
     return ExecuteWithParams(sql, params);
 }
 
