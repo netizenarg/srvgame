@@ -104,6 +104,10 @@ set(NETWORK_SOURCES
 
 # Core logic system
 set(LOGIC_CORE_SOURCES
+    src/game/LootItem.cpp
+    src/game/LootTable.cpp
+    src/game/LootTableManager.cpp
+    src/game/MobSystem.cpp
     src/game/LogicCore.cpp
     src/game/LogicWorld.cpp
     src/game/LogicEntity.cpp

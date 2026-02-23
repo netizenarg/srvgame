@@ -826,11 +826,27 @@ void NPCEntity::UpdatePatrol(float delta_time) {
         return;
     }
 
+    if (waiting_at_patrol_point_) {
+        // Decrease wait timer
+        patrol_wait_timer_ -= delta_time;
+        if (patrol_wait_timer_ <= 0.0f) {
+            // Finished waiting, move to next point
+            waiting_at_patrol_point_ = false;
+            glm::vec3 next_point = GetNextPatrolPoint();
+            MoveTo(next_point, ai_profile_.patrol_speed);
+        }
+        return;
+    }
+
     // Check if reached patrol point
     if (!IsMoving()) {
-        // Get next patrol point
-        glm::vec3 next_point = GetNextPatrolPoint();
-        MoveTo(next_point, ai_profile_.patrol_speed);
+        // Arrived at point – start waiting
+        waiting_at_patrol_point_ = true;
+        // Random wait duration (e.g., 2–5 seconds)
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_real_distribution<float> wait_dist(2.0f, 5.0f);
+        patrol_wait_timer_ = wait_dist(gen);
     }
 }
 
@@ -861,7 +877,6 @@ void NPCEntity::UpdateChase(float delta_time) {
 
     // Move toward target (simulated)
     // In real implementation, you would get target position and move toward it
-    glm::vec3 current_pos = GetPosition();
     glm::vec3 chase_dir = glm::vec3(1.0f, 0.0f, 1.0f); // Simplified
     chase_dir = glm::normalize(chase_dir);
 
@@ -870,6 +885,7 @@ void NPCEntity::UpdateChase(float delta_time) {
 }
 
 void NPCEntity::UpdateAttack(float delta_time) {
+    (void)delta_time;
     if (!HasTarget()) {
         SetAIState(NPCAIState::IDLE);
         return;
@@ -912,7 +928,7 @@ void NPCEntity::UpdateFlee(float delta_time) {
 }
 
 void NPCEntity::UpdateSpawning(float delta_time) {
-    // Spawning animation/behavior
+    (void)delta_time;
     // For now, just transition to idle after a short time
     if (state_timer_ >= 2.0f) {
         SetAIState(NPCAIState::IDLE);
@@ -920,7 +936,7 @@ void NPCEntity::UpdateSpawning(float delta_time) {
 }
 
 void NPCEntity::UpdateDespawning(float delta_time) {
-    // Despawn after delay
+    (void)delta_time;
     if (state_timer_ >= DESPAWN_DELAY) {
         // Mark for removal (should be handled by EntityManager)
         SetActive(false);

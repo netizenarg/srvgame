@@ -952,7 +952,7 @@ void GameLogic::SaveGameState() {
             {"server_time", GetCurrentTimestamp()},
             {"world_seed", GetWorldConfig().seed},
             {"active_chunks", LogicWorld::GetInstance().GetActiveChunkCount()},
-            {"active_npcs", 0}, // LogicEntity::GetInstance().GetActiveNPCCount() if exposed
+            {"active_npcs", 0}, // TODO: expose from LogicEntity if needed
             {"world_config", {
                 {"view_distance", GetWorldConfig().viewDistance},
                 {"chunk_size", GetWorldConfig().chunkSize},
@@ -960,10 +960,12 @@ void GameLogic::SaveGameState() {
             }}
         };
 
-        auto& dbClient = CitusClient::GetInstance();
-        dbClient.SaveGameState("current_game", gameState);
-
-        Logger::Debug("game state saved");
+        // Use DbManager instead of direct CitusClient
+        if (!DbManager::GetInstance().SaveGameState("current_game", gameState)) {
+            Logger::Error("Failed to save game state: DbManager returned false");
+        } else {
+            Logger::Debug("Game state saved");
+        }
     } catch (const std::exception& e) {
         Logger::Error("Failed to save game state: {}", e.what());
     }

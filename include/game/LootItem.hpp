@@ -61,6 +61,9 @@ public:
     const glm::vec3& GetIconColor() const { return iconColor_; }
 
     // Setters
+    void SetId(uint64_t id) { id_ = id; }
+    void SetName(const std::string& name) { name_ = name; }
+    void SetRarity(LootRarity rarity = LootRarity::COMMON) { rarity_ = rarity; }
     void SetStackSize(int size);
     void SetLevelRequirement(int level);
     void SetIconColor(const glm::vec3& color);

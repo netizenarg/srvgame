@@ -1,13 +1,17 @@
 #pragma once
 
-#include <vector>
+#include <algorithm>
+#include <fstream>
 #include <random>
+#include <vector>
 #include <unordered_map>
 
+#include "logging/Logger.hpp"
 #include "game/LootItem.hpp"
 
 struct LootEntry {
-    std::string itemId;
+    uint64_t itemId;
+    std::string name;
     float dropChance = 0.0f;  // 0.0 to 1.0
     int minQuantity = 1;
     int maxQuantity = 1;

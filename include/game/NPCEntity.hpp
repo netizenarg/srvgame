@@ -15,7 +15,7 @@
 
 #include "game/GameEntity.hpp"
 #include "game/LootTableManager.hpp"
-#include "game/MobSystem.hpp"
+//#include "game/MobSystem.hpp"
 #include "logging/Logger.hpp"
 #include "config/ConfigManager.hpp"
 
@@ -421,6 +421,8 @@ private:
     float summon_cooldown_ = 0.0f;
 
     // Patrol and movement
+    float patrol_wait_timer_ = 0.0f;
+    bool waiting_at_patrol_point_ = false;
     glm::vec3 spawn_position_;
     std::queue<glm::vec3> patrol_queue_;
 
@@ -439,6 +441,6 @@ private:
     static constexpr float DESPAWN_DELAY = 10.0f;
 
     friend class NPCAISystem;
-    friend class MobSystem;
+    //friend class MobSystem;
     friend class EntityManager;
 };
