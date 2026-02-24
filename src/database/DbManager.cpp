@@ -26,6 +26,96 @@ DbManager::~DbManager() {
     Logger::Debug("DbManager destroyed");
 }
 
+bool DbManager::EnsureDatabaseExists(const nlohmann::json& config) {
+    // Validate essential fields
+    if (!config.contains("host") || !config["host"].is_string() ||
+        !config.contains("port") || !config["port"].is_number() ||
+        !config.contains("user") || !config["user"].is_string() ||
+        !config.contains("name") || !config["name"].is_string()) {
+        Logger::Error("Invalid database configuration for existence check");
+        return false;
+    }
+
+    std::string targetDb = config["name"];
+    std::string defaultDb = "postgres";   // maintenance database
+
+    // Validate that the database name contains only safe characters (alphanumeric and underscore)
+    auto isSafeDbName = [](const std::string& name) {
+        for (char c : name) {
+            if (!isalnum(c) && c != '_') return false;
+        }
+        return true;
+    };
+    if (!isSafeDbName(targetDb)) {
+        Logger::Error("Database name '{}' contains unsafe characters", targetDb);
+        return false;
+    }
+
+    // Create a temporary config for the default database
+    nlohmann::json tempConfig = config;
+    tempConfig["name"] = defaultDb;
+
+    // Use PostgreSqlClient to connect to the default database
+    PostgreSqlClient tempClient(tempConfig);
+
+    // Initialize a minimal connection pool (1 connection) so that Query/Execute work
+    if (!tempClient.InitializeConnectionPool(1, 1)) {
+        Logger::Error("Failed to initialize connection pool for temporary client");
+        return false;
+    }
+
+    if (!tempClient.Connect()) {
+        Logger::Error("Failed to connect to '{}' database to check existence of '{}'",
+                      defaultDb, targetDb);
+        tempClient.ReleaseConnectionPool();
+        return false;
+    }
+
+    // Check if target database exists – use raw name (already validated safe)
+    std::string checkQuery = "SELECT 1 FROM pg_database WHERE datname = '" + targetDb + "'";
+    auto result = tempClient.Query(checkQuery);
+
+    bool exists = (!result.empty() && !result[0].empty());
+    if (exists) {
+        Logger::Info("Database '{}' already exists.", targetDb);
+        tempClient.Disconnect();
+        tempClient.ReleaseConnectionPool();
+        return true;
+    }
+
+    // Database does not exist – attempt to create it
+    Logger::Info("Database '{}' does not exist. Creating it...", targetDb);
+
+    std::string createSql = "CREATE DATABASE " + targetDb;
+    if (config.contains("user") && !config["user"].empty()) {
+        createSql += " OWNER " + config["user"].get<std::string>();
+    }
+
+    if (tempClient.Execute(createSql)) {
+        Logger::Info("Database '{}' created successfully.", targetDb);
+        tempClient.Disconnect();
+        tempClient.ReleaseConnectionPool();
+        return true;
+    } else {
+        // Creation failed – check if it's because another process created it
+        // just after our check (unlikely in master, but possible in clustered setups).
+        // Re-query to see if it now exists.
+        result = tempClient.Query(checkQuery);
+        exists = (!result.empty() && !result[0].empty());
+        if (exists) {
+            Logger::Warn("Database '{}' was created by another process; proceeding.", targetDb);
+            tempClient.Disconnect();
+            tempClient.ReleaseConnectionPool();
+            return true;
+        }
+
+        Logger::Error("Failed to create database '{}'. Check permissions.", targetDb);
+        tempClient.Disconnect();
+        tempClient.ReleaseConnectionPool();
+        return false;
+    }
+}
+
 bool DbManager::Initialize() {
     if (initialized_) {
         Logger::Warn("DbManager already initialized");
@@ -117,11 +207,11 @@ void DbManager::Shutdown() {
 
 bool DbManager::LoadConfiguration(const std::string& configPath) {
     try {
-        auto& configManager = ConfigManager::GetInstance();
+        auto& config_mgr = ConfigManager::GetInstance();
 
         // Try to load from file first
         std::string path = configPath.empty() ?
-            configManager.GetString("database.config_path", "./config/database.json") :
+            config_mgr.GetString("database.config_path", "config/database.json") :
             configPath;
 
         if (!path.empty()) {
@@ -134,23 +224,31 @@ bool DbManager::LoadConfiguration(const std::string& configPath) {
             }
         }
 
+        if (config_.empty())
+        {
+            config_ = config_mgr.GetJson("database");
+            Logger::Debug("Database configuration loaded from: {}", config_mgr.GetConfigPath());
+        }
+
         // Fall back to config manager
+        nlohmann::json poolConfig = config_.value("pool", nlohmann::json::object());
+
         config_ = {
-            {"type", configManager.GetString("database.type", "postgresql")},
-            {"host", configManager.GetString("database.host", "localhost")},
-            {"port", configManager.GetInt("database.port", 5432)},
-            {"database", configManager.GetString("database.name", "game_db")},
-            {"username", configManager.GetString("database.username", "postgres")},
-            {"password", configManager.GetString("database.password", "")},
+            {"type", config_.value("type", "postgresql")},
+            {"host", config_.value("host", "localhost")},
+            {"port", config_.value("port", 5432)},
+            {"name", config_.value("name", "game_db")},
+            {"user", config_.value("user", "postgres")},
+            {"password", config_.value("password", "")},
             {"connection_pool", {
-                {"enabled", configManager.GetBool("database.pool.enabled", true)},
-                {"min_connections", configManager.GetInt("database.pool.min", 5)},
-                {"max_connections", configManager.GetInt("database.pool.max", 20)}
+                {"enabled", poolConfig.value("enabled", true)},
+                {"min_connections", poolConfig.value("min", 5)},
+                {"max_connections", poolConfig.value("max", 20)}
             }},
-            {"shards", configManager.GetInt("database.shards", 32)},
-            {"replication", configManager.GetBool("database.replication", false)},
-            {"ssl", configManager.GetBool("database.ssl", false)},
-            {"timeout", configManager.GetInt("database.timeout", 30)}
+            {"shards", config_.value("shards", 32)},
+            {"replication", config_.value("replication", false)},
+            {"ssl", config_.value("ssl", false)},
+            {"timeout", config_.value("timeout", 30)}
         };
 
         Logger::Debug("Database configuration loaded from ConfigManager");
@@ -170,13 +268,13 @@ bool DbManager::ValidateConfiguration(const nlohmann::json& config) const {
             return false;
         }
 
-        if (!config.contains("database") || !config["database"].is_string()) {
-            Logger::Error("Missing or invalid 'database' in database configuration");
+        if (!config.contains("name") || !config["name"].is_string()) {
+            Logger::Error("Missing or invalid 'name' in database configuration");
             return false;
         }
 
-        if (!config.contains("username") || !config["username"].is_string()) {
-            Logger::Error("Missing or invalid 'username' in database configuration");
+        if (!config.contains("user") || !config["user"].is_string()) {
+            Logger::Error("Missing or invalid 'user' in database configuration");
             return false;
         }
 
@@ -291,6 +389,8 @@ bool DbManager::Connect() {
         return true;
     }
 
+    // The master process has already ensured the database exists.
+    // Simply attempt to connect.
     try {
         if (backend_->Connect()) {
             connected_ = true;

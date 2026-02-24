@@ -21,6 +21,7 @@
 #include <sys/wait.h>
 #include <sys/prctl.h>
 #include <sys/socket.h>
+#include <signal.h>
 
 #include "logging/Logger.hpp"
 
@@ -62,6 +63,9 @@ public:
     uint32_t GetMaxMessageSize() const { return maxMessageSize_; }
     void SetReceiveTimeout(uint32_t timeoutMs) { receiveTimeoutMs_ = timeoutMs; }
     uint32_t GetReceiveTimeout() const { return receiveTimeoutMs_; }
+
+    void BlockSignals(sigset_t* oldset);
+    void UnblockSignals(const sigset_t* oldset);
 
 private:
     void MasterProcess();

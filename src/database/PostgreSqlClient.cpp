@@ -492,8 +492,8 @@ std::string PostgreSqlClient::BuildConnectionString() const {
 
     oss << "host=" << config_.value("host", "localhost") << " ";
     oss << "port=" << config_.value("port", 5432) << " ";
-    oss << "dbname=" << config_.value("database", "game_db") << " ";
-    oss << "user=" << config_.value("username", "postgres") << " ";
+    oss << "dbname=" << config_.value("name", "game_db") << " ";
+    oss << "user=" << config_.value("user", "postgres") << " ";
     oss << "password=" << config_.value("password", "") << " ";
 
     if (config_.value("ssl", false)) {

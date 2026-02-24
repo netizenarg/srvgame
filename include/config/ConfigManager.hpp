@@ -22,6 +22,7 @@ public:
 
     bool LoadConfig(const std::string& configPath);
     bool ReloadConfig();
+    const std::string& GetConfigPath() const { return configPath_; }
 
     // Setters
     void SetBool(const std::string& key, bool value);

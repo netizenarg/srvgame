@@ -62,14 +62,12 @@ std::shared_ptr<WorldChunk> LogicWorld::GetOrCreateChunk(int chunkX, int chunkZ)
         }
     }
 
-    // Generate a unique_ptr, then convert to shared_ptr
     std::unique_ptr<WorldChunk> uniqueChunk = worldGenerator_->GenerateChunk(chunkX, chunkZ);
     if (!uniqueChunk) {
         Logger::Error("Failed to generate chunk [{}, {}]", chunkX, chunkZ);
         return nullptr;
     }
 
-    // Convert to shared_ptr and store in map
     std::shared_ptr<WorldChunk> chunk = std::move(uniqueChunk);
     loadedChunks_[chunkKey] = chunk;
     activeChunkCount_++;
@@ -139,14 +137,15 @@ BiomeType LogicWorld::GetBiomeAt(float x, float z) const {
 
 void LogicWorld::SaveChunkData() {
     std::lock_guard<std::mutex> lock(chunksMutex_);
-    if (!databaseBackend_) {
+    DatabaseBackend* backend = DbManager::GetInstance().GetBackend();
+    if (!backend) {
         Logger::Error("No database backend configured");
         return;
     }
     for (const auto& [key, chunk] : loadedChunks_) {
         try {
             nlohmann::json chunkData = chunk->Serialize();
-            databaseBackend_->SaveChunkData(chunk->GetChunkX(), chunk->GetChunkZ(), chunkData);
+            backend->SaveChunkData(chunk->GetChunkX(), chunk->GetChunkZ(), chunkData);
         } catch (const std::exception& e) {
             Logger::Error("Failed to save chunk [{}, {}]: {}",
                          chunk->GetChunkX(), chunk->GetChunkZ(), e.what());
@@ -180,15 +179,9 @@ void LogicWorld::UpdateEntities(float deltaTime) {
 }
 
 void LogicWorld::SetTimeOfDay(float time) {
-    // Clamp to [0,1] to avoid invalid values
     if (time < 0.0f) time = 0.0f;
     if (time > 1.0f) time = 1.0f;
     currentTimeOfDay_.store(time, std::memory_order_relaxed);
-
-    // Optionally propagate to other systems that depend on time
-    // e.g., update global lighting, weather, or mob spawn rates
-    // LightManager::GetInstance().SetTimeOfDay(time);
-    // WeatherSystem::GetInstance().UpdateDayCycle(time);
 }
 
 float LogicWorld::GetTimeOfDay() const {

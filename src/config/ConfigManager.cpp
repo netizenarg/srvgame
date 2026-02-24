@@ -246,7 +246,7 @@ uint16_t ConfigManager::GetDatabasePort() const {
 std::string ConfigManager::GetDatabaseName() const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
-        return config_.at("database").at("database_name").get<std::string>();
+        return config_.at("database").at("name").get<std::string>();
     } catch (const std::exception& e) {
         Logger::Warn("Failed to get database name, using default: game_db");
         return "game_db";
@@ -256,7 +256,7 @@ std::string ConfigManager::GetDatabaseName() const {
 std::string ConfigManager::GetDatabaseUser() const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
-        return config_.at("database").at("username").get<std::string>();
+        return config_.at("database").at("user").get<std::string>();
     } catch (const std::exception& e) {
         Logger::Warn("Failed to get database user, using default: game_user");
         return "game_user";
@@ -466,10 +466,10 @@ std::string ConfigManager::GetLogLevel() const {
 std::string ConfigManager::GetLogFilePath() const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
-        return config_.at("logging").at("file_path").get<std::string>();
+        return config_.at("logging").at("file").get<std::string>();
     } catch (const std::exception& e) {
-        Logger::Warn("Failed to get log file path, using default: /var/log/game_server/server.log");
-        return "/var/log/game_server/server.log";
+        Logger::Warn("Failed to get log file path, using default: gameserver.log");
+        return "gameserver.log";
     }
 }
 

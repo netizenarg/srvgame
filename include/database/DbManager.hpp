@@ -46,6 +46,8 @@ public:
     void Shutdown();
     bool IsInitialized() const { return initialized_; }
 
+    static bool EnsureDatabaseExists(const nlohmann::json& config);
+
     std::string EscapeString(const std::string& input);
 
     // Backend Management

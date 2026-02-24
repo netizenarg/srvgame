@@ -52,7 +52,8 @@ rm -rf CMakeFiles
 
 # Build
 mkdir -p build
-cp -fr config build/config
+#cp -fr config build/config
+rsync -a --delete config/ build/config/
 cd build
 #cmake .. -B . -DUSE_CITUS=${USE_CITUS:-OFF} -DCMAKE_BUILD_TYPE=Release
 cmake .. -B . -DUSE_CITUS=${USE_CITUS:-OFF} -DCMAKE_BUILD_TYPE=Debug
@@ -64,3 +65,7 @@ else
     echo "Build failed - no executable created"
     echo "Check cmake output above for errors"
 fi
+
+# create default database user
+#sudo -u postgres psql -c "DROP USER IF EXISTS gameuser;"
+#sudo -u postgres psql -c "CREATE USER gameuser WITH PASSWORD 'password' SUPERUSER;"
