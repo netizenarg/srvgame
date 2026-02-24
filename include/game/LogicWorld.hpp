@@ -32,10 +32,6 @@ public:
     void Initialize(const WorldConfig& config);
     void Shutdown();
 
-    void SetDatabaseBackend(std::shared_ptr<DatabaseBackend> backend) {
-        databaseBackend_ = backend;
-    }
-
     // Chunk management
     std::shared_ptr<WorldChunk> GetOrCreateChunk(int chunkX, int chunkZ);
     void UnloadDistantChunks(const glm::vec3& centerPosition, float keepRadius = 200.0f);
@@ -69,8 +65,6 @@ private:
 
     static std::mutex instanceMutex_;
     static LogicWorld* instance_;
-
-    std::shared_ptr<DatabaseBackend> databaseBackend_;
 
     WorldConfig worldConfig_;
     std::unique_ptr<WorldGenerator> worldGenerator_;
