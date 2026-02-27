@@ -90,6 +90,7 @@ public:
     }
 
     bool IsCitusEnabled() const { return citusEnabled_; }
+    bool ConnectToDatabase(const std::string& dbname) override;
 
 private:
     static std::mutex instanceMutex_;

@@ -96,7 +96,7 @@ bool PostgreSqlClient::Connect() {
         }
 
         Logger::Info("Connected to PostgreSQL database: {}",
-                    config_.value("database", "unknown"));
+                    config_.value("name", "unknown"));
         return true;
 
     } catch (const std::exception& e) {
@@ -818,7 +818,7 @@ std::string PostgreSqlClient::GetConnectionInfo() const {
     std::ostringstream oss;
     oss << "PostgreSQL: " << config_.value("host", "localhost")
         << ":" << config_.value("port", 5432)
-        << "/" << config_.value("database", "game_db")
+        << "/" << config_.value("name", "game_db")
         << " (Pool: " << GetActiveConnections() << "/"
         << connections_.size() << " active)";
     return oss.str();
@@ -1513,4 +1513,13 @@ bool PostgreSqlClient::ShouldReconnect(PGconn* conn) const {
     PQclear(result);
 
     return execStatus != PGRES_TUPLES_OK;
+}
+
+bool PostgreSqlClient::ConnectToDatabase(const std::string& dbname) {
+    Disconnect();
+    config_["name"] = dbname;
+    connectionString_ = BuildConnectionString();
+    poolInitialized_ = false;
+    Logger::Debug("Switched database connection to '{}'", dbname);
+    return true;
 }

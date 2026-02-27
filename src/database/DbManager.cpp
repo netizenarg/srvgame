@@ -26,161 +26,96 @@ DbManager::~DbManager() {
     Logger::Debug("DbManager destroyed");
 }
 
-bool DbManager::EnsureDatabaseExists(const nlohmann::json& config) {
-    // Validate essential fields
-    if (!config.contains("host") || !config["host"].is_string() ||
-        !config.contains("port") || !config["port"].is_number() ||
-        !config.contains("user") || !config["user"].is_string() ||
-        !config.contains("name") || !config["name"].is_string()) {
-        Logger::Error("Invalid database configuration for existence check");
+bool DbManager::EnsureDatabaseExists(const std::string& configPath) {
+    if (!Initialize(configPath)) {
+        Logger::Error("Failed to initialize DbManager");
         return false;
     }
-
-    std::string targetDb = config["name"];
-    std::string defaultDb = "postgres";   // maintenance database
-
-    // Validate that the database name contains only safe characters (alphanumeric and underscore)
-    auto isSafeDbName = [](const std::string& name) {
-        for (char c : name) {
-            if (!isalnum(c) && c != '_') return false;
-        }
-        return true;
-    };
-    if (!isSafeDbName(targetDb)) {
-        Logger::Error("Database name '{}' contains unsafe characters", targetDb);
+    std::string targetDb = config_["name"].get<std::string>();
+    if (!backend_->ConnectToDatabase("postgres")) {
+        Logger::Error("Failed to switch to admin database 'postgres'");
         return false;
     }
-
-    // Create a temporary config for the default database
-    nlohmann::json tempConfig = config;
-    tempConfig["name"] = defaultDb;
-
-    // Use PostgreSqlClient to connect to the default database
-    PostgreSqlClient tempClient(tempConfig);
-
-    // Initialize a minimal connection pool (1 connection) so that Query/Execute work
-    if (!tempClient.InitializeConnectionPool(1, 1)) {
-        Logger::Error("Failed to initialize connection pool for temporary client");
+    if (!backend_->Connect()) {
+        Logger::Error("Failed to connect to admin database 'postgres'");
         return false;
     }
-
-    if (!tempClient.Connect()) {
-        Logger::Error("Failed to connect to '{}' database to check existence of '{}'",
-                      defaultDb, targetDb);
-        tempClient.ReleaseConnectionPool();
-        return false;
-    }
-
-    // Check if target database exists – use raw name (already validated safe)
     std::string checkQuery = "SELECT 1 FROM pg_database WHERE datname = '" + targetDb + "'";
-    auto result = tempClient.Query(checkQuery);
-
+    auto result = backend_->Query(checkQuery);
     bool exists = (!result.empty() && !result[0].empty());
-    if (exists) {
-        Logger::Info("Database '{}' already exists.", targetDb);
-        tempClient.Disconnect();
-        tempClient.ReleaseConnectionPool();
-        return true;
-    }
-
-    // Database does not exist – attempt to create it
-    Logger::Info("Database '{}' does not exist. Creating it...", targetDb);
-
-    std::string createSql = "CREATE DATABASE " + targetDb;
-    if (config.contains("user") && !config["user"].empty()) {
-        createSql += " OWNER " + config["user"].get<std::string>();
-    }
-
-    if (tempClient.Execute(createSql)) {
-        Logger::Info("Database '{}' created successfully.", targetDb);
-        tempClient.Disconnect();
-        tempClient.ReleaseConnectionPool();
-        return true;
-    } else {
-        // Creation failed – check if it's because another process created it
-        // just after our check (unlikely in master, but possible in clustered setups).
-        // Re-query to see if it now exists.
-        result = tempClient.Query(checkQuery);
-        exists = (!result.empty() && !result[0].empty());
-        if (exists) {
-            Logger::Warn("Database '{}' was created by another process; proceeding.", targetDb);
-            tempClient.Disconnect();
-            tempClient.ReleaseConnectionPool();
-            return true;
+    if (!exists) {
+        Logger::Info("Database '{}' does not exist. Creating it...", targetDb);
+        std::string createSql = "CREATE DATABASE " + targetDb;
+        if (config_.contains("user") && config_["user"].is_string() && !config_["user"].get<std::string>().empty()) {
+            createSql += " OWNER " + config_["user"].get<std::string>();
         }
-
-        Logger::Error("Failed to create database '{}'. Check permissions.", targetDb);
-        tempClient.Disconnect();
-        tempClient.ReleaseConnectionPool();
+        if (!backend_->Execute(createSql)) {
+            result = backend_->Query(checkQuery);
+            exists = (!result.empty() && !result[0].empty());
+            if (!exists) {
+                Logger::Error("Failed to create database '{}'. Check permissions.", targetDb);
+                backend_->Disconnect();
+                return false;
+            }
+            Logger::Warn("Database '{}' was created by another process; proceeding.", targetDb);
+        } else {
+            Logger::Info("Database '{}' created successfully.", targetDb);
+        }
+    } else {
+        Logger::Info("Database '{}' already exists.", targetDb);
+    }
+    if (!backend_->ConnectToDatabase(targetDb)) {
+        Logger::Error("Failed to switch to target database '{}'", targetDb);
         return false;
     }
+    if (!backend_->Connect()) {
+        Logger::Error("Failed to connect to target database '{}'", targetDb);
+        return false;
+    }
+    if (!CreateDefaultTablesIfNotExist()) {
+        Logger::Critical("Failed to create default tables.");
+        return false;
+    }
+    Logger::Info("Default SQL tables verified/created successfully.");
+    return true;
 }
 
-bool DbManager::Initialize() {
+bool DbManager::Initialize(const std::string& configPath) {
     if (initialized_) {
         Logger::Warn("DbManager already initialized");
         return true;
     }
-
     Logger::Info("Initializing DbManager...");
-
-    // Load configuration
-    if (!LoadConfiguration()) {
+    if (!LoadConfiguration(configPath)) {
         Logger::Error("Failed to load database configuration");
         return false;
     }
-
-    // Validate configuration
     if (!ValidateConfiguration(config_)) {
         Logger::Error("Invalid database configuration");
         return false;
     }
-
-    // Parse database type
     std::string typeStr = config_.value("type", "postgresql");
     currentType_ = ParseDatabaseType(typeStr);
-
     if (currentType_ == INVALID) {
         Logger::Error("Unknown database type: {}", typeStr);
         return false;
     }
-
-    // Create appropriate backend
-    bool backendCreated = false;
     switch (currentType_) {
         case POSTGRESQL:
             backend_ = std::make_unique<PostgreSqlClient>(config_);
-            backendCreated = true;
             break;
         case CITUS:
-#ifdef USE_CITUS
+            #ifdef USE_CITUS
             backend_ = std::make_unique<CitusClient>(config_);
-            backendCreated = true;
-#else
+            #else
             Logger::Error("Citus support not compiled in. Recompile with USE_CITUS=1");
             return false;
-#endif
+            #endif
             break;
         default:
             Logger::Error("Unsupported database type");
             return false;
     }
-
-    if (!backendCreated) {
-        Logger::Error("Failed to create database backend");
-        return false;
-    }
-
-    // Initialize connection pool if configured
-    if (config_.contains("connection_pool")) {
-        size_t minConnections = config_["connection_pool"].value("min_connections", 5);
-        size_t maxConnections = config_["connection_pool"].value("max_connections", 20);
-
-        if (!backend_->InitializeConnectionPool(minConnections, maxConnections)) {
-            Logger::Warn("Failed to initialize connection pool");
-        }
-    }
-
     initialized_ = true;
     Logger::Info("DbManager initialized with {} backend", DatabaseTypeToString(currentType_));
     return true;
@@ -211,8 +146,8 @@ bool DbManager::LoadConfiguration(const std::string& configPath) {
 
         // Try to load from file first
         std::string path = configPath.empty() ?
-            config_mgr.GetString("database.config_path", "config/database.json") :
-            configPath;
+        config_mgr.GetString("database.config_path", "config/database.json") :
+        configPath;
 
         if (!path.empty()) {
             std::ifstream configFile(path);
@@ -220,17 +155,21 @@ bool DbManager::LoadConfiguration(const std::string& configPath) {
                 configFile >> config_;
                 configFile.close();
                 Logger::Debug("Database configuration loaded from: {}", path);
-                return true;
+
+                // If the loaded JSON has a "database" key, use that as the actual config
+                if (config_.contains("database") && config_["database"].is_object()) {
+                    config_ = config_["database"];
+                }
             }
         }
 
-        if (config_.empty())
-        {
+        // Fallback to ConfigManager if config_ is still empty
+        if (config_.empty()) {
             config_ = config_mgr.GetJson("database");
-            Logger::Debug("Database configuration loaded from: {}", config_mgr.GetConfigPath());
+            Logger::Debug("Database configuration loaded from ConfigManager: {}", config_mgr.GetConfigPath());
         }
 
-        // Fall back to config manager
+        // Reconstruct with defaults (ensures all required fields exist)
         nlohmann::json poolConfig = config_.value("pool", nlohmann::json::object());
 
         config_ = {
@@ -251,7 +190,7 @@ bool DbManager::LoadConfiguration(const std::string& configPath) {
             {"timeout", config_.value("timeout", 30)}
         };
 
-        Logger::Debug("Database configuration loaded from ConfigManager");
+        Logger::Debug("Database configuration finalized");
         return true;
 
     } catch (const std::exception& e) {
@@ -641,4 +580,196 @@ std::string DbManager::DatabaseTypeToString(DatabaseType type) const {
         case CITUS: return "Citus";
         default: return "Unknown";
     }
+}
+
+bool DbManager::TableExists(const std::string& tableName) {
+    std::string sql = "SELECT EXISTS ("
+    "SELECT FROM information_schema.tables "
+    "WHERE table_schema = 'public' AND table_name = '" + tableName + "'"
+    ") AS exists;";
+        try {
+            nlohmann::json result = backend_->Query(sql);
+            if (result.empty() || !result[0].contains("exists")) {
+                return false;
+            }
+
+            const auto& existsVal = result[0]["exists"];
+            if (existsVal.is_boolean()) {
+                return existsVal.get<bool>();
+            } else if (existsVal.is_string()) {
+                std::string str = existsVal.get<std::string>();
+                // PostgreSQL returns 't' for true, 'f' for false
+                return str == "t" || str == "true" || str == "1";
+            } else if (existsVal.is_number()) {
+                return existsVal.get<int>() != 0;
+            }
+            return false;
+        } catch (const std::exception& e) {
+            Logger::Error("Failed to check existence of table {}: {}", tableName, e.what());
+            return false;
+        }
+}
+
+bool DbManager::ExecuteCreateTable(const std::string& tableName, const std::string& createSql) {
+    if (TableExists(tableName)) {
+        Logger::Debug("Table '{}' already exists, skipping creation.", tableName);
+        return true;
+    }
+
+    Logger::Info("Creating table '{}'...", tableName);
+    try {
+        backend_->Query(createSql);
+        Logger::Info("Table '{}' created successfully.", tableName);
+        return true;
+    } catch (const std::exception& e) {
+        std::string error = e.what();
+        // Check for PostgreSQL "duplicate key" error on pg_type (error code 23505)
+        // This can happen when two sessions create the same table concurrently.
+        if (error.find("23505") != std::string::npos ||
+            error.find("duplicate key value") != std::string::npos) {
+            Logger::Warn("Table '{}' was created concurrently by another process; treating as success.", tableName);
+        return true;
+            }
+            Logger::Error("Failed to create table '{}': {}", tableName, e.what());
+            return false;
+    }
+}
+
+bool DbManager::CreateDefaultTablesIfNotExist() {
+    if (!IsConnected() && !Connect()) {
+        Logger::Error("Cannot create default tables: not connected to database.");
+        return false;
+    }
+
+    bool success = true;
+
+    success &= ExecuteCreateTable("players", R"(
+        CREATE TABLE IF NOT EXISTS players (
+            id BIGINT PRIMARY KEY,
+            data JSONB NOT NULL,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_players_updated ON players(updated_at);
+    )");
+
+    success &= ExecuteCreateTable("player_inventory", R"(
+        CREATE TABLE IF NOT EXISTS player_inventory (
+            player_id BIGINT REFERENCES players(id) ON DELETE CASCADE,
+            slot INT NOT NULL,
+            item_id BIGINT NOT NULL,
+            quantity INT NOT NULL DEFAULT 1,
+            data JSONB,  -- additional item-specific data (durability, enchantments, etc.)
+            PRIMARY KEY (player_id, slot)
+        );
+        CREATE INDEX IF NOT EXISTS idx_inventory_player ON player_inventory(player_id);
+    )");
+
+    success &= ExecuteCreateTable("player_skills", R"(
+        CREATE TABLE IF NOT EXISTS player_skills (
+            player_id BIGINT REFERENCES players(id) ON DELETE CASCADE,
+            skill_id VARCHAR(64) NOT NULL,
+            level INT NOT NULL DEFAULT 1,
+            experience FLOAT NOT NULL DEFAULT 0,
+            data JSONB,
+            PRIMARY KEY (player_id, skill_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_skills_player ON player_skills(player_id);
+    )");
+
+    success &= ExecuteCreateTable("player_quests", R"(
+        CREATE TABLE IF NOT EXISTS player_quests (
+            player_id BIGINT REFERENCES players(id) ON DELETE CASCADE,
+            quest_id BIGINT NOT NULL,
+            state INT NOT NULL,  -- QuestState enum as integer
+            progress JSONB NOT NULL,
+            started_at TIMESTAMPTZ,
+            completed_at TIMESTAMPTZ,
+            PRIMARY KEY (player_id, quest_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_quests_player ON player_quests(player_id);
+        CREATE INDEX IF NOT EXISTS idx_quests_state ON player_quests(state);
+    )");
+
+    success &= ExecuteCreateTable("world_chunks", R"(
+        CREATE TABLE IF NOT EXISTS world_chunks (
+            chunk_x INT NOT NULL,
+            chunk_z INT NOT NULL,
+            biome INT NOT NULL,
+            data JSONB NOT NULL,  -- serialized WorldChunk data
+            generated_at TIMESTAMPTZ DEFAULT NOW(),
+            PRIMARY KEY (chunk_x, chunk_z)
+        );
+        CREATE INDEX IF NOT EXISTS idx_chunks_coords ON world_chunks(chunk_x, chunk_z);
+    )");
+
+    success &= ExecuteCreateTable("npcs", R"(
+        CREATE TABLE IF NOT EXISTS npcs (
+            id BIGINT PRIMARY KEY,
+            type INT NOT NULL,
+            position JSONB NOT NULL,  -- {x, y, z}
+            level INT NOT NULL DEFAULT 1,
+            data JSONB NOT NULL,      -- stats, AI state, loot table, etc.
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_npcs_type ON npcs(type);
+    )");
+
+    success &= ExecuteCreateTable("loot_tables", R"(
+        CREATE TABLE IF NOT EXISTS loot_tables (
+            table_id VARCHAR(64) PRIMARY KEY,
+            name VARCHAR(128) NOT NULL,
+            data JSONB NOT NULL,  -- entries, drop chances, etc.
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        );
+    )");
+
+    success &= ExecuteCreateTable("game_state", R"(
+        CREATE TABLE IF NOT EXISTS game_state (
+            key VARCHAR(64) PRIMARY KEY,
+            value JSONB NOT NULL,
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        );
+    )");
+
+#ifdef USE_CITUS
+    if (currentType_ == DatabaseType::CITUS) {
+        try {
+            // Distribute tables by player_id or appropriate shard key
+            backend_->Query("SELECT create_distributed_table('players', 'id');");
+            backend_->Query("SELECT create_distributed_table('player_inventory', 'player_id');");
+            backend_->Query("SELECT create_distributed_table('player_skills', 'player_id');");
+            backend_->Query("SELECT create_distributed_table('player_quests', 'player_id');");
+            // World chunks could be distributed by (chunk_x, chunk_z) – Citus supports hash distribution on multiple columns
+            backend_->Query("SELECT create_distributed_table('world_chunks', 'chunk_x');");
+            backend_->Query("SELECT create_distributed_table('npcs', 'id');");
+            Logger::Info("Citus distribution created for main tables.");
+        } catch (const std::exception& e) {
+            Logger::Warn("Failed to distribute tables for Citus: {}", e.what());
+        }
+    }
+#endif
+
+    if (success) {
+        Logger::Info("All default tables verified/created successfully.");
+    } else {
+        Logger::Error("Some tables could not be created. Check logs for details.");
+    }
+
+    return success;
+}
+
+bool DbManager::CheckDefaultTablesExist() {
+    std::vector<std::string> requiredTables = {
+        "players", "player_inventory", "player_skills", "player_quests",
+        "world_chunks", "npcs", "loot_tables", "game_state"
+    };
+    for (const auto& table : requiredTables) {
+        if (!TableExists(table)) {
+            Logger::Warn("Required table '{}' does not exist.", table);
+            return false;
+        }
+    }
+    return true;
 }

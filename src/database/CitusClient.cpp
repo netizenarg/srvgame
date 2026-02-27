@@ -1153,4 +1153,12 @@ bool CitusClient::ReplicateReferenceTables() {
     }
 }
 
+bool CitusClient::ConnectToDatabase(const std::string& dbname) {
+    if (!PostgreSqlClient::ConnectToDatabase(dbname))
+        return false;
+    RefreshWorkerNodes();
+    RefreshShardPlacements();
+    return true;
+}
+
 #endif // USE_CITUS

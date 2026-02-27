@@ -53,9 +53,6 @@ void WorkerMain(int workerId, ProcessPool* processPool = nullptr, const std::str
         // Initialize database using the new DbManager interface
         auto& dbManager = DbManager::GetInstance();
 
-        std::string backendType = config.GetDatabaseBackend();
-        Logger::Info("Worker {} using database backend: {}", workerId, backendType);
-
         // Create configuration JSON object
         nlohmann::json dbConfig;
         dbConfig["host"] = config.GetDatabaseHost();
@@ -69,38 +66,7 @@ void WorkerMain(int workerId, ProcessPool* processPool = nullptr, const std::str
         dbConfig["min_connections"] = config.GetInt("database.min_connections", 5);
         dbConfig["connection_timeout_ms"] = config.GetInt("database.connection_timeout_ms", 5000);
 
-        // Set backend type
-        if (backendType == "citus") {
-            // Set backend type
-            DbManager::DatabaseType dbType = DbManager::CITUS;
-
-            // Add Citus worker nodes if configured
-            std::vector<std::string> workerNodes = config.GetCitusWorkerNodes();
-            if (!workerNodes.empty()) {
-                nlohmann::json nodesArray = nlohmann::json::array();
-                for (const auto& node : workerNodes) {
-                    nodesArray.push_back(node);
-                }
-                dbConfig["worker_nodes"] = nodesArray;
-            }
-
-            // Set backend configuration
-            if (!dbManager.SetBackend(dbType, dbConfig)) {
-                Logger::Error("Worker {} failed to set Citus database backend", workerId);
-                return;
-            }
-        } else {
-            // Use PostgreSQL backend
-            DbManager::DatabaseType dbType = DbManager::POSTGRESQL;
-
-            if (!dbManager.SetBackend(dbType, dbConfig)) {
-                Logger::Error("Worker {} failed to set PostgreSQL database backend", workerId);
-                return;
-            }
-        }
-
-        // Initialize the database manager
-        if (!dbManager.Initialize()) {
+        if (!dbManager.Initialize(path_config)) {
             Logger::Error("Worker {} failed to initialize database", workerId);
             return;
         }
@@ -111,7 +77,8 @@ void WorkerMain(int workerId, ProcessPool* processPool = nullptr, const std::str
             return;
         }
 
-        Logger::Info("Worker {} database connection established successfully", workerId);
+        Logger::Info("Worker {} database connection established successfully using backend: {}",
+                     workerId, config.GetDatabaseBackend());
 
         // Initialize game logic with 3D world system
         auto& gameLogic = GameLogic::GetInstance();
@@ -306,8 +273,11 @@ int main(int argc, char* argv[]) {
     Logger::Initialize();
 
     // Ensure the target database exists (master process only)
-    auto dbConfig = config.GetJson("database");
-    if (!DbManager::EnsureDatabaseExists(dbConfig)) {
+    DbManager& dbManager = DbManager::GetInstance();
+    bool db_check = dbManager.EnsureDatabaseExists(conf_path);
+    dbManager.Disconnect();
+    dbManager.Shutdown();
+    if (!db_check) {
         Logger::Critical("Failed to ensure database existence. Exiting.");
         return 1;
     }

@@ -8,6 +8,7 @@ public:
 
     // Connection Management
     virtual bool Connect() = 0;
+    virtual bool ConnectToDatabase(const std::string& dbname) = 0;
     virtual bool Reconnect() = 0;
     virtual void Disconnect() = 0;
     virtual bool IsConnected() const = 0;
