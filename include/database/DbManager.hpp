@@ -42,11 +42,11 @@ public:
     static DbManager& GetInstance();
 
     // Lifecycle Management
-    bool Initialize();
+    bool Initialize(const std::string& configPath = "");
     void Shutdown();
     bool IsInitialized() const { return initialized_; }
 
-    static bool EnsureDatabaseExists(const nlohmann::json& config);
+    bool EnsureDatabaseExists(const std::string& configPath = "");
 
     std::string EscapeString(const std::string& input);
 
@@ -88,6 +88,9 @@ public:
     bool CheckMigrationStatus();
     bool RollbackMigration(int version);
 
+    bool CreateDefaultTablesIfNotExist();
+    bool CheckDefaultTablesExist();
+
 private:
     DbManager();
     ~DbManager();
@@ -119,4 +122,8 @@ private:
     bool ValidateConfiguration(const nlohmann::json& config) const;
     DatabaseType ParseDatabaseType(const std::string& typeStr) const;
     std::string DatabaseTypeToString(DatabaseType type) const;
+
+    bool ExecuteCreateTable(const std::string& tableName, const std::string& createSql);
+    bool TableExists(const std::string& tableName);
+
 };

@@ -43,6 +43,7 @@ public:
 
     // Connection Management
     bool Connect() override;
+    bool ConnectToDatabase(const std::string& dbname) override;
     bool Reconnect() override;
     void Disconnect() override;
     bool IsConnected() const override;
