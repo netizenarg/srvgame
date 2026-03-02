@@ -1,6 +1,5 @@
 #pragma once
 
-#include <asio.hpp>
 #include <functional>
 #include <memory>
 #include <netinet/in.h>
@@ -8,9 +7,11 @@
 #include <string>
 #include <sys/socket.h>
 
+#include <asio.hpp>
+#include <asio/error.hpp>
+
 #include "logging/Logger.hpp"
 #include "config/ConfigManager.hpp"
-//#include "network/GameSession.hpp"
 #include "network/ConnectionManager.hpp"
 
 class GameServer {
