@@ -20,13 +20,9 @@ bool GameServer::Initialize() {
             asio::ip::make_address(host_),
                                          port_
         );
-
         acceptor_.open(endpoint.protocol());
-
         if (reusePort_) {
             acceptor_.set_option(asio::ip::tcp::acceptor::reuse_address(true));
-
-            // Set SO_REUSEPORT for Linux
             int optval = 1;
             if (setsockopt(acceptor_.native_handle(),
                 SOL_SOCKET,
@@ -36,15 +32,11 @@ bool GameServer::Initialize() {
                 Logger::Error("Failed to set SO_REUSEPORT: {}", strerror(errno));
                 }
         }
-
         acceptor_.bind(endpoint);
         acceptor_.listen(config_.GetMaxConnections());
-
         SetupSignalHandlers();
-
         Logger::Info("GameServer initialized on {}:{}", host_, port_);
         return true;
-
     } catch (const std::exception& e) {
         Logger::Critical("Failed to initialize server: {}", e.what());
         return false;
@@ -53,13 +45,16 @@ bool GameServer::Initialize() {
 
 void GameServer::Run() {
     running_ = true;
-
     DoAccept();
     StartWorkerThreads();
-
     Logger::Info("GameServer started with {} IO threads", ioThreads_);
-
     ioContext_.run();
+    for (auto& thread : workerThreads_) {
+        if (thread.joinable()) {
+            thread.join();
+        }
+    }
+    Logger::Info("GameServer run finished");
 }
 
 void GameServer::DoAccept() {
@@ -72,9 +67,13 @@ void GameServer::DoAccept() {
                     session->Start();
                 }
             } else {
-                Logger::Error("Accept error: {}", ec.message());
+                // During shutdown, operation_aborted is expected, don't log as error
+                if (ec != asio::error::operation_aborted) {
+                    Logger::Error("Accept error: {}", ec.message());
+                } else {
+                    Logger::Debug("Accept aborted during shutdown");
+                }
             }
-
             if (running_) {
                 DoAccept();
             }
@@ -93,7 +92,6 @@ void GameServer::SetupSignalHandlers() {
     signals_.add(SIGINT);
     signals_.add(SIGTERM);
     signals_.add(SIGQUIT);
-
     signals_.async_wait([this](std::error_code ec, int signal) {
         if (!ec) {
             Logger::Info("Received signal {}, shutting down...", signal);
@@ -104,23 +102,12 @@ void GameServer::SetupSignalHandlers() {
 
 void GameServer::Shutdown() {
     if (!running_) return;
-
     running_ = false;
-
     ConnectionManager::GetInstance().StopAll();
-
     signals_.cancel();
     acceptor_.close();
-
     ioContext_.stop();
-
-    for (auto& thread : workerThreads_) {
-        if (thread.joinable()) {
-            thread.join();
-        }
-    }
-
-    Logger::Info("GameServer shutdown complete");
+    Logger::Info("GameServer shutdown initiated");
 }
 
 void GameServer::SetSessionFactory(std::function<std::shared_ptr<GameSession>(asio::ip::tcp::socket)> factory) {

@@ -162,8 +162,7 @@ void WorkerMain(int workerId, ProcessPool* processPool = nullptr, const std::str
 
         // Initialize and run server
         if (server.Initialize()) {
-            Logger::Info("Worker {} game server initialized on port {}",
-                         workerId, config.GetServerPort());
+            Logger::Info("Worker {} game server initialized on port {}", workerId, config.GetServerPort());
 
             // Start background world maintenance thread
             std::atomic<bool> worldMaintenanceRunning{true};
@@ -214,7 +213,7 @@ void WorkerMain(int workerId, ProcessPool* processPool = nullptr, const std::str
                 Logger::Info("Worker {} world maintenance thread stopped", workerId);
             });
 
-            // Start the server
+            // Start the server (blocks until shutdown)
             Logger::Info("Worker {} starting server loop", workerId);
             server.Run();
 
