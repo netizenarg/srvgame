@@ -43,16 +43,18 @@ if(NOT spdlog_FOUND)
     add_subdirectory(${SPDLOG_DIR} EXCLUDE_FROM_ALL)
 endif()
 
-# Option for Citus support
+# Options for database backends
 option(USE_CITUS "Enable Citus distributed database support" OFF)
+option(USE_SQLITE "Enable SQLite embedded database support" OFF)
 
 # Find dependencies
 find_package(OpenGL REQUIRED)
 find_package(PostgreSQL REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Development)
-#find_package(glm REQUIRED)
-#find_package(asio REQUIRED)
-#find_package(nlohmann_json REQUIRED)
+
+if(USE_SQLITE)
+    find_package(SQLite3 REQUIRED)
+endif()
 
 # Find zlib for compression
 find_package(ZLIB REQUIRED)
@@ -86,7 +88,6 @@ set(PROCESS_SOURCES
 # Scripting system
 set(SCRIPTING_SOURCES
     src/scripting/PythonAPI.cpp
-    #src/scripting/PythonEvent.cpp
     src/scripting/PythonModule.cpp
     src/scripting/PythonScripting.cpp
     src/scripting/ScriptHotReloader.cpp
@@ -144,9 +145,11 @@ set(DATABASE_SOURCES
 if(USE_CITUS)
     message(STATUS "Building with Citus support")
     list(APPEND DATABASE_SOURCES src/database/CitusClient.cpp)
-else()
-    message(STATUS "Building without Citus (PostgreSQL only)")
-    # No definition added here – Citus code is completely excluded
+endif()
+
+if(USE_SQLITE)
+    message(STATUS "Building with SQLite support")
+    list(APPEND DATABASE_SOURCES src/database/SQLiteClient.cpp)
 endif()
 
 # Include directories
@@ -178,6 +181,10 @@ if(USE_CITUS)
     target_compile_definitions(gameserver PRIVATE USE_CITUS=1)
 endif()
 
+if(USE_SQLITE)
+    target_compile_definitions(gameserver PRIVATE USE_SQLITE=1)
+endif()
+
 # Link libraries
 target_link_libraries(gameserver PRIVATE
     ${OPENGL_LIBRARIES}
@@ -194,6 +201,10 @@ target_link_libraries(gameserver PRIVATE
     ${UUID_LIBRARY}
     ${CRYPT_LIB}
 )
+
+if(USE_SQLITE)
+    target_link_libraries(gameserver PRIVATE SQLite::SQLite3)
+endif()
 
 # Compiler flags
 if(MSVC)

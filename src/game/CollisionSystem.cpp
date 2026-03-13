@@ -977,6 +977,7 @@ bool CollisionSystem::SweptSphereSphere(const glm::vec3& startA, const glm::vec3
 }
 
 void CollisionSystem::PerformContinuousCollisionDetection(float deltaTime) {
+    (void)deltaTime;
     // Get all potential collision pairs (using the updated grid)
     auto pairs = GetPotentialCollisions();
 

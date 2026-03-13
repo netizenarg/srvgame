@@ -1,46 +1,29 @@
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
-#include <cstring>
-#include <iomanip>
-#include <memory>
+#include <filesystem>
 #include <mutex>
-#include <vector>
 #include <queue>
 #include <thread>
-#include <sstream>
+#include <unordered_map>
 
-#include <libpq-fe.h>
+#include <sqlite3.h>
 
-#include "utils/Converters.hpp"
 #include "database/Backend.hpp"
-//#include "database/DbManager.hpp"
 
 /**
- * @brief PostgreSQL Client Implementation
+ * @brief SQLite Client Implementation
  *
- * Provides a concrete implementation of DatabaseBackend for PostgreSQL.
- * Includes connection pooling, prepared statements, and transaction support.
+ * Provides a concrete implementation of DatabaseBackend for SQLite.
+ * Uses a single connection with mutex locking for simplicity.
+ * Supports JSON storage via SQLite's JSON1 extension (if available).
  */
-class PostgreSqlClient : public DatabaseBackend {
+class SQLiteClient : public DatabaseBackend {
 public:
-    // Connection pool entry
-    struct Connection {
-        PGconn* conn;
-        bool inUse;
-        std::chrono::steady_clock::time_point lastUsed;
-    };
-
-    // Prepared statement
-    struct PreparedStatement {
-        std::string name;
-        std::string sql;
-        int paramCount;
-    };
-
-    PostgreSqlClient(const nlohmann::json& config);
-    virtual ~PostgreSqlClient();
+    explicit SQLiteClient(const nlohmann::json& config);
+    virtual ~SQLiteClient();
 
     // Connection Management
     bool Connect() override;
@@ -95,11 +78,13 @@ public:
     bool Execute(const std::string& sql) override;
     bool ExecuteWithParams(const std::string& sql, const std::vector<std::string>& params) override;
 
-    // Shard Operations (simulated for compatibility)
+    // Shard Operations (ignored, forward to main)
     nlohmann::json QueryShard(int shardId, const std::string& sql) override;
-    nlohmann::json QueryShardWithParams(int shardId, const std::string& sql, const std::vector<std::string>& params) override;
+    nlohmann::json QueryShardWithParams(int shardId, const std::string& sql,
+                                       const std::vector<std::string>& params) override;
     bool ExecuteShard(int shardId, const std::string& sql) override;
-    bool ExecuteShardWithParams(int shardId, const std::string& sql, const std::vector<std::string>& params) override;
+    bool ExecuteShardWithParams(int shardId, const std::string& sql,
+                               const std::vector<std::string>& params) override;
 
     // Utility Methods
     std::string EscapeString(const std::string& str) override;
@@ -113,90 +98,46 @@ public:
     nlohmann::json GetDatabaseStats() override;
     void ResetStats() override;
 
-    // Connection Pool Management
+    // Connection Pool Management (SQLite uses single connection)
     bool InitializeConnectionPool(size_t minConnections, size_t maxConnections) override;
     void ReleaseConnectionPool() override;
     size_t GetActiveConnections() const override;
     size_t GetIdleConnections() const override;
 
-    // Prepared Statements
-    bool PrepareStatement(const std::string& name, const std::string& sql, int paramCount);
-    bool ExecutePrepared(const std::string& name, const std::vector<std::string>& params);
-    nlohmann::json QueryPrepared(const std::string& name, const std::vector<std::string>& params);
-
-    // Backward compatibility methods
-    bool ExecuteDatabase(const std::string& sql) { return Execute(sql); }
-    nlohmann::json QueryDatabase(const std::string& sql) { return Query(sql); }
-
 private:
-    // Connection management
-    PGconn* GetConnection();
-    void ReleaseConnection(PGconn* conn);
-    PGconn* CreateNewConnection();
-    void CloseConnection(PGconn* conn);
-    bool TestConnection(PGconn* conn) const;
-
-    // Connection pool management
-    void MaintainPool();
-    void CleanupIdleConnections();
-
-    // Query execution helpers
-    nlohmann::json ExecuteQuery(PGconn* conn, const std::string& sql,
-                                const std::vector<const char*>& params = {});
-    bool ExecuteCommand(PGconn* conn, const std::string& sql,
-                       const std::vector<const char*>& params = {});
-
-    // Result processing
-    nlohmann::json ResultToJson(PGresult* result) const;
-
-    // Error handling
-    void HandleSQLError(PGconn* conn, const std::string& operation);
-    bool ShouldReconnect(PGconn* conn) const;
-
-    // Configuration
-    std::string BuildConnectionString() const;
+    // Core database handle
+    sqlite3* db_;
 
     // Configuration
     nlohmann::json config_;
-    std::string connectionString_;
+    std::string dbPath_;
 
-    // Connection pool
-    mutable std::mutex poolMutex_;
-    std::condition_variable poolCV_;
-    std::vector<Connection> connections_;
-    size_t minConnections_;
-    size_t maxConnections_;
-    std::atomic<bool> poolInitialized_;
-    std::atomic<bool> poolShuttingDown_;
+    // Synchronization
+    mutable std::mutex dbMutex_;
 
     // Statistics
-    struct DatabaseStats {
+    struct SQLiteStats {
         std::atomic<int64_t> totalQueries{0};
         std::atomic<int64_t> failedQueries{0};
         std::atomic<int64_t> totalTransactions{0};
         std::atomic<int64_t> connectionErrors{0};
-        std::atomic<int64_t> connectionPoolHits{0};
-        std::atomic<int64_t> connectionPoolMisses{0};
         std::chrono::steady_clock::time_point startTime;
     };
-    DatabaseStats stats_;
-
-    // Prepared statements
-    std::unordered_map<std::string, PreparedStatement> preparedStatements_;
-    mutable std::mutex preparedStatementsMutex_;
-
-    // Current transaction state (per connection)
-    struct TransactionState {
-        PGconn* conn;
-        bool inTransaction;
-    };
-    std::unordered_map<PGconn*, TransactionState> transactionStates_;
-    mutable std::mutex transactionMutex_;
+    SQLiteStats stats_;
 
     // Last operation results
     int64_t lastInsertId_;
     int affectedRows_;
 
-    // Shard configuration (for compatibility)
+    // Shard configuration (dummy, for compatibility)
     int totalShards_;
+
+    // Helper methods
+    bool OpenDatabase(const std::string& path);
+    void CloseDatabase();
+    bool ExecuteSql(const std::string& sql, std::vector<std::vector<std::string>>* results = nullptr);
+    nlohmann::json ResultSetToJson(const std::vector<std::vector<std::string>>& rows,
+                                   const std::vector<std::string>& columnNames) const;
+    std::string BuildCreateTableSql(const std::string& tableName, const std::string& columns) const;
+    bool TableExists(const std::string& tableName);
 };

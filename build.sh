@@ -35,28 +35,47 @@ sudo apt-get install -y \
     libspdlog-dev \
     nlohmann-json3-dev
 
+# Parse command line arguments for optional database backends
+USE_CITUS=OFF
+USE_SQLITE=OFF
 
-# Optional: Install Citus only if requested
-if [ "$1" = "--with-citus" ]; then
-    echo "Installing Citus extension..."
-    sudo apt-get install -y postgresql-15-citus-12
-    export USE_CITUS=ON
-else
-    echo "Building without Citus (PostgreSQL only)"
-    export USE_CITUS=OFF
-fi
+for arg in "$@"; do
+    case $arg in
+        --with-citus)
+            echo "Installing Citus extension..."
+            sudo apt-get install -y postgresql-15-citus-12
+            USE_CITUS=ON
+            ;;
+        --with-sqlite)
+            echo "Installing SQLite3 development libraries..."
+            sudo apt-get install -y libsqlite3-dev
+            USE_SQLITE=ON
+            ;;
+        *)
+            # ignore unknown
+            ;;
+    esac
+done
 
-#rm -rf build
+# Build configuration
+echo "Building with Citus: $USE_CITUS, SQLite: $USE_SQLITE"
+
+# Clean previous build artifacts
 rm -f CMakeCache.txt Makefile cmake_install.cmake
 rm -rf CMakeFiles
 
-# Build
+# Create build directory and copy config
 mkdir -p build
-#cp -fr config build/config
 rsync -a --delete config/ build/config/
 cd build
-#cmake .. -B . -DUSE_CITUS=${USE_CITUS:-OFF} -DCMAKE_BUILD_TYPE=Release
-cmake .. -B . -DUSE_CITUS=${USE_CITUS:-OFF} -DCMAKE_BUILD_TYPE=Debug
+
+# Run CMake
+cmake .. -B . \
+    -DUSE_CITUS=${USE_CITUS} \
+    -DUSE_SQLITE=${USE_SQLITE} \
+    -DCMAKE_BUILD_TYPE=Debug
+
+# Build
 make -j$(nproc)
 
 if [ -f "gameserver" ]; then
@@ -66,6 +85,6 @@ else
     echo "Check cmake output above for errors"
 fi
 
-# create default database user
+# create default database user (commented out by default)
 #sudo -u postgres psql -c "DROP USER IF EXISTS gameuser;"
 #sudo -u postgres psql -c "CREATE USER gameuser WITH PASSWORD 'password' SUPERUSER;"

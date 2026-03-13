@@ -17,12 +17,15 @@
 
 #ifdef USE_CITUS
 #include "database/CitusClient.hpp"
-class CitusClient;
+//class CitusClient;
 #else
 #include "database/PostgreSqlClient.hpp"
-class PostgreSqlClient;
+//class PostgreSqlClient;
 #endif
 
+#ifdef USE_SQLITE
+#include "database/SQLiteClient.hpp"
+#endif
 
 /**
  * @brief Database Manager Singleton
@@ -33,7 +36,8 @@ class PostgreSqlClient;
 class DbManager {
 public:
     // Database types
-    enum DatabaseType {
+    enum BackendType {
+        SQLITE,
         POSTGRESQL,
         CITUS,
         INVALID
@@ -52,11 +56,17 @@ public:
 
     // Backend Management
     bool SaveGameState(const std::string& key, const nlohmann::json& state);
-    bool SetBackend(DatabaseType type, const nlohmann::json& config);
+    bool SetBackend(BackendType type, const nlohmann::json& config);
     DatabaseBackend* GetBackend() const { return backend_.get(); }
-    DatabaseType GetCurrentType() const { return currentType_; }
-    nlohmann::json Query(const std::string& sql) { return backend_->Query(sql); };
+    BackendType GetCurrentType() const { return currentType_; }
     nlohmann::json GetPlayer(uint64_t playerId){ return backend_->GetPlayer(playerId); };
+
+    nlohmann::json Query(const std::string& sql) { return backend_->Query(sql); };
+    nlohmann::json QueryWithParams(const std::string& sql, const std::vector<std::string>& params)
+    { return backend_->QueryWithParams(sql, params); };
+    bool Execute(const std::string& sql) { return backend_->Execute(sql); };
+    bool ExecuteWithParams(const std::string& sql, const std::vector<std::string>& params)
+    { return backend_->ExecuteWithParams(sql, params); };
 
     bool UpdatePlayerPosition(uint64_t playerId, float x, float y, float z) {
         if (backend_) {
@@ -102,7 +112,7 @@ private:
     static DbManager* instance_;
 
     std::unique_ptr<DatabaseBackend> backend_;
-    DatabaseType currentType_;
+    BackendType currentType_;
     nlohmann::json config_;
     std::atomic<bool> initialized_;
     std::atomic<bool> connected_;
@@ -120,8 +130,8 @@ private:
 
     // Helper methods
     bool ValidateConfiguration(const nlohmann::json& config) const;
-    DatabaseType ParseDatabaseType(const std::string& typeStr) const;
-    std::string DatabaseTypeToString(DatabaseType type) const;
+    BackendType ParseBackendType(const std::string& typeStr) const;
+    std::string BackendTypeToString(BackendType type) const;
 
     bool ExecuteCreateTable(const std::string& tableName, const std::string& createSql);
     bool TableExists(const std::string& tableName);

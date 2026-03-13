@@ -86,7 +86,7 @@
 
   "database": {
     "backend": "postgresql",
-    "host": "localhost",
+    "host": "127.0.0.1",
     "port": 5432,
     "name": "gamedb",
     "user": "gameuser",
@@ -98,7 +98,7 @@
   },
 
   "logging": {
-    "level": "info",
+    "level": "debug",
     "file": "logs/server.log",
     "maxSize": 10485760,
     "backupCount": 5

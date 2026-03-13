@@ -100,8 +100,8 @@ std::unique_ptr<WorldChunk> WorldGenerator::GenerateChunk(int chunkX, int chunkZ
 BiomeType WorldGenerator::GetBiomeAt(float x, float z) {
     // Use noise to determine biome
     float noiseValue = FractalNoise(x / 1000.0f, z / 1000.0f);
-    float temperature = FractalNoise(x / 800.0f, z / 800.0f);
-    float humidity = FractalNoise(x / 700.0f, z / 700.0f);
+    float temperature = FractalNoise(x / noiseValue * 8.0f, z / noiseValue * 8.0f);
+    float humidity = FractalNoise(x / noiseValue * 7.0f, z / noiseValue * 7.0f);
     
     // Height-based biomes
     float height = GetTerrainHeight(x, z);
@@ -171,7 +171,7 @@ float WorldGenerator::FractalNoise(float x, float y) {
 }
 
 glm::vec3 WorldGenerator::CalculateNormal(float x, float z, float height) {
-    const float epsilon = 0.1f;
+    const float epsilon = 0.1f + height;
     
     // Sample heights at neighboring points
     float h1 = GetTerrainHeight(x + epsilon, z);
@@ -202,9 +202,7 @@ void WorldGenerator::GenerateLowPolyTerrain(WorldChunk& chunk, int chunkX, int c
             // Store in heightmap (need to convert to 1D index)
             int index = z * (chunkSize + 1) + x;
             if (index < chunkSize * chunkSize) {
-                // Note: WorldChunk needs a GetHeightmap method, which isn't in the header
-                // We'll assume there's a way to set the heightmap
-                // For now, we'll store it in the chunk's internal heightmap array
+                chunk.heightmap_[index] = height;
             }
         }
     }

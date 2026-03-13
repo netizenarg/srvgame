@@ -31,8 +31,31 @@ bool DbManager::EnsureDatabaseExists(const std::string& configPath) {
         Logger::Error("Failed to initialize DbManager");
         return false;
     }
-    std::string targetDb = config_["name"].get<std::string>();
-    if (!backend_->ConnectToDatabase("postgres")) {
+
+    std::string targetDb = config_["name"].get<std::string>(); // For SQLite this is a file path
+
+    if (currentType_ == SQLITE) { // --- SQLite handling ---
+        std::filesystem::path path(targetDb);
+        std::filesystem::path dir = path.parent_path();
+        if (!dir.empty() &&
+            !std::filesystem::exists(dir)) { // Ensure directory for db file exists
+            std::filesystem::create_directories(dir);
+        }
+        if (!backend_->Connect()) { // Connect – this will create the file if it doesn't exist
+            Logger::Error("Failed to connect to SQLite database at '{}'", targetDb);
+            return false;
+        }
+        if (!CreateDefaultTablesIfNotExist()) { // Create default tables
+            Logger::Critical("Failed to create default tables for SQLite.");
+            backend_->Disconnect();
+            return false;
+        }
+        backend_->Disconnect();
+        Logger::Info("SQLite database file ready and tables created: {}", targetDb);
+        return true;
+    }
+
+    if (!backend_->ConnectToDatabase("postgres")) { // --- PostgreSQL / Citus handling ---
         Logger::Error("Failed to switch to admin database 'postgres'");
         return false;
     }
@@ -40,9 +63,11 @@ bool DbManager::EnsureDatabaseExists(const std::string& configPath) {
         Logger::Error("Failed to connect to admin database 'postgres'");
         return false;
     }
+
     std::string checkQuery = "SELECT 1 FROM pg_database WHERE datname = '" + targetDb + "'";
     auto result = backend_->Query(checkQuery);
     bool exists = (!result.empty() && !result[0].empty());
+
     if (!exists) {
         Logger::Info("Database '{}' does not exist. Creating it...", targetDb);
         std::string createSql = "CREATE DATABASE " + targetDb;
@@ -50,6 +75,7 @@ bool DbManager::EnsureDatabaseExists(const std::string& configPath) {
             createSql += " OWNER " + config_["user"].get<std::string>();
         }
         if (!backend_->Execute(createSql)) {
+            // Re-check in case another process created it concurrently
             result = backend_->Query(checkQuery);
             exists = (!result.empty() && !result[0].empty());
             if (!exists) {
@@ -64,6 +90,8 @@ bool DbManager::EnsureDatabaseExists(const std::string& configPath) {
     } else {
         Logger::Info("Database '{}' already exists.", targetDb);
     }
+
+    // Switch to the target database
     if (!backend_->ConnectToDatabase(targetDb)) {
         Logger::Error("Failed to switch to target database '{}'", targetDb);
         return false;
@@ -72,10 +100,12 @@ bool DbManager::EnsureDatabaseExists(const std::string& configPath) {
         Logger::Error("Failed to connect to target database '{}'", targetDb);
         return false;
     }
+
     if (!CreateDefaultTablesIfNotExist()) {
         Logger::Critical("Failed to create default tables.");
         return false;
     }
+
     Logger::Info("Default SQL tables verified/created successfully.");
     return true;
 }
@@ -94,30 +124,38 @@ bool DbManager::Initialize(const std::string& configPath) {
         Logger::Error("Invalid database configuration");
         return false;
     }
-    std::string typeStr = config_.value("type", "postgresql");
-    currentType_ = ParseDatabaseType(typeStr);
+    std::string backendStr = config_.value("backend", "postgresql");
+    currentType_ = ParseBackendType(backendStr);
     if (currentType_ == INVALID) {
-        Logger::Error("Unknown database type: {}", typeStr);
+        Logger::Error("Unknown database backend: {}", backendStr);
         return false;
     }
     switch (currentType_) {
+        case SQLITE:
+#ifdef USE_SQLITE
+            backend_ = std::make_unique<SQLiteClient>(config_);
+#else
+            Logger::Error("SQLite support not compiled in. Recompile with USE_SQLITE=1");
+            return false;
+#endif
+            break;
         case POSTGRESQL:
             backend_ = std::make_unique<PostgreSqlClient>(config_);
             break;
         case CITUS:
-            #ifdef USE_CITUS
+#ifdef USE_CITUS
             backend_ = std::make_unique<CitusClient>(config_);
-            #else
+#else
             Logger::Error("Citus support not compiled in. Recompile with USE_CITUS=1");
             return false;
-            #endif
+#endif
             break;
         default:
-            Logger::Error("Unsupported database type");
+            Logger::Error("Unsupported database backend");
             return false;
     }
     initialized_ = true;
-    Logger::Info("DbManager initialized with {} backend", DatabaseTypeToString(currentType_));
+    Logger::Info("DbManager initialized with {} backend", BackendTypeToString(currentType_));
     return true;
 }
 
@@ -173,8 +211,8 @@ bool DbManager::LoadConfiguration(const std::string& configPath) {
         nlohmann::json poolConfig = config_.value("pool", nlohmann::json::object());
 
         config_ = {
-            {"type", config_.value("type", "postgresql")},
-            {"host", config_.value("host", "localhost")},
+            {"backend", config_.value("backend", "postgresql")},
+            {"host", config_.value("host", "127.0.0.1")},
             {"port", config_.value("port", 5432)},
             {"name", config_.value("name", "game_db")},
             {"user", config_.value("user", "postgres")},
@@ -202,8 +240,8 @@ bool DbManager::LoadConfiguration(const std::string& configPath) {
 bool DbManager::ValidateConfiguration(const nlohmann::json& config) const {
     try {
         // Check required fields
-        if (!config.contains("host") || !config["host"].is_string()) {
-            Logger::Error("Missing or invalid 'host' in database configuration");
+        if (config.contains("host") && !config["host"].is_string()) {
+            Logger::Error("Invalid 'host' in database configuration (must be string)");
             return false;
         }
 
@@ -218,9 +256,10 @@ bool DbManager::ValidateConfiguration(const nlohmann::json& config) const {
         }
 
         // Validate port
+        // Port is optional (default 5432), but if present must be valid
         if (config.contains("port")) {
             if (!config["port"].is_number()) {
-                Logger::Error("Invalid 'port' in database configuration");
+                Logger::Error("Invalid 'port' in database configuration (must be number)");
                 return false;
             }
             int port = config["port"];
@@ -258,7 +297,7 @@ bool DbManager::ValidateConfiguration(const nlohmann::json& config) const {
     }
 }
 
-bool DbManager::SetBackend(DatabaseType type, const nlohmann::json& config) {
+bool DbManager::SetBackend(BackendType backendType, const nlohmann::json& config) {
     std::lock_guard<std::mutex> lock(instanceMutex_);
 
     if (!ValidateConfiguration(config)) {
@@ -270,7 +309,7 @@ bool DbManager::SetBackend(DatabaseType type, const nlohmann::json& config) {
     std::unique_ptr<DatabaseBackend> oldBackend = std::move(backend_);
 
     // Create new backend
-    switch (type) {
+    switch (backendType) {
         case POSTGRESQL:
             backend_ = std::make_unique<PostgreSqlClient>(config);
             break;
@@ -283,16 +322,16 @@ bool DbManager::SetBackend(DatabaseType type, const nlohmann::json& config) {
 #endif
             break;
         default:
-            Logger::Error("Unsupported database type");
+            Logger::Error("Unsupported database backend");
             backend_ = std::move(oldBackend);
             return false;
     }
 
-    currentType_ = type;
+    currentType_ = backendType;
     config_ = config;
     connected_ = false;
 
-    Logger::Info("Database backend changed to {}", DatabaseTypeToString(type));
+    Logger::Info("Database backend changed to {}", BackendTypeToString(currentType_));
     return true;
 }
 
@@ -333,7 +372,7 @@ bool DbManager::Connect() {
     try {
         if (backend_->Connect()) {
             connected_ = true;
-            Logger::Info("Connected to {} database", DatabaseTypeToString(currentType_));
+            Logger::Info("Connected to {} database", BackendTypeToString(currentType_));
             return true;
         } else {
             Logger::Error("Failed to connect to database");
@@ -397,7 +436,7 @@ nlohmann::json DbManager::GetStatistics() const {
     nlohmann::json stats;
 
     // Basic info
-    stats["type"] = DatabaseTypeToString(currentType_);
+    stats["backend"] = BackendTypeToString(currentType_);
     stats["initialized"] = initialized_.load();
     stats["connected"] = connected_.load();
 
@@ -431,7 +470,7 @@ void DbManager::PrintStatistics() const {
     auto stats = GetStatistics();
 
     Logger::Info("=== Database Statistics ===");
-    Logger::Info("  Type: {}", stats["type"].get<std::string>());
+    Logger::Info("  Backend: {}", stats["backend"].get<std::string>());
     Logger::Info("  Status: {}", stats["connected"].get<bool>() ? "Connected" : "Disconnected");
     Logger::Info("  Uptime: {} seconds", stats["uptime_seconds"].get<int64_t>());
     Logger::Info("  ");
@@ -524,9 +563,9 @@ bool DbManager::CheckMigrationStatus() {
             Logger::Info("=== Migration Status ===");
             for (const auto& row : result) {
                 Logger::Info("  Version {}: {} (applied at {})",
-                           row["version"].get<int>(),
-                           row["name"].get<std::string>(),
-                           row["applied_at"].get<std::string>());
+                    row["version"].get<int>(),
+                    row["name"].get<std::string>(),
+                    row["applied_at"].get<std::string>());
             }
             Logger::Info("=======================");
         }
@@ -541,19 +580,89 @@ bool DbManager::CheckMigrationStatus() {
 
 bool DbManager::RollbackMigration(int version) {
     if (!IsConnected()) {
+        Logger::Error("Cannot rollback migration: not connected to database");
         return false;
     }
 
+    // Path to migrations directory – could be configurable
+    const std::string migrationsDir = "migrations/";
+    std::string downFileName = "U" + std::to_string(version) + "*.sql"; // wildcard for description
+
     try {
-        Logger::Info("Rolling back migration version {}...", version);
+        // Find the actual down file (there should be exactly one)
+        std::vector<std::filesystem::path> downFiles;
+        for (const auto& entry : std::filesystem::directory_iterator(migrationsDir)) {
+            if (entry.is_regular_file()) {
+                std::string filename = entry.path().filename().string();
+                if (filename.rfind("U" + std::to_string(version), 0) == 0 &&
+                    filename.size() > 3 && filename.substr(filename.size() - 4) == ".sql") {
+                    downFiles.push_back(entry.path());
+                    }
+            }
+        }
 
-        // TODO: Implement rollback logic based on your migration system
-        // This would involve finding and executing the down.sql for the given version
+        if (downFiles.empty()) {
+            Logger::Error("No down migration found for version {}", version);
+            return false;
+        }
+        if (downFiles.size() > 1) {
+            Logger::Error("Multiple down migrations found for version {}: {}", version, downFiles.size());
+            return false;
+        }
 
-        backend_->Execute("DELETE FROM schema_migrations WHERE version = " + std::to_string(version));
+        // Read the down SQL script
+        std::ifstream file(downFiles[0]);
+        if (!file.is_open()) {
+            Logger::Error("Failed to open down migration file: {}", downFiles[0].string());
+            return false;
+        }
+        std::stringstream buffer;
+        buffer << file.rdbuf();
+        std::string downSql = buffer.str();
 
-        Logger::Info("Migration version {} rolled back", version);
-        return true;
+        Logger::Info("Rolling back migration version {} using file: {}", version, downFiles[0].string());
+
+        // Execute the down script within a transaction
+        if (!backend_->BeginTransaction()) {
+            Logger::Error("Failed to begin transaction for rollback");
+            return false;
+        }
+
+        bool success = false;
+        try {
+            // Execute the down SQL (may contain multiple statements)
+            // Simple approach: execute whole script. If your backend doesn't support multiple statements,
+            // you may need to split by ';'. We'll assume Execute handles batches.
+            if (backend_->Execute(downSql)) {
+                // Remove the migration record
+                std::string deleteSql = "DELETE FROM schema_migrations WHERE version = " + std::to_string(version);
+                if (backend_->Execute(deleteSql)) {
+                    success = true;
+                } else {
+                    Logger::Error("Failed to delete migration record for version {}", version);
+                }
+            } else {
+                Logger::Error("Failed to execute down migration SQL for version {}", version);
+            }
+
+            if (success) {
+                if (!backend_->CommitTransaction()) {
+                    Logger::Error("Failed to commit transaction during rollback");
+                    success = false;
+                }
+            } else {
+                backend_->RollbackTransaction();
+            }
+        } catch (const std::exception& e) {
+            Logger::Error("Exception during rollback: {}", e.what());
+            backend_->RollbackTransaction();
+            return false;
+        }
+
+        if (success) {
+            Logger::Info("Migration version {} rolled back successfully", version);
+        }
+        return success;
 
     } catch (const std::exception& e) {
         Logger::Error("Rollback error: {}", e.what());
@@ -561,11 +670,13 @@ bool DbManager::RollbackMigration(int version) {
     }
 }
 
-DbManager::DatabaseType DbManager::ParseDatabaseType(const std::string& typeStr) const {
-    std::string lowerType = typeStr;
+DbManager::BackendType DbManager::ParseBackendType(const std::string& backendStr) const {
+    std::string lowerType = backendStr;
     std::transform(lowerType.begin(), lowerType.end(), lowerType.begin(), ::tolower);
 
-    if (lowerType == "postgresql" || lowerType == "postgres") {
+    if (lowerType == "sqlite") {
+        return SQLITE;
+    } else if (lowerType == "postgresql" || lowerType == "postgres") {
         return POSTGRESQL;
     } else if (lowerType == "citus") {
         return CITUS;
@@ -574,8 +685,9 @@ DbManager::DatabaseType DbManager::ParseDatabaseType(const std::string& typeStr)
     return INVALID;
 }
 
-std::string DbManager::DatabaseTypeToString(DatabaseType type) const {
-    switch (type) {
+std::string DbManager::BackendTypeToString(BackendType backendType) const {
+    switch (backendType) {
+        case SQLITE: return "SQLite";
         case POSTGRESQL: return "PostgreSQL";
         case CITUS: return "Citus";
         default: return "Unknown";
@@ -583,31 +695,37 @@ std::string DbManager::DatabaseTypeToString(DatabaseType type) const {
 }
 
 bool DbManager::TableExists(const std::string& tableName) {
-    std::string sql = "SELECT EXISTS ("
-    "SELECT FROM information_schema.tables "
-    "WHERE table_schema = 'public' AND table_name = '" + tableName + "'"
-    ") AS exists;";
-        try {
-            nlohmann::json result = backend_->Query(sql);
+    try {
+        nlohmann::json result;
+        if (currentType_ == SQLITE) { // SQLite: query sqlite_master
+            std::string sql = "SELECT name FROM sqlite_master WHERE type='table' AND name='" +
+            EscapeString(tableName) + "';";
+            result = backend_->Query(sql);
+            return !result.empty();
+        } else { // PostgreSQL / Citus: use information_schema
+            std::string sql = "SELECT EXISTS ("
+            "SELECT FROM information_schema.tables "
+            "WHERE table_schema = 'public' AND table_name = '" +
+            EscapeString(tableName) + "') AS exists;";
+            result = backend_->Query(sql);
             if (result.empty() || !result[0].contains("exists")) {
                 return false;
             }
-
             const auto& existsVal = result[0]["exists"];
             if (existsVal.is_boolean()) {
                 return existsVal.get<bool>();
             } else if (existsVal.is_string()) {
                 std::string str = existsVal.get<std::string>();
-                // PostgreSQL returns 't' for true, 'f' for false
                 return str == "t" || str == "true" || str == "1";
             } else if (existsVal.is_number()) {
                 return existsVal.get<int>() != 0;
             }
             return false;
-        } catch (const std::exception& e) {
-            Logger::Error("Failed to check existence of table {}: {}", tableName, e.what());
-            return false;
         }
+    } catch (const std::exception& e) {
+        Logger::Error("Failed to check existence of table {}: {}", tableName, e.what());
+        return false;
+    }
 }
 
 bool DbManager::ExecuteCreateTable(const std::string& tableName, const std::string& createSql) {
@@ -618,20 +736,12 @@ bool DbManager::ExecuteCreateTable(const std::string& tableName, const std::stri
 
     Logger::Info("Creating table '{}'...", tableName);
     try {
-        backend_->Query(createSql);
+        backend_->Execute(createSql);
         Logger::Info("Table '{}' created successfully.", tableName);
         return true;
     } catch (const std::exception& e) {
-        std::string error = e.what();
-        // Check for PostgreSQL "duplicate key" error on pg_type (error code 23505)
-        // This can happen when two sessions create the same table concurrently.
-        if (error.find("23505") != std::string::npos ||
-            error.find("duplicate key value") != std::string::npos) {
-            Logger::Warn("Table '{}' was created concurrently by another process; treating as success.", tableName);
-        return true;
-            }
-            Logger::Error("Failed to create table '{}': {}", tableName, e.what());
-            return false;
+        Logger::Error("Failed to create table '{}': {}", tableName, e.what());
+        return false;
     }
 }
 
@@ -642,99 +752,195 @@ bool DbManager::CreateDefaultTablesIfNotExist() {
     }
 
     bool success = true;
-
-    success &= ExecuteCreateTable("players", R"(
+// SQLite versions (use TEXT for JSON, INTEGER for timestamps)
+    if (currentType_ == SQLITE) {
+        success &= ExecuteCreateTable("players", R"(
         CREATE TABLE IF NOT EXISTS players (
-            id BIGINT PRIMARY KEY,
-            data JSONB NOT NULL,
-            created_at TIMESTAMPTZ DEFAULT NOW(),
-            updated_at TIMESTAMPTZ DEFAULT NOW()
+            id INTEGER PRIMARY KEY,
+            data TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
         );
-        CREATE INDEX IF NOT EXISTS idx_players_updated ON players(updated_at);
-    )");
+        )");
 
-    success &= ExecuteCreateTable("player_inventory", R"(
+        success &= ExecuteCreateTable("player_inventory", R"(
         CREATE TABLE IF NOT EXISTS player_inventory (
-            player_id BIGINT REFERENCES players(id) ON DELETE CASCADE,
-            slot INT NOT NULL,
-            item_id BIGINT NOT NULL,
-            quantity INT NOT NULL DEFAULT 1,
-            data JSONB,  -- additional item-specific data (durability, enchantments, etc.)
-            PRIMARY KEY (player_id, slot)
+            player_id INTEGER NOT NULL,
+            slot INTEGER NOT NULL,
+            item_id INTEGER NOT NULL,
+            quantity INTEGER NOT NULL DEFAULT 1,
+            data TEXT,
+            PRIMARY KEY (player_id, slot),
+            FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
         );
-        CREATE INDEX IF NOT EXISTS idx_inventory_player ON player_inventory(player_id);
-    )");
+        )");
+        Execute("CREATE INDEX IF NOT EXISTS idx_inventory_player ON player_inventory(player_id);");
 
-    success &= ExecuteCreateTable("player_skills", R"(
+        success &= ExecuteCreateTable("player_skills", R"(
         CREATE TABLE IF NOT EXISTS player_skills (
-            player_id BIGINT REFERENCES players(id) ON DELETE CASCADE,
-            skill_id VARCHAR(64) NOT NULL,
-            level INT NOT NULL DEFAULT 1,
-            experience FLOAT NOT NULL DEFAULT 0,
-            data JSONB,
-            PRIMARY KEY (player_id, skill_id)
+            player_id INTEGER NOT NULL,
+            skill_id TEXT NOT NULL,
+            level INTEGER NOT NULL DEFAULT 1,
+            experience REAL NOT NULL DEFAULT 0,
+            data TEXT,
+            PRIMARY KEY (player_id, skill_id),
+            FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
         );
-        CREATE INDEX IF NOT EXISTS idx_skills_player ON player_skills(player_id);
-    )");
+        )");
+        Execute("CREATE INDEX IF NOT EXISTS idx_skills_player ON player_skills(player_id);");
 
-    success &= ExecuteCreateTable("player_quests", R"(
+        success &= ExecuteCreateTable("player_quests", R"(
         CREATE TABLE IF NOT EXISTS player_quests (
-            player_id BIGINT REFERENCES players(id) ON DELETE CASCADE,
-            quest_id BIGINT NOT NULL,
-            state INT NOT NULL,  -- QuestState enum as integer
-            progress JSONB NOT NULL,
-            started_at TIMESTAMPTZ,
-            completed_at TIMESTAMPTZ,
-            PRIMARY KEY (player_id, quest_id)
+            player_id INTEGER NOT NULL,
+            quest_id INTEGER NOT NULL,
+            state INTEGER NOT NULL,
+            progress TEXT NOT NULL,
+            started_at TEXT,
+            completed_at TEXT,
+            PRIMARY KEY (player_id, quest_id),
+            FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
         );
-        CREATE INDEX IF NOT EXISTS idx_quests_player ON player_quests(player_id);
-        CREATE INDEX IF NOT EXISTS idx_quests_state ON player_quests(state);
-    )");
+        )");
+        Execute("CREATE INDEX IF NOT EXISTS idx_quests_player ON player_quests(player_id);");
+        Execute("CREATE INDEX IF NOT EXISTS idx_quests_state ON player_quests(state);");
 
-    success &= ExecuteCreateTable("world_chunks", R"(
+        success &= ExecuteCreateTable("world_chunks", R"(
         CREATE TABLE IF NOT EXISTS world_chunks (
-            chunk_x INT NOT NULL,
-            chunk_z INT NOT NULL,
-            biome INT NOT NULL,
-            data JSONB NOT NULL,  -- serialized WorldChunk data
-            generated_at TIMESTAMPTZ DEFAULT NOW(),
+            chunk_x INTEGER NOT NULL,
+            chunk_z INTEGER NOT NULL,
+            biome INTEGER NOT NULL,
+            data TEXT NOT NULL,
+            generated_at TEXT DEFAULT (datetime('now')),
             PRIMARY KEY (chunk_x, chunk_z)
         );
-        CREATE INDEX IF NOT EXISTS idx_chunks_coords ON world_chunks(chunk_x, chunk_z);
-    )");
+        )");
+        Execute("CREATE INDEX IF NOT EXISTS idx_chunks_coords ON world_chunks(chunk_x, chunk_z);");
 
-    success &= ExecuteCreateTable("npcs", R"(
+        success &= ExecuteCreateTable("npcs", R"(
         CREATE TABLE IF NOT EXISTS npcs (
-            id BIGINT PRIMARY KEY,
-            type INT NOT NULL,
-            position JSONB NOT NULL,  -- {x, y, z}
-            level INT NOT NULL DEFAULT 1,
-            data JSONB NOT NULL,      -- stats, AI state, loot table, etc.
-            created_at TIMESTAMPTZ DEFAULT NOW(),
-            updated_at TIMESTAMPTZ DEFAULT NOW()
+            id INTEGER PRIMARY KEY,
+            type INTEGER NOT NULL,
+            position TEXT NOT NULL,
+            level INTEGER NOT NULL DEFAULT 1,
+            data TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
         );
-        CREATE INDEX IF NOT EXISTS idx_npcs_type ON npcs(type);
-    )");
+        )");
+        Execute("CREATE INDEX IF NOT EXISTS idx_npcs_type ON npcs(type);");
 
-    success &= ExecuteCreateTable("loot_tables", R"(
+        success &= ExecuteCreateTable("loot_tables", R"(
         CREATE TABLE IF NOT EXISTS loot_tables (
-            table_id VARCHAR(64) PRIMARY KEY,
-            name VARCHAR(128) NOT NULL,
-            data JSONB NOT NULL,  -- entries, drop chances, etc.
-            created_at TIMESTAMPTZ DEFAULT NOW()
+            table_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            data TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now'))
         );
-    )");
+        )");
 
-    success &= ExecuteCreateTable("game_state", R"(
+        success &= ExecuteCreateTable("game_state", R"(
         CREATE TABLE IF NOT EXISTS game_state (
-            key VARCHAR(64) PRIMARY KEY,
-            value JSONB NOT NULL,
-            updated_at TIMESTAMPTZ DEFAULT NOW()
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TEXT DEFAULT (datetime('now'))
         );
-    )");
+        )");
+    }
+    else // PostgreSQL / Citus versions (existing code, unchanged)
+    {
+        success &= ExecuteCreateTable("players", R"(
+            CREATE TABLE IF NOT EXISTS players (
+                id BIGINT PRIMARY KEY,
+                data JSONB NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_players_updated ON players(updated_at);
+        )");
+
+        success &= ExecuteCreateTable("player_inventory", R"(
+            CREATE TABLE IF NOT EXISTS player_inventory (
+                player_id BIGINT REFERENCES players(id) ON DELETE CASCADE,
+                slot INT NOT NULL,
+                item_id BIGINT NOT NULL,
+                quantity INT NOT NULL DEFAULT 1,
+                data JSONB,  -- additional item-specific data (durability, enchantments, etc.)
+                PRIMARY KEY (player_id, slot)
+            );
+            CREATE INDEX IF NOT EXISTS idx_inventory_player ON player_inventory(player_id);
+        )");
+
+        success &= ExecuteCreateTable("player_skills", R"(
+            CREATE TABLE IF NOT EXISTS player_skills (
+                player_id BIGINT REFERENCES players(id) ON DELETE CASCADE,
+                skill_id VARCHAR(64) NOT NULL,
+                level INT NOT NULL DEFAULT 1,
+                experience FLOAT NOT NULL DEFAULT 0,
+                data JSONB,
+                PRIMARY KEY (player_id, skill_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_skills_player ON player_skills(player_id);
+        )");
+
+        success &= ExecuteCreateTable("player_quests", R"(
+            CREATE TABLE IF NOT EXISTS player_quests (
+                player_id BIGINT REFERENCES players(id) ON DELETE CASCADE,
+                quest_id BIGINT NOT NULL,
+                state INT NOT NULL,  -- QuestState enum as integer
+                progress JSONB NOT NULL,
+                started_at TIMESTAMPTZ,
+                completed_at TIMESTAMPTZ,
+                PRIMARY KEY (player_id, quest_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_quests_player ON player_quests(player_id);
+            CREATE INDEX IF NOT EXISTS idx_quests_state ON player_quests(state);
+        )");
+
+        success &= ExecuteCreateTable("world_chunks", R"(
+            CREATE TABLE IF NOT EXISTS world_chunks (
+                chunk_x INT NOT NULL,
+                chunk_z INT NOT NULL,
+                biome INT NOT NULL,
+                data JSONB NOT NULL,  -- serialized WorldChunk data
+                generated_at TIMESTAMPTZ DEFAULT NOW(),
+                PRIMARY KEY (chunk_x, chunk_z)
+            );
+            CREATE INDEX IF NOT EXISTS idx_chunks_coords ON world_chunks(chunk_x, chunk_z);
+        )");
+
+        success &= ExecuteCreateTable("npcs", R"(
+            CREATE TABLE IF NOT EXISTS npcs (
+                id BIGINT PRIMARY KEY,
+                type INT NOT NULL,
+                position JSONB NOT NULL,  -- {x, y, z}
+                level INT NOT NULL DEFAULT 1,
+                data JSONB NOT NULL,      -- stats, AI state, loot table, etc.
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_npcs_type ON npcs(type);
+        )");
+
+        success &= ExecuteCreateTable("loot_tables", R"(
+            CREATE TABLE IF NOT EXISTS loot_tables (
+                table_id VARCHAR(64) PRIMARY KEY,
+                name VARCHAR(128) NOT NULL,
+                data JSONB NOT NULL,  -- entries, drop chances, etc.
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            );
+        )");
+
+        success &= ExecuteCreateTable("game_state", R"(
+            CREATE TABLE IF NOT EXISTS game_state (
+                key VARCHAR(64) PRIMARY KEY,
+                value JSONB NOT NULL,
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            );
+        )");
+    }
 
 #ifdef USE_CITUS
-    if (currentType_ == DatabaseType::CITUS) {
+    if (currentType_ == BackendType::CITUS) {
         try {
             // Distribute tables by player_id or appropriate shard key
             backend_->Query("SELECT create_distributed_table('players', 'id');");

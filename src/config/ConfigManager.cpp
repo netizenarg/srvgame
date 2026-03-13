@@ -45,12 +45,12 @@ bool ConfigManager::ReloadConfig() {
 }
 
 bool ConfigManager::ValidateConfig() const {
+    Logger::Info("Validate config started...");
     try {
-        // Validate server section
-        if (!config_.contains("server")) {
+        if (config_.contains("server"))
+            Logger::Info("Validate config 'server' section...");
+        else
             throw std::runtime_error("Missing 'server' section");
-        }
-
         const auto& server = config_["server"];
         if (!server.contains("host") || !server["host"].is_string()) {
             throw std::runtime_error("Invalid or missing 'server.host'");
@@ -62,57 +62,51 @@ bool ConfigManager::ValidateConfig() const {
             throw std::runtime_error("Invalid server port");
         }
 
-        // Validate database section
-        if (!config_.contains("database")) {
+        if (config_.contains("database"))
+            Logger::Info("Validate config 'database' section...");
+        else
             throw std::runtime_error("Missing 'database' section");
-        }
-
         const auto& database = config_["database"];
         if (!database.contains("host") || !database["host"].is_string()) {
-            throw std::runtime_error("Invalid or missing 'database.host'");
+            Logger::Warn("database.host not set, will use default 127.0.0.1");
         }
         if (!database.contains("port") || !database["port"].is_number_unsigned()) {
-            throw std::runtime_error("Invalid or missing 'database.port'");
+            Logger::Warn("database.port not set, will use default 5432");
         }
         if (!database.contains("name") || !database["name"].is_string()) {
             throw std::runtime_error("Invalid or missing 'database.name'");
         }
 
-        // Validate game section
-        if (!config_.contains("game")) {
+        if (config_.contains("game"))
+            Logger::Info("Validate config 'game' section...");
+        else
             throw std::runtime_error("Missing 'game' section");
-        }
-
         const auto& game = config_["game"];
         if (!game.contains("max_players_per_session") ||
             !game["max_players_per_session"].is_number_unsigned()) {
             throw std::runtime_error("Invalid or missing 'game.max_players_per_session'");
             }
 
-            // Validate logging section
-            if (!config_.contains("logging")) {
-                throw std::runtime_error("Missing 'logging' section");
-            }
-
-            const auto& logging = config_["logging"];
+        if (config_.contains("logging"))
+            Logger::Info("Validate config 'logging' section...");
+        else
+            throw std::runtime_error("Missing 'logging' section");
+        const auto& logging = config_["logging"];
         if (!logging.contains("level") || !logging["level"].is_string()) {
             throw std::runtime_error("Invalid or missing 'logging.level'");
         }
-
         // Validate log levels
         const std::string logLevel = logging["level"];
         const std::vector<std::string> validLevels = {
             "trace", "debug", "info", "warn", "error", "critical", "off"
         };
-
         std::string lowerLevel = logLevel;
         std::transform(lowerLevel.begin(), lowerLevel.end(), lowerLevel.begin(), ::tolower);
-
         if (std::find(validLevels.begin(), validLevels.end(), lowerLevel) == validLevels.end()) {
             throw std::runtime_error("Invalid log level: " + logLevel);
         }
 
-        Logger::Debug("Configuration validation passed");
+        Logger::Info("Configuration validation passed");
         return true;
 
     } catch (const std::exception& e) {
@@ -228,8 +222,8 @@ std::string ConfigManager::GetDatabaseHost() const {
     try {
         return config_.at("database").at("host").get<std::string>();
     } catch (const std::exception& e) {
-        Logger::Warn("Failed to get database host, using default: localhost");
-        return "localhost";
+        Logger::Warn("Failed to get database host, using default: 127.0.0.1");
+        return "127.0.0.1";
     }
 }
 
@@ -507,12 +501,11 @@ bool ConfigManager::GetConsoleOutput() const {
 int ConfigManager::GetInt(const std::string& key, int defaultValue) const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
-        // Convert dots to forward slashes for JSON pointer
         std::string keyPath = key;
         std::replace(keyPath.begin(), keyPath.end(), '.', '/');
-        nlohmann::json::json_pointer ptr("/" + keyPath);
-        return config_.at(ptr).get<int>();
+        return config_.at(nlohmann::json::json_pointer("/" + keyPath)).get<int>();
     } catch (const std::exception& e) {
+        Logger::Warn("Failed to get int for key '{}': {}", key, e.what());
         return defaultValue;
     }
 }
@@ -522,9 +515,9 @@ float ConfigManager::GetFloat(const std::string& key, float defaultValue) const 
     try {
         std::string keyPath = key;
         std::replace(keyPath.begin(), keyPath.end(), '.', '/');
-        nlohmann::json::json_pointer ptr("/" + keyPath);
-        return config_.at(ptr).get<float>();
+        return config_.at(nlohmann::json::json_pointer("/" + keyPath)).get<float>();
     } catch (const std::exception& e) {
+        Logger::Warn("Failed to get float for key '{}': {}", key, e.what());
         return defaultValue;
     }
 }
@@ -534,9 +527,9 @@ bool ConfigManager::GetBool(const std::string& key, bool defaultValue) const {
     try {
         std::string keyPath = key;
         std::replace(keyPath.begin(), keyPath.end(), '.', '/');
-        nlohmann::json::json_pointer ptr("/" + keyPath);
-        return config_.at(ptr).get<bool>();
+        return config_.at(nlohmann::json::json_pointer("/" + keyPath)).get<bool>();
     } catch (const std::exception& e) {
+        Logger::Warn("Failed to get bool for key '{}': {}", key, e.what());
         return defaultValue;
     }
 }
@@ -546,9 +539,9 @@ std::string ConfigManager::GetString(const std::string& key, const std::string& 
     try {
         std::string keyPath = key;
         std::replace(keyPath.begin(), keyPath.end(), '.', '/');
-        nlohmann::json::json_pointer ptr("/" + keyPath);
-        return config_.at(ptr).get<std::string>();
+        return config_.at(nlohmann::json::json_pointer("/" + keyPath)).get<std::string>();
     } catch (const std::exception& e) {
+        Logger::Warn("Failed to get string for key '{}': {}", key, e.what());
         return defaultValue;
     }
 }
@@ -559,8 +552,7 @@ std::vector<std::string> ConfigManager::GetStringArray(const std::string& key) c
     try {
         std::string keyPath = key;
         std::replace(keyPath.begin(), keyPath.end(), '.', '/');
-        nlohmann::json::json_pointer ptr("/" + keyPath);
-        auto& arr = config_.at(ptr);
+        auto& arr = config_.at(nlohmann::json::json_pointer("/" + keyPath));
         if (arr.is_array()) {
             for (const auto& item : arr) {
                 if (item.is_string()) {
@@ -581,9 +573,9 @@ nlohmann::json ConfigManager::GetJson(const std::string& key) const {
     try {
         std::string keyPath = key;
         std::replace(keyPath.begin(), keyPath.end(), '.', '/');
-        nlohmann::json::json_pointer ptr("/" + keyPath);
-        return config_.at(ptr);
+        return config_.at(nlohmann::json::json_pointer("/" + keyPath));
     } catch (const std::exception& e) {
+        Logger::Warn("Failed to get json for key '{}': {}", key, e.what());
         return nlohmann::json();
     }
 }
@@ -593,9 +585,9 @@ bool ConfigManager::HasKey(const std::string& key) const {
     try {
         std::string keyPath = key;
         std::replace(keyPath.begin(), keyPath.end(), '.', '/');
-        nlohmann::json::json_pointer ptr("/" + keyPath);
-        return config_.contains(ptr);
+        return config_.contains(nlohmann::json::json_pointer("/" + keyPath));
     } catch (const std::exception& e) {
+        Logger::Warn("Failed HasKey for key '{}': {}", key, e.what());
         return false;
     }
 }
