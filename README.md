@@ -1,5 +1,9 @@
 # Game Server with Scripting
 
+![image](https://private-user-images.githubusercontent.com/29286243/565547709-32033803-16ea-421b-b2f0-f5fa27ba8107.gif "test client small screen moving")
+![image](https://private-user-images.githubusercontent.com/29286243/565547944-293b2ab0-f902-433e-80db-a9c57e410e17.png "test client screenshot night")
+![image](https://private-user-images.githubusercontent.com/29286243/565547953-1bba216f-a353-4f64-8ab2-5e669fc19c71.png "test client screenshot day")
+
 ## Overview
 
 GameServer is a sophisticated, game server designed for massively multiplayer online games. Built with a C++ core and extensible Python scripting, it provides solution for managing persistent game worlds with real-time player interactions, advanced networking, and comprehensive monitoring capabilities.
