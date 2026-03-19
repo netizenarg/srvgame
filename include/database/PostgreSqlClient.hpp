@@ -39,7 +39,7 @@ public:
         int paramCount;
     };
 
-    PostgreSqlClient(const nlohmann::json& config);
+    PostgreSqlClient(const nlohmann::json& config, const SQLProvider& sqlProvider);
     virtual ~PostgreSqlClient();
 
     // Connection Management
@@ -129,6 +129,8 @@ public:
     nlohmann::json QueryDatabase(const std::string& sql) { return Query(sql); }
 
 private:
+    const SQLProvider& sqlProvider_;
+
     // Connection management
     PGconn* GetConnection();
     void ReleaseConnection(PGconn* conn);

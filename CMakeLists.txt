@@ -185,6 +185,9 @@ if(USE_SQLITE)
     target_compile_definitions(gameserver PRIVATE USE_SQLITE=1)
 endif()
 
+add_definitions(-DUSE_POSTGRESQL=1)
+add_definitions(-DUSE_SPDLOG=1)
+
 # Link libraries
 target_link_libraries(gameserver PRIVATE
     ${OPENGL_LIBRARIES}

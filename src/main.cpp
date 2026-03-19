@@ -4,11 +4,17 @@
 #include <iostream>
 #include <thread>
 
-#include "config/ConfigManager.hpp"
+//#define USE_SPDLOG 1
 #include "logging/Logger.hpp"
+
+#include "config/ConfigManager.hpp"
+
 #include "network/GameServer.hpp"
 #include "process/ProcessPool.hpp"
+
+//#define USE_POSTGRESQL 1
 #include "database/DbManager.hpp"
+
 #include "game/GameLogic.hpp"
 
 

@@ -2,7 +2,11 @@
 
 #include <nlohmann/json.hpp>
 
+#ifdef USE_SPDLOG
 #include "logging/Logger.hpp"
+#endif
+
+#include "database/SQLProvider.hpp"
 
 class DatabaseBackend {
 public:

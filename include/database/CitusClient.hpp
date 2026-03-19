@@ -19,7 +19,7 @@ class CitusClient : public PostgreSqlClient {
 public:
     static CitusClient& GetInstance();
 
-    CitusClient(const nlohmann::json& config);
+    CitusClient(const nlohmann::json& config, const SQLProvider& sqlProvider);
     virtual ~CitusClient();
 
     // Citus-specific cluster management
@@ -95,6 +95,7 @@ public:
 private:
     static std::mutex instanceMutex_;
     static CitusClient* instance_;
+    const SQLProvider& sqlProvider_;
 
     // Citus-specific configuration
     bool citusEnabled_;
