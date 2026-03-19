@@ -64,9 +64,10 @@ echo "Building with Citus: $USE_CITUS, SQLite: $USE_SQLITE"
 rm -f CMakeCache.txt Makefile cmake_install.cmake
 rm -rf CMakeFiles
 
-# Create build directory and copy config
+# Create build directory and copy related folders
 mkdir -p build
 rsync -a --delete config/ build/config/
+rsync -a --delete dbschema/ build/dbschema/
 cd build
 
 # Run CMake

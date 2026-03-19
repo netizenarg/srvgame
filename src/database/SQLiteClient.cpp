@@ -2,19 +2,15 @@
 
 #include "database/SQLiteClient.hpp"
 
-#include <filesystem>
-#include <fstream>
-#include <iomanip>
-#include <sstream>
-
 // =============== Constructor and Destructor ===============
-SQLiteClient::SQLiteClient(const nlohmann::json& config)
+SQLiteClient::SQLiteClient(const nlohmann::json& config, const SQLProvider& sqlProvider)
     : db_(nullptr),
+      sqlProvider_(sqlProvider),
       config_(config),
       lastInsertId_(0),
-      affectedRows_(0) {
-
-    // Determine database file path: try "name" (from DbManager), fallback to "file", then default
+      affectedRows_(0)
+{
+    // Determine database file path
     if (config.contains("file") && config["file"].is_string()) {
         dbPath_ = config["file"].get<std::string>();
     } else if (config.contains("name") && config["name"].is_string()) {
@@ -22,11 +18,8 @@ SQLiteClient::SQLiteClient(const nlohmann::json& config)
     } else {
         dbPath_ = "game.db";
     }
-
-    // Shards configuration (SQLite doesn't support sharding, but keep for interface)
     int shards = config.value("shards", 1);
     totalShards_ = (shards > 0) ? shards : 1;
-
     stats_.startTime = std::chrono::steady_clock::now();
     Logger::Debug("SQLiteClient created with database file: {}", dbPath_);
 }
@@ -39,31 +32,22 @@ SQLiteClient::~SQLiteClient() {
 // =============== Connection Management ===============
 bool SQLiteClient::Connect() {
     std::lock_guard<std::mutex> lock(dbMutex_);
+    if (db_) return true;
 
-    if (db_) {
-        // Already connected
-        return true;
-    }
-
-    // Ensure the directory exists
     std::filesystem::path path(dbPath_);
     std::filesystem::path dir = path.parent_path();
     if (!dir.empty() && !std::filesystem::exists(dir)) {
         std::filesystem::create_directories(dir);
     }
 
-    // Open the database
     int rc = sqlite3_open(dbPath_.c_str(), &db_);
     if (rc != SQLITE_OK) {
         Logger::Error("Failed to open SQLite database '{}': {}", dbPath_, sqlite3_errmsg(db_));
-        if (db_) {
-            sqlite3_close(db_);
-            db_ = nullptr;
-        }
+        if (db_) sqlite3_close(db_);
+        db_ = nullptr;
         return false;
     }
 
-    // Enable foreign keys
     char* errMsg = nullptr;
     rc = sqlite3_exec(db_, "PRAGMA foreign_keys = ON;", nullptr, nullptr, &errMsg);
     if (rc != SQLITE_OK) {
@@ -71,7 +55,6 @@ bool SQLiteClient::Connect() {
         sqlite3_free(errMsg);
     }
 
-    // Enable JSON1 extension (if available)
     rc = sqlite3_exec(db_, "SELECT json('{}');", nullptr, nullptr, &errMsg);
     if (rc != SQLITE_OK) {
         Logger::Warn("JSON1 extension not available: {}", errMsg ? errMsg : "unknown error");
@@ -83,7 +66,6 @@ bool SQLiteClient::Connect() {
 }
 
 bool SQLiteClient::ConnectToDatabase(const std::string& dbname) {
-    // SQLite: dbname is the file path; we can change the file.
     Disconnect();
     dbPath_ = dbname;
     return Connect();
@@ -111,13 +93,10 @@ bool SQLiteClient::IsConnected() const {
 bool SQLiteClient::CheckHealth() {
     std::lock_guard<std::mutex> lock(dbMutex_);
     if (!db_) return false;
-    // Execute a simple query to test
     const char* sql = "SELECT 1;";
     sqlite3_stmt* stmt = nullptr;
     int rc = sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
-    if (rc != SQLITE_OK) {
-        return false;
-    }
+    if (rc != SQLITE_OK) return false;
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
     return rc == SQLITE_ROW;
@@ -129,13 +108,11 @@ void SQLiteClient::ReconnectAll() {
 
 // =============== Connection Pool Management (dummy) ===============
 bool SQLiteClient::InitializeConnectionPool(size_t /*minConnections*/, size_t /*maxConnections*/) {
-    Logger::Debug("SQLiteClient: connection pool not implemented (single connection used)");
-    return true; // no-op, always succeeds
+    Logger::Debug("SQLiteClient: connection pool not implemented");
+    return true;
 }
 
-void SQLiteClient::ReleaseConnectionPool() {
-    // no-op
-}
+void SQLiteClient::ReleaseConnectionPool() {}
 
 size_t SQLiteClient::GetActiveConnections() const {
     return db_ ? 1 : 0;
@@ -156,36 +133,27 @@ bool SQLiteClient::ExecuteSql(const std::string& sql, std::vector<std::vector<st
     }
 
     sqlite3_stmt* stmt = nullptr;
-    const char* tail = nullptr;
-    int rc = sqlite3_prepare_v2(db_, sql.c_str(), static_cast<int>(sql.size()), &stmt, &tail);
-
+    int rc = sqlite3_prepare_v2(db_, sql.c_str(), static_cast<int>(sql.size()), &stmt, nullptr);
     if (rc != SQLITE_OK) {
         Logger::Error("SQL prepare error: {} (SQL: {})", sqlite3_errmsg(db_), sql);
         stats_.failedQueries++;
         return false;
     }
 
-    // Execute and possibly fetch results
     bool success = true;
     int stepResult = sqlite3_step(stmt);
     if (stepResult == SQLITE_ROW) {
-        // Query returns rows
         if (results) {
             int colCount = sqlite3_column_count(stmt);
             do {
                 std::vector<std::string> row;
                 for (int i = 0; i < colCount; ++i) {
                     const unsigned char* text = sqlite3_column_text(stmt, i);
-                    if (text) {
-                        row.emplace_back(reinterpret_cast<const char*>(text));
-                    } else {
-                        row.emplace_back(); // empty string for NULL
-                    }
+                    row.emplace_back(text ? reinterpret_cast<const char*>(text) : "");
                 }
                 results->push_back(std::move(row));
             } while ((stepResult = sqlite3_step(stmt)) == SQLITE_ROW);
         } else {
-            // Just step through without collecting
             while ((stepResult = sqlite3_step(stmt)) == SQLITE_ROW) {}
         }
     }
@@ -195,7 +163,6 @@ bool SQLiteClient::ExecuteSql(const std::string& sql, std::vector<std::vector<st
         success = false;
         stats_.failedQueries++;
     } else {
-        // For INSERT/UPDATE, get last insert rowid and changes
         if (sql.find("INSERT") != std::string::npos || sql.find("UPDATE") != std::string::npos ||
             sql.find("DELETE") != std::string::npos) {
             lastInsertId_ = static_cast<int64_t>(sqlite3_last_insert_rowid(db_));
@@ -218,7 +185,6 @@ nlohmann::json SQLiteClient::ResultSetToJson(const std::vector<std::vector<std::
             if (value.empty()) {
                 rowObj[columnNames[i]] = nullptr;
             } else {
-                // Try to parse as JSON if it looks like JSON
                 if (!value.empty() && (value[0] == '{' || value[0] == '[')) {
                     try {
                         rowObj[columnNames[i]] = nlohmann::json::parse(value);
@@ -236,7 +202,6 @@ nlohmann::json SQLiteClient::ResultSetToJson(const std::vector<std::vector<std::
 }
 
 std::string SQLiteClient::EscapeString(const std::string& str) {
-    // SQLite escaping: double single quotes
     std::string escaped;
     escaped.reserve(str.size() + 2);
     for (char c : str) {
@@ -249,40 +214,11 @@ std::string SQLiteClient::EscapeString(const std::string& str) {
 bool SQLiteClient::TableExists(const std::string& tableName) {
     std::string sql = "SELECT name FROM sqlite_master WHERE type='table' AND name='" + EscapeString(tableName) + "';";
     std::vector<std::vector<std::string>> results;
-    if (!ExecuteSql(sql, &results)) {
-        return false;
-    }
-    return !results.empty();
+    return ExecuteSql(sql, &results) && !results.empty();
 }
 
 // =============== Query Operations ===============
 nlohmann::json SQLiteClient::Query(const std::string& sql) {
-    std::vector<std::vector<std::string>> rows;
-    if (!ExecuteSql(sql, &rows)) {
-        return nlohmann::json::array();
-    }
-
-    // Need column names. Since we don't have them from ExecuteSql, we need to prepare separately.
-    // Alternative: use sqlite3_column_name in ExecuteSql and return column names.
-    // For simplicity, we'll modify ExecuteSql to optionally return column names.
-    // But to keep changes minimal, we'll re-execute a separate query to get column info? Not efficient.
-    // Better to enhance ExecuteSql to return column names. Let's redesign quickly.
-
-    // For now, we'll assume Query is used with SELECT and we can get column names via a separate query.
-    // But that's hacky. Let's implement a proper method that returns both rows and column names.
-    // We'll refactor: ExecuteSql will fill a struct with rows and column names.
-
-    // Since we're in the middle of implementation, let's create a private struct ResultSet.
-    // But to avoid major changes, we'll create a new helper that does the full job.
-
-    // Let's implement a method ExecuteQuery that returns nlohmann::json directly.
-    // We'll keep ExecuteSql for simple execution.
-
-    // Instead, we'll add a new method ExecuteSelect that returns json.
-    // But for now, we'll implement Query by calling ExecuteSql and then constructing JSON without column names - that's wrong.
-
-    // So let's properly implement Query using sqlite3 directly.
-
     std::lock_guard<std::mutex> lock(dbMutex_);
     if (!db_) {
         Logger::Error("Query: database not connected");
@@ -298,14 +234,12 @@ nlohmann::json SQLiteClient::Query(const std::string& sql) {
         return nlohmann::json::array();
     }
 
-    // Get column names
     int colCount = sqlite3_column_count(stmt);
     std::vector<std::string> colNames;
     for (int i = 0; i < colCount; ++i) {
         colNames.push_back(sqlite3_column_name(stmt, i));
     }
 
-    // Fetch rows
     nlohmann::json result = nlohmann::json::array();
     while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
         nlohmann::json rowObj;
@@ -313,7 +247,6 @@ nlohmann::json SQLiteClient::Query(const std::string& sql) {
             const char* text = reinterpret_cast<const char*>(sqlite3_column_text(stmt, i));
             if (text) {
                 std::string value(text);
-                // Try to parse JSON
                 if (!value.empty() && (value[0] == '{' || value[0] == '[')) {
                     try {
                         rowObj[colNames[i]] = nlohmann::json::parse(value);
@@ -343,8 +276,6 @@ nlohmann::json SQLiteClient::Query(const std::string& sql) {
 }
 
 nlohmann::json SQLiteClient::QueryWithParams(const std::string& sql, const std::vector<std::string>& params) {
-    // SQLite doesn't support named parameters easily; we can construct the SQL by escaping.
-    // Not the safest but acceptable for now.
     std::string processedSql = sql;
     size_t pos = 0;
     for (const auto& param : params) {
@@ -372,7 +303,7 @@ bool SQLiteClient::ExecuteWithParams(const std::string& sql, const std::vector<s
     return Execute(processedSql);
 }
 
-// =============== Shard Operations (ignore shardId) ===============
+// =============== Shard Operations ===============
 nlohmann::json SQLiteClient::QueryShard(int /*shardId*/, const std::string& sql) {
     return Query(sql);
 }
@@ -390,7 +321,6 @@ bool SQLiteClient::ExecuteShardWithParams(int /*shardId*/, const std::string& sq
 
 // =============== Utility Methods ===============
 int SQLiteClient::GetShardId(uint64_t entityId) const {
-    // Simple hash modulo shard count (dummy, always 0)
     return static_cast<int>(entityId % totalShards_);
 }
 int SQLiteClient::GetTotalShards() const {
@@ -440,18 +370,27 @@ void SQLiteClient::ResetStats() {
 
 // =============== Transaction Operations ===============
 bool SQLiteClient::BeginTransaction() {
-    if (Execute("BEGIN TRANSACTION;")) {
+    std::string sql = sqlProvider_.GetQuery("begin_transaction");
+    if (sql.empty()) sql = "BEGIN TRANSACTION;";
+    if (Execute(sql)) {
         stats_.totalTransactions++;
         return true;
     }
     return false;
 }
+
 bool SQLiteClient::CommitTransaction() {
-    return Execute("COMMIT;");
+    std::string sql = sqlProvider_.GetQuery("commit_transaction");
+    if (sql.empty()) sql = "COMMIT;";
+    return Execute(sql);
 }
+
 bool SQLiteClient::RollbackTransaction() {
-    return Execute("ROLLBACK;");
+    std::string sql = sqlProvider_.GetQuery("rollback_transaction");
+    if (sql.empty()) sql = "ROLLBACK;";
+    return Execute(sql);
 }
+
 bool SQLiteClient::ExecuteTransaction(const std::function<bool()>& operation) {
     if (!BeginTransaction()) return false;
     bool success = false;
@@ -473,16 +412,18 @@ bool SQLiteClient::ExecuteTransaction(const std::function<bool()>& operation) {
 
 // =============== Player Data Operations ===============
 bool SQLiteClient::SavePlayerData(uint64_t playerId, const nlohmann::json& data) {
-    std::string dataJson = data.dump();
-    std::string escaped = EscapeString(dataJson);
-    std::string sql = "INSERT OR REPLACE INTO players (id, data, updated_at) VALUES (" +
-                      std::to_string(playerId) + ", '" + escaped + "', datetime('now'));";
-    return Execute(sql);
+    std::string sql = sqlProvider_.GetQuery("save_player_data");
+    if (sql.empty()) {
+        Logger::Error("Missing SQL: save_player_data");
+        return false;
+    }
+    return ExecuteWithParams(sql, { std::to_string(playerId), data.dump() });
 }
 
 nlohmann::json SQLiteClient::LoadPlayerData(uint64_t playerId) {
-    std::string sql = "SELECT data FROM players WHERE id = " + std::to_string(playerId) + ";";
-    auto result = Query(sql);
+    std::string sql = sqlProvider_.GetQuery("load_player_data");
+    if (sql.empty()) return nlohmann::json();
+    auto result = QueryWithParams(sql, { std::to_string(playerId) });
     if (!result.empty() && result[0].contains("data")) {
         return result[0]["data"];
     }
@@ -508,29 +449,36 @@ bool SQLiteClient::UpdatePlayer(uint64_t playerId, const nlohmann::json& updates
 }
 
 bool SQLiteClient::DeletePlayer(uint64_t playerId) {
-    std::string sql = "DELETE FROM players WHERE id = " + std::to_string(playerId) + ";";
-    return Execute(sql);
+    std::string sql = sqlProvider_.GetQuery("delete_player");
+    if (sql.empty()) {
+        sql = "DELETE FROM players WHERE id = ?;";
+    }
+    return ExecuteWithParams(sql, { std::to_string(playerId) });
 }
 
 bool SQLiteClient::UpdatePlayerPosition(uint64_t playerId, float x, float y, float z) {
-    std::string sql = "UPDATE players SET pos_x = " + std::to_string(x) +
-                      ", pos_y = " + std::to_string(y) +
-                      ", pos_z = " + std::to_string(z) +
-                      ", updated_at = datetime('now') WHERE id = " + std::to_string(playerId) + ";";
-    return Execute(sql);
+    std::string sql = sqlProvider_.GetQuery("update_player_position");
+    if (sql.empty()) {
+        sql = "UPDATE players SET position_x = ?, position_y = ?, position_z = ?, updated_at = datetime('now') WHERE id = ?;";
+    }
+    return ExecuteWithParams(sql, { std::to_string(x), std::to_string(y), std::to_string(z), std::to_string(playerId) });
 }
 
 bool SQLiteClient::PlayerExists(uint64_t playerId) {
-    std::string sql = "SELECT 1 FROM players WHERE id = " + std::to_string(playerId) + " LIMIT 1;";
-    auto result = Query(sql);
+    std::string sql = sqlProvider_.GetQuery("player_exists");
+    if (sql.empty()) {
+        sql = "SELECT 1 FROM players WHERE id = ? LIMIT 1;";
+    }
+    auto result = QueryWithParams(sql, { std::to_string(playerId) });
     return !result.empty();
 }
 
 nlohmann::json SQLiteClient::GetPlayerStats(uint64_t playerId) {
-    std::string sql = "SELECT level, experience, health, max_health, mana, max_mana, "
-                      "currency_gold, currency_gems, total_playtime "
-                      "FROM players WHERE id = " + std::to_string(playerId) + ";";
-    auto result = Query(sql);
+    std::string sql = sqlProvider_.GetQuery("get_player_stats");
+    if (sql.empty()) {
+        sql = "SELECT level, experience, health, max_health, mana, max_mana, currency_gold, currency_gems, total_playtime FROM players WHERE id = ?;";
+    }
+    auto result = QueryWithParams(sql, { std::to_string(playerId) });
     if (!result.empty()) return result[0];
     return nlohmann::json();
 }
@@ -540,24 +488,30 @@ bool SQLiteClient::UpdatePlayerStats(uint64_t playerId, const nlohmann::json& st
 }
 
 nlohmann::json SQLiteClient::GetPlayer(uint64_t playerId) {
-    std::string sql = "SELECT * FROM players WHERE id = " + std::to_string(playerId) + ";";
-    auto result = Query(sql);
+    std::string sql = sqlProvider_.GetQuery("get_player");
+    if (sql.empty()) {
+        sql = "SELECT * FROM players WHERE id = ?;";
+    }
+    auto result = QueryWithParams(sql, { std::to_string(playerId) });
     if (!result.empty()) return result[0];
     return nlohmann::json();
 }
 
 // =============== Game State Operations ===============
 bool SQLiteClient::SaveGameState(const std::string& key, const nlohmann::json& state) {
-    std::string stateJson = state.dump();
-    std::string escaped = EscapeString(stateJson);
-    std::string sql = "INSERT OR REPLACE INTO game_state (key, value, updated_at) VALUES ('" +
-                      EscapeString(key) + "', '" + escaped + "', datetime('now'));";
-    return Execute(sql);
+    std::string sql = sqlProvider_.GetQuery("save_game_state");
+    if (sql.empty()) {
+        sql = "INSERT OR REPLACE INTO game_state (key, value, updated_at) VALUES (?, ?, datetime('now'));";
+    }
+    return ExecuteWithParams(sql, { key, state.dump() });
 }
 
 nlohmann::json SQLiteClient::LoadGameState(const std::string& key) {
-    std::string sql = "SELECT value FROM game_state WHERE key = '" + EscapeString(key) + "';";
-    auto result = Query(sql);
+    std::string sql = sqlProvider_.GetQuery("load_game_state");
+    if (sql.empty()) {
+        sql = "SELECT value FROM game_state WHERE key = ?;";
+    }
+    auto result = QueryWithParams(sql, { key });
     if (!result.empty() && result[0].contains("value")) {
         return result[0]["value"];
     }
@@ -565,12 +519,18 @@ nlohmann::json SQLiteClient::LoadGameState(const std::string& key) {
 }
 
 bool SQLiteClient::DeleteGameState(const std::string& key) {
-    std::string sql = "DELETE FROM game_state WHERE key = '" + EscapeString(key) + "';";
-    return Execute(sql);
+    std::string sql = sqlProvider_.GetQuery("delete_game_state");
+    if (sql.empty()) {
+        sql = "DELETE FROM game_state WHERE key = ?;";
+    }
+    return ExecuteWithParams(sql, { key });
 }
 
 std::vector<std::string> SQLiteClient::ListGameStates() {
-    std::string sql = "SELECT key FROM game_state ORDER BY key;";
+    std::string sql = sqlProvider_.GetQuery("list_game_states");
+    if (sql.empty()) {
+        sql = "SELECT key FROM game_state ORDER BY key;";
+    }
     auto result = Query(sql);
     std::vector<std::string> keys;
     for (const auto& row : result) {
@@ -581,17 +541,19 @@ std::vector<std::string> SQLiteClient::ListGameStates() {
 
 // =============== World Data Operations ===============
 bool SQLiteClient::SaveChunkData(int chunkX, int chunkZ, const nlohmann::json& chunkData) {
-    std::string dataJson = chunkData.dump();
-    std::string escaped = EscapeString(dataJson);
-    std::string sql = "INSERT OR REPLACE INTO world_chunks (chunk_x, chunk_z, data, generated_at) VALUES (" +
-                      std::to_string(chunkX) + ", " + std::to_string(chunkZ) + ", '" + escaped + "', datetime('now'));";
-    return Execute(sql);
+    std::string sql = sqlProvider_.GetQuery("save_chunk_data");
+    if (sql.empty()) {
+        sql = "INSERT OR REPLACE INTO world_chunks (chunk_x, chunk_z, biome, data, last_updated) VALUES (?, ?, ?, ?, datetime('now'));";
+    }
+    return ExecuteWithParams(sql, { std::to_string(chunkX), std::to_string(chunkZ), "0", chunkData.dump() });
 }
 
 nlohmann::json SQLiteClient::LoadChunkData(int chunkX, int chunkZ) {
-    std::string sql = "SELECT data FROM world_chunks WHERE chunk_x = " + std::to_string(chunkX) +
-                      " AND chunk_z = " + std::to_string(chunkZ) + ";";
-    auto result = Query(sql);
+    std::string sql = sqlProvider_.GetQuery("load_chunk_data");
+    if (sql.empty()) {
+        sql = "SELECT data FROM world_chunks WHERE chunk_x = ? AND chunk_z = ?;";
+    }
+    auto result = QueryWithParams(sql, { std::to_string(chunkX), std::to_string(chunkZ) });
     if (!result.empty() && result[0].contains("data")) {
         return result[0]["data"];
     }
@@ -599,9 +561,11 @@ nlohmann::json SQLiteClient::LoadChunkData(int chunkX, int chunkZ) {
 }
 
 bool SQLiteClient::DeleteChunkData(int chunkX, int chunkZ) {
-    std::string sql = "DELETE FROM world_chunks WHERE chunk_x = " + std::to_string(chunkX) +
-                      " AND chunk_z = " + std::to_string(chunkZ) + ";";
-    return Execute(sql);
+    std::string sql = sqlProvider_.GetQuery("delete_chunk_data");
+    if (sql.empty()) {
+        sql = "DELETE FROM world_chunks WHERE chunk_x = ? AND chunk_z = ?;";
+    }
+    return ExecuteWithParams(sql, { std::to_string(chunkX), std::to_string(chunkZ) });
 }
 
 std::vector<std::pair<int, int>> SQLiteClient::ListChunksInRange(int centerX, int centerZ, int radius) {
@@ -615,12 +579,14 @@ std::vector<std::pair<int, int>> SQLiteClient::ListChunksInRange(int centerX, in
         minZ < std::numeric_limits<int>::min() || maxZ > std::numeric_limits<int>::max()) {
         return {};
     }
-    std::string sql = "SELECT chunk_x, chunk_z FROM world_chunks "
-                      "WHERE chunk_x BETWEEN " + std::to_string(static_cast<int>(minX)) +
-                      " AND " + std::to_string(static_cast<int>(maxX)) +
-                      " AND chunk_z BETWEEN " + std::to_string(static_cast<int>(minZ)) +
-                      " AND " + std::to_string(static_cast<int>(maxZ)) + ";";
-    auto result = Query(sql);
+    std::string sql = sqlProvider_.GetQuery("list_chunks_in_range");
+    if (sql.empty()) {
+        sql = "SELECT chunk_x, chunk_z FROM world_chunks WHERE chunk_x BETWEEN ? AND ? AND chunk_z BETWEEN ? AND ?;";
+    }
+    auto result = QueryWithParams(sql, {
+        std::to_string(static_cast<int>(minX)), std::to_string(static_cast<int>(maxX)),
+        std::to_string(static_cast<int>(minZ)), std::to_string(static_cast<int>(maxZ))
+    });
     std::vector<std::pair<int, int>> chunks;
     for (const auto& row : result) {
         if (row.contains("chunk_x") && row.contains("chunk_z")) {
@@ -632,16 +598,19 @@ std::vector<std::pair<int, int>> SQLiteClient::ListChunksInRange(int centerX, in
 
 // =============== Inventory Operations ===============
 bool SQLiteClient::SaveInventory(uint64_t playerId, const nlohmann::json& inventory) {
-    std::string invJson = inventory.dump();
-    std::string escaped = EscapeString(invJson);
-    std::string sql = "INSERT OR REPLACE INTO player_inventory (player_id, data, updated_at) VALUES (" +
-                      std::to_string(playerId) + ", '" + escaped + "', datetime('now'));";
-    return Execute(sql);
+    std::string sql = sqlProvider_.GetQuery("save_inventory");
+    if (sql.empty()) {
+        sql = "INSERT OR REPLACE INTO player_inventory (player_id, data, last_updated) VALUES (?, ?, datetime('now'));";
+    }
+    return ExecuteWithParams(sql, { std::to_string(playerId), inventory.dump() });
 }
 
 nlohmann::json SQLiteClient::LoadInventory(uint64_t playerId) {
-    std::string sql = "SELECT data FROM player_inventory WHERE player_id = " + std::to_string(playerId) + ";";
-    auto result = Query(sql);
+    std::string sql = sqlProvider_.GetQuery("load_inventory");
+    if (sql.empty()) {
+        sql = "SELECT data FROM player_inventory WHERE player_id = ?;";
+    }
+    auto result = QueryWithParams(sql, { std::to_string(playerId) });
     if (!result.empty() && result[0].contains("data")) {
         return result[0]["data"];
     }
@@ -650,17 +619,19 @@ nlohmann::json SQLiteClient::LoadInventory(uint64_t playerId) {
 
 // =============== Quest Operations ===============
 bool SQLiteClient::SaveQuestProgress(uint64_t playerId, const std::string& questId, const nlohmann::json& progress) {
-    std::string progJson = progress.dump();
-    std::string escaped = EscapeString(progJson);
-    std::string sql = "INSERT OR REPLACE INTO player_quests (player_id, quest_id, progress, updated_at) VALUES (" +
-                      std::to_string(playerId) + ", '" + EscapeString(questId) + "', '" + escaped + "', datetime('now'));";
-    return Execute(sql);
+    std::string sql = sqlProvider_.GetQuery("save_quest_progress");
+    if (sql.empty()) {
+        sql = "INSERT OR REPLACE INTO player_quests (player_id, quest_id, progress, last_updated) VALUES (?, ?, ?, datetime('now'));";
+    }
+    return ExecuteWithParams(sql, { std::to_string(playerId), questId, progress.dump() });
 }
 
 nlohmann::json SQLiteClient::LoadQuestProgress(uint64_t playerId, const std::string& questId) {
-    std::string sql = "SELECT progress FROM player_quests WHERE player_id = " + std::to_string(playerId) +
-                      " AND quest_id = '" + EscapeString(questId) + "';";
-    auto result = Query(sql);
+    std::string sql = sqlProvider_.GetQuery("load_quest_progress");
+    if (sql.empty()) {
+        sql = "SELECT progress FROM player_quests WHERE player_id = ? AND quest_id = ?;";
+    }
+    auto result = QueryWithParams(sql, { std::to_string(playerId), questId });
     if (!result.empty() && result[0].contains("progress")) {
         return result[0]["progress"];
     }
@@ -668,9 +639,11 @@ nlohmann::json SQLiteClient::LoadQuestProgress(uint64_t playerId, const std::str
 }
 
 std::vector<std::string> SQLiteClient::ListActiveQuests(uint64_t playerId) {
-    std::string sql = "SELECT quest_id FROM player_quests WHERE player_id = " + std::to_string(playerId) +
-                      " ORDER BY quest_id;";
-    auto result = Query(sql);
+    std::string sql = sqlProvider_.GetQuery("list_active_quests");
+    if (sql.empty()) {
+        sql = "SELECT quest_id FROM player_quests WHERE player_id = ? ORDER BY quest_id;";
+    }
+    auto result = QueryWithParams(sql, { std::to_string(playerId) });
     std::vector<std::string> quests;
     for (const auto& row : result) {
         if (row.contains("quest_id")) quests.push_back(row["quest_id"].get<std::string>());

@@ -4,8 +4,11 @@
 #include <chrono>
 #include <condition_variable>
 #include <filesystem>
+#include <fstream>
+#include <iomanip>
 #include <mutex>
 #include <queue>
+#include <sstream>
 #include <thread>
 #include <unordered_map>
 
@@ -22,7 +25,7 @@
  */
 class SQLiteClient : public DatabaseBackend {
 public:
-    explicit SQLiteClient(const nlohmann::json& config);
+    explicit SQLiteClient(const nlohmann::json& config, const SQLProvider& sqlProvider);
     virtual ~SQLiteClient();
 
     // Connection Management
@@ -107,6 +110,7 @@ public:
 private:
     // Core database handle
     sqlite3* db_;
+    const SQLProvider& sqlProvider_;
 
     // Configuration
     nlohmann::json config_;

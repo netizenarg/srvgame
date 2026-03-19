@@ -26,6 +26,39 @@ DbManager::~DbManager() {
     Logger::Debug("DbManager destroyed");
 }
 
+bool DbManager::LoadSQLForBackend() {
+    std::string sqlPath = "dbschema/";  // configurable base path
+    switch (currentType_) {
+        case SQLITE:
+            sqlPath += "sqlite.sql";
+            break;
+        case POSTGRESQL:
+            sqlPath += "postgres.sql";
+            break;
+        case CITUS:
+            // Load base PostgreSQL first, then Citus extensions
+            if (!sqlProvider_.LoadFromFile(sqlPath + "postgres.sql")) {
+                return false;
+            }
+            sqlPath += "citus.sql";
+            break;
+        default:
+            return false;
+    }
+    if (currentType_ != CITUS) {
+        if (!sqlProvider_.LoadFromFile(sqlPath)) {
+            Logger::Error("Could not load SQL file: {}", sqlPath);
+            return false;
+        }
+    } else {
+        // Load Citus-specific file
+        if (!sqlProvider_.LoadFromFile(sqlPath)) {
+            Logger::Warn("Citus SQL file not loaded, some features may be unavailable");
+        }
+    }
+    return true;
+}
+
 bool DbManager::EnsureDatabaseExists(const std::string& configPath) {
     if (!Initialize(configPath)) {
         Logger::Error("Failed to initialize DbManager");
@@ -130,21 +163,31 @@ bool DbManager::Initialize(const std::string& configPath) {
         Logger::Error("Unknown database backend: {}", backendStr);
         return false;
     }
+
+    if (!LoadSQLForBackend()) {
+        Logger::Error("Failed to load SQL queries for backend");
+        return false;
+    }
+
     switch (currentType_) {
         case SQLITE:
 #ifdef USE_SQLITE
-            backend_ = std::make_unique<SQLiteClient>(config_);
+            backend_ = std::make_unique<SQLiteClient>(config_, sqlProvider_);
 #else
             Logger::Error("SQLite support not compiled in. Recompile with USE_SQLITE=1");
             return false;
 #endif
             break;
         case POSTGRESQL:
-            backend_ = std::make_unique<PostgreSqlClient>(config_);
+#ifdef USE_POSTGRESQL
+            backend_ = std::make_unique<PostgreSqlClient>(config_, sqlProvider_);
+#else
+            Logger::Error("PostgreSql support not compiled in. Recompile with USE_POSTGRESQL=1");
+#endif
             break;
         case CITUS:
 #ifdef USE_CITUS
-            backend_ = std::make_unique<CitusClient>(config_);
+            backend_ = std::make_unique<CitusClient>(config_, sqlProvider_);
 #else
             Logger::Error("Citus support not compiled in. Recompile with USE_CITUS=1");
             return false;
@@ -305,32 +348,52 @@ bool DbManager::SetBackend(BackendType backendType, const nlohmann::json& config
         return false;
     }
 
-    // Store old backend
+    // Temporarily store old backend (not needed but kept for safety)
     std::unique_ptr<DatabaseBackend> oldBackend = std::move(backend_);
 
-    // Create new backend
+    // Update current type and config
+    currentType_ = backendType;
+    config_ = config;
+
+    // Reload SQL for the new backend
+    if (!LoadSQLForBackend()) {
+        Logger::Error("Failed to load SQL queries for new backend");
+        // Restore old backend? We'll just return false and leave backend_ empty
+        return false;
+    }
+
+    // Create new backend with the provider
     switch (backendType) {
+        case SQLITE:
+#ifdef USE_SQLITE
+            backend_ = std::make_unique<SQLiteClient>(config_, sqlProvider_);
+#else
+            Logger::Error("SQLite support not compiled in.");
+            return false;
+#endif
+            break;
         case POSTGRESQL:
-            backend_ = std::make_unique<PostgreSqlClient>(config);
+#ifdef USE_POSTGRESQL
+            backend_ = std::make_unique<PostgreSqlClient>(config_, sqlProvider_);
+#else
+            Logger::Error("PostgreSql support not compiled in.");
+            return false;
+#endif
             break;
         case CITUS:
 #ifdef USE_CITUS
-            backend_ = std::make_unique<CitusClient>(config);
+            backend_ = std::make_unique<CitusClient>(config_, sqlProvider_);
 #else
-            Logger::Error("Citus support not compiled in");
+            Logger::Error("Citus support not compiled in.");
             return false;
 #endif
             break;
         default:
             Logger::Error("Unsupported database backend");
-            backend_ = std::move(oldBackend);
             return false;
     }
 
-    currentType_ = backendType;
-    config_ = config;
-    connected_ = false;
-
+    connected_ = false; // Will need to reconnect
     Logger::Info("Database backend changed to {}", BackendTypeToString(currentType_));
     return true;
 }
@@ -745,223 +808,53 @@ bool DbManager::ExecuteCreateTable(const std::string& tableName, const std::stri
     }
 }
 
+
 bool DbManager::CreateDefaultTablesIfNotExist() {
-    if (!IsConnected() && !Connect()) {
-        Logger::Error("Cannot create default tables: not connected to database.");
-        return false;
-    }
+    if (!IsConnected() && !Connect()) return false;
 
     bool success = true;
-// SQLite versions (use TEXT for JSON, INTEGER for timestamps)
-    if (currentType_ == SQLITE) {
-        success &= ExecuteCreateTable("players", R"(
-        CREATE TABLE IF NOT EXISTS players (
-            id INTEGER PRIMARY KEY,
-            data TEXT NOT NULL,
-            created_at TEXT DEFAULT (datetime('now')),
-            updated_at TEXT DEFAULT (datetime('now'))
-        );
-        )");
+    std::vector<std::string> tableQueries = {
+        "create_table_players",
+        "create_table_game_state",
+        "create_table_world_chunks",
+        "create_table_player_inventory",
+        "create_table_player_quests",
+        "create_table_npcs",
+        "create_table_loot_tables",
+        "create_table_schema_migrations"
+    };
 
-        success &= ExecuteCreateTable("player_inventory", R"(
-        CREATE TABLE IF NOT EXISTS player_inventory (
-            player_id INTEGER NOT NULL,
-            slot INTEGER NOT NULL,
-            item_id INTEGER NOT NULL,
-            quantity INTEGER NOT NULL DEFAULT 1,
-            data TEXT,
-            PRIMARY KEY (player_id, slot),
-            FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
-        );
-        )");
-        Execute("CREATE INDEX IF NOT EXISTS idx_inventory_player ON player_inventory(player_id);");
-
-        success &= ExecuteCreateTable("player_skills", R"(
-        CREATE TABLE IF NOT EXISTS player_skills (
-            player_id INTEGER NOT NULL,
-            skill_id TEXT NOT NULL,
-            level INTEGER NOT NULL DEFAULT 1,
-            experience REAL NOT NULL DEFAULT 0,
-            data TEXT,
-            PRIMARY KEY (player_id, skill_id),
-            FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
-        );
-        )");
-        Execute("CREATE INDEX IF NOT EXISTS idx_skills_player ON player_skills(player_id);");
-
-        success &= ExecuteCreateTable("player_quests", R"(
-        CREATE TABLE IF NOT EXISTS player_quests (
-            player_id INTEGER NOT NULL,
-            quest_id INTEGER NOT NULL,
-            state INTEGER NOT NULL,
-            progress TEXT NOT NULL,
-            started_at TEXT,
-            completed_at TEXT,
-            PRIMARY KEY (player_id, quest_id),
-            FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
-        );
-        )");
-        Execute("CREATE INDEX IF NOT EXISTS idx_quests_player ON player_quests(player_id);");
-        Execute("CREATE INDEX IF NOT EXISTS idx_quests_state ON player_quests(state);");
-
-        success &= ExecuteCreateTable("world_chunks", R"(
-        CREATE TABLE IF NOT EXISTS world_chunks (
-            chunk_x INTEGER NOT NULL,
-            chunk_z INTEGER NOT NULL,
-            biome INTEGER NOT NULL,
-            data TEXT NOT NULL,
-            generated_at TEXT DEFAULT (datetime('now')),
-            PRIMARY KEY (chunk_x, chunk_z)
-        );
-        )");
-        Execute("CREATE INDEX IF NOT EXISTS idx_chunks_coords ON world_chunks(chunk_x, chunk_z);");
-
-        success &= ExecuteCreateTable("npcs", R"(
-        CREATE TABLE IF NOT EXISTS npcs (
-            id INTEGER PRIMARY KEY,
-            type INTEGER NOT NULL,
-            position TEXT NOT NULL,
-            level INTEGER NOT NULL DEFAULT 1,
-            data TEXT NOT NULL,
-            created_at TEXT DEFAULT (datetime('now')),
-            updated_at TEXT DEFAULT (datetime('now'))
-        );
-        )");
-        Execute("CREATE INDEX IF NOT EXISTS idx_npcs_type ON npcs(type);");
-
-        success &= ExecuteCreateTable("loot_tables", R"(
-        CREATE TABLE IF NOT EXISTS loot_tables (
-            table_id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            data TEXT NOT NULL,
-            created_at TEXT DEFAULT (datetime('now'))
-        );
-        )");
-
-        success &= ExecuteCreateTable("game_state", R"(
-        CREATE TABLE IF NOT EXISTS game_state (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL,
-            updated_at TEXT DEFAULT (datetime('now'))
-        );
-        )");
-    }
-    else // PostgreSQL / Citus versions (existing code, unchanged)
-    {
-        success &= ExecuteCreateTable("players", R"(
-            CREATE TABLE IF NOT EXISTS players (
-                id BIGINT PRIMARY KEY,
-                data JSONB NOT NULL,
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                updated_at TIMESTAMPTZ DEFAULT NOW()
-            );
-            CREATE INDEX IF NOT EXISTS idx_players_updated ON players(updated_at);
-        )");
-
-        success &= ExecuteCreateTable("player_inventory", R"(
-            CREATE TABLE IF NOT EXISTS player_inventory (
-                player_id BIGINT REFERENCES players(id) ON DELETE CASCADE,
-                slot INT NOT NULL,
-                item_id BIGINT NOT NULL,
-                quantity INT NOT NULL DEFAULT 1,
-                data JSONB,  -- additional item-specific data (durability, enchantments, etc.)
-                PRIMARY KEY (player_id, slot)
-            );
-            CREATE INDEX IF NOT EXISTS idx_inventory_player ON player_inventory(player_id);
-        )");
-
-        success &= ExecuteCreateTable("player_skills", R"(
-            CREATE TABLE IF NOT EXISTS player_skills (
-                player_id BIGINT REFERENCES players(id) ON DELETE CASCADE,
-                skill_id VARCHAR(64) NOT NULL,
-                level INT NOT NULL DEFAULT 1,
-                experience FLOAT NOT NULL DEFAULT 0,
-                data JSONB,
-                PRIMARY KEY (player_id, skill_id)
-            );
-            CREATE INDEX IF NOT EXISTS idx_skills_player ON player_skills(player_id);
-        )");
-
-        success &= ExecuteCreateTable("player_quests", R"(
-            CREATE TABLE IF NOT EXISTS player_quests (
-                player_id BIGINT REFERENCES players(id) ON DELETE CASCADE,
-                quest_id BIGINT NOT NULL,
-                state INT NOT NULL,  -- QuestState enum as integer
-                progress JSONB NOT NULL,
-                started_at TIMESTAMPTZ,
-                completed_at TIMESTAMPTZ,
-                PRIMARY KEY (player_id, quest_id)
-            );
-            CREATE INDEX IF NOT EXISTS idx_quests_player ON player_quests(player_id);
-            CREATE INDEX IF NOT EXISTS idx_quests_state ON player_quests(state);
-        )");
-
-        success &= ExecuteCreateTable("world_chunks", R"(
-            CREATE TABLE IF NOT EXISTS world_chunks (
-                chunk_x INT NOT NULL,
-                chunk_z INT NOT NULL,
-                biome INT NOT NULL,
-                data JSONB NOT NULL,  -- serialized WorldChunk data
-                generated_at TIMESTAMPTZ DEFAULT NOW(),
-                PRIMARY KEY (chunk_x, chunk_z)
-            );
-            CREATE INDEX IF NOT EXISTS idx_chunks_coords ON world_chunks(chunk_x, chunk_z);
-        )");
-
-        success &= ExecuteCreateTable("npcs", R"(
-            CREATE TABLE IF NOT EXISTS npcs (
-                id BIGINT PRIMARY KEY,
-                type INT NOT NULL,
-                position JSONB NOT NULL,  -- {x, y, z}
-                level INT NOT NULL DEFAULT 1,
-                data JSONB NOT NULL,      -- stats, AI state, loot table, etc.
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                updated_at TIMESTAMPTZ DEFAULT NOW()
-            );
-            CREATE INDEX IF NOT EXISTS idx_npcs_type ON npcs(type);
-        )");
-
-        success &= ExecuteCreateTable("loot_tables", R"(
-            CREATE TABLE IF NOT EXISTS loot_tables (
-                table_id VARCHAR(64) PRIMARY KEY,
-                name VARCHAR(128) NOT NULL,
-                data JSONB NOT NULL,  -- entries, drop chances, etc.
-                created_at TIMESTAMPTZ DEFAULT NOW()
-            );
-        )");
-
-        success &= ExecuteCreateTable("game_state", R"(
-            CREATE TABLE IF NOT EXISTS game_state (
-                key VARCHAR(64) PRIMARY KEY,
-                value JSONB NOT NULL,
-                updated_at TIMESTAMPTZ DEFAULT NOW()
-            );
-        )");
-    }
-
-#ifdef USE_CITUS
-    if (currentType_ == BackendType::CITUS) {
-        try {
-            // Distribute tables by player_id or appropriate shard key
-            backend_->Query("SELECT create_distributed_table('players', 'id');");
-            backend_->Query("SELECT create_distributed_table('player_inventory', 'player_id');");
-            backend_->Query("SELECT create_distributed_table('player_skills', 'player_id');");
-            backend_->Query("SELECT create_distributed_table('player_quests', 'player_id');");
-            // World chunks could be distributed by (chunk_x, chunk_z) – Citus supports hash distribution on multiple columns
-            backend_->Query("SELECT create_distributed_table('world_chunks', 'chunk_x');");
-            backend_->Query("SELECT create_distributed_table('npcs', 'id');");
-            Logger::Info("Citus distribution created for main tables.");
-        } catch (const std::exception& e) {
-            Logger::Warn("Failed to distribute tables for Citus: {}", e.what());
+    for (const auto& key : tableQueries) {
+        std::string sql = sqlProvider_.GetQuery(key);
+        if (sql.empty()) {
+            Logger::Error("Missing SQL for table creation: {}", key);
+            success = false;
+            continue;
+        }
+        if (!backend_->Execute(sql)) {
+            Logger::Error("Failed to execute: {}", key);
+            success = false;
         }
     }
-#endif
 
-    if (success) {
-        Logger::Info("All default tables verified/created successfully.");
-    } else {
-        Logger::Error("Some tables could not be created. Check logs for details.");
+    #ifdef USE_CITUS
+    if (currentType_ == CITUS) {
+        std::vector<std::string> distQueries = {
+            "create_distributed_table_players",
+            "create_distributed_table_player_inventory",
+            "create_distributed_table_player_quests",
+            "create_distributed_table_world_chunks",
+            "create_distributed_table_npcs",
+            "create_reference_table_loot_tables"
+        };
+        for (const auto& key : distQueries) {
+            std::string sql = sqlProvider_.GetQuery(key);
+            if (!sql.empty()) {
+                backend_->Execute(sql);  // ignore failure if table already distributed
+            }
+        }
     }
+    #endif
 
     return success;
 }

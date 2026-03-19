@@ -12,15 +12,15 @@
 
 #include <nlohmann/json.hpp>
 
-#include "logging/Logger.hpp"
 #include "config/ConfigManager.hpp"
+#include "database/Backend.hpp"
 
 #ifdef USE_CITUS
 #include "database/CitusClient.hpp"
-//class CitusClient;
 #else
+#ifdef USE_POSTGRESQL // default in main.cpp
 #include "database/PostgreSqlClient.hpp"
-//class PostgreSqlClient;
+#endif
 #endif
 
 #ifdef USE_SQLITE
@@ -49,6 +49,9 @@ public:
     bool Initialize(const std::string& configPath = "");
     void Shutdown();
     bool IsInitialized() const { return initialized_; }
+
+    const SQLProvider& GetSQLProvider() const { return sqlProvider_; }
+    bool LoadSQLForBackend();
 
     bool EnsureDatabaseExists(const std::string& configPath = "");
 
@@ -110,7 +113,7 @@ private:
 
     static std::mutex instanceMutex_;
     static DbManager* instance_;
-
+    SQLProvider sqlProvider_;
     std::unique_ptr<DatabaseBackend> backend_;
     BackendType currentType_;
     nlohmann::json config_;
