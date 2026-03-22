@@ -1,15 +1,26 @@
 #include "network/GameServer.hpp"
 
-GameServer::GameServer(const ConfigManager& config)
-: ioContext_(config.GetIoThreads()),
-acceptor_(ioContext_),
-signals_(ioContext_),
-config_(config)
+GameServer::GameServer(const WorkerGroupConfig& groupConfig, const ConfigManager& globalConfig)
+    : ioContext_(groupConfig.threads),
+      acceptor_(ioContext_),
+      signals_(ioContext_),
+      groupConfig_(groupConfig),
+      globalConfig_(globalConfig),
+      host_(groupConfig.host),
+      port_(groupConfig.port),
+      reusePort_(globalConfig.GetReusePort()),  // reuse_port from global config (could be moved to group)
+      ioThreads_(groupConfig.threads)
 {
-    host_ = config.GetServerHost();
-    port_ = config.GetServerPort();
-    reusePort_ = config.GetReusePort();
-    ioThreads_ = config.GetIoThreads();
+    // Set up SSL context if requested
+    if (groupConfig.ssl.has_value()) {
+        sslContext_ = std::make_shared<asio::ssl::context>(asio::ssl::context::tls_server);
+        sslContext_->use_certificate_chain_file(groupConfig.ssl->certificate);
+        sslContext_->use_private_key_file(groupConfig.ssl->private_key, asio::ssl::context::pem);
+        if (!groupConfig.ssl->dh_params.empty()) {
+            sslContext_->use_tmp_dh_file(groupConfig.ssl->dh_params);
+        }
+        // Additional SSL options can be set here
+    }
 }
 
 GameServer::~GameServer() = default;
@@ -18,7 +29,7 @@ bool GameServer::Initialize() {
     try {
         asio::ip::tcp::endpoint endpoint(
             asio::ip::make_address(host_),
-                                         port_
+            port_
         );
         acceptor_.open(endpoint.protocol());
         if (reusePort_) {
@@ -30,15 +41,18 @@ bool GameServer::Initialize() {
                 &optval,
                 sizeof(optval)) < 0) {
                 Logger::Error("Failed to set SO_REUSEPORT: {}", strerror(errno));
-                }
+            }
         }
         acceptor_.bind(endpoint);
-        acceptor_.listen(config_.GetMaxConnections());
+        acceptor_.listen(globalConfig_.GetMaxConnections());
+
         SetupSignalHandlers();
-        Logger::Info("GameServer initialized on {}:{}", host_, port_);
+        Logger::Info("GameServer initialized for protocol '{}' on {}:{}",
+                     groupConfig_.protocol, host_, port_);
         return true;
     } catch (const std::exception& e) {
-        Logger::Critical("Failed to initialize server: {}", e.what());
+        Logger::Critical("Failed to initialize server for protocol '{}': {}",
+                         groupConfig_.protocol, e.what());
         return false;
     }
 }
@@ -47,27 +61,55 @@ void GameServer::Run() {
     running_ = true;
     DoAccept();
     StartWorkerThreads();
-    Logger::Info("GameServer started with {} IO threads", ioThreads_);
+    Logger::Info("GameServer started with {} IO threads for protocol '{}'",
+                 ioThreads_, groupConfig_.protocol);
     ioContext_.run();
     for (auto& thread : workerThreads_) {
         if (thread.joinable()) {
             thread.join();
         }
     }
-    Logger::Info("GameServer run finished");
+    Logger::Info("GameServer run finished for protocol '{}'", groupConfig_.protocol);
 }
 
 void GameServer::DoAccept() {
     acceptor_.async_accept(
         [this](std::error_code ec, asio::ip::tcp::socket socket) {
             if (!ec) {
-                if (sessionFactory_) {
-                    auto session = sessionFactory_(std::move(socket));
-                    ConnectionManager::GetInstance().Start(session);
-                    session->Start();
+                // Apply socket options
+                if (groupConfig_.tcp_nodelay) {
+                    asio::ip::tcp::no_delay option(true);
+                    socket.set_option(option);
+                }
+                if (groupConfig_.send_buffer_size > 0) {
+                    asio::socket_base::send_buffer_size option(groupConfig_.send_buffer_size);
+                    socket.set_option(option);
+                }
+                if (groupConfig_.receive_buffer_size > 0) {
+                    asio::socket_base::receive_buffer_size option(groupConfig_.receive_buffer_size);
+                    socket.set_option(option);
+                }
+
+                if (groupConfig_.protocol == "binary") {
+                    if (sessionFactory_) {
+                        auto session = sessionFactory_(std::move(socket), sslContext_);
+                        ConnectionManager::GetInstance().Start(session);
+                        session->Start();
+                    } else {
+                        Logger::Error("No session factory set for binary protocol");
+                    }
+                } else if (groupConfig_.protocol == "websocket") {
+                    if (webSocketFactory_) {
+                        auto ws_conn = webSocketFactory_(std::move(socket), sslContext_);
+                        // TODO: Add to ConnectionManager (needs adaptation)
+                        ws_conn->Start();
+                    } else {
+                        Logger::Error("No WebSocket factory set for websocket protocol");
+                    }
+                } else {
+                    Logger::Error("Unknown protocol: {}", groupConfig_.protocol);
                 }
             } else {
-                // During shutdown, operation_aborted is expected, don't log as error
                 if (ec != asio::error::operation_aborted) {
                     Logger::Error("Accept error: {}", ec.message());
                 } else {
@@ -107,9 +149,13 @@ void GameServer::Shutdown() {
     signals_.cancel();
     acceptor_.close();
     ioContext_.stop();
-    Logger::Info("GameServer shutdown initiated");
+    Logger::Info("GameServer shutdown initiated for protocol '{}'", groupConfig_.protocol);
 }
 
-void GameServer::SetSessionFactory(std::function<std::shared_ptr<GameSession>(asio::ip::tcp::socket)> factory) {
+void GameServer::SetSessionFactory(SessionFactory factory) {
     sessionFactory_ = std::move(factory);
+}
+
+void GameServer::SetWebSocketConnectionFactory(WebSocketFactory factory) {
+    webSocketFactory_ = std::move(factory);
 }
