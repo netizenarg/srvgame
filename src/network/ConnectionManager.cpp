@@ -36,7 +36,7 @@ ConnectionManager::~ConnectionManager() {
     Logger::Info("ConnectionManager destroyed");
 }
 
-void ConnectionManager::Start(std::shared_ptr<GameSession> session) {
+void ConnectionManager::Start(std::shared_ptr<IConnection> session) {
     if (!session) {
         Logger::Error("Cannot start null session");
         return;
@@ -81,7 +81,7 @@ void ConnectionManager::Start(std::shared_ptr<GameSession> session) {
     });
 }
 
-void ConnectionManager::Stop(std::shared_ptr<GameSession> session) {
+void ConnectionManager::Stop(std::shared_ptr<IConnection> session) {
     if (!session) {
         return;
     }
@@ -132,7 +132,7 @@ void ConnectionManager::Stop(std::shared_ptr<GameSession> session) {
 void ConnectionManager::StopAll() {
     Logger::Info("Stopping all connections...");
 
-    std::vector<std::shared_ptr<GameSession>> allSessions;
+    std::vector<std::shared_ptr<IConnection>> allSessions;
 
     {
         std::unique_lock<std::shared_mutex> lock(sessionsMutex_);
@@ -167,9 +167,9 @@ size_t ConnectionManager::GetConnectionCount() const {
     return totalConnections_.load();
 }
 
-std::vector<std::shared_ptr<GameSession>> ConnectionManager::GetAllSessions() const {
+std::vector<std::shared_ptr<IConnection>> ConnectionManager::GetAllSessions() const {
     std::shared_lock<std::shared_mutex> lock(sessionsMutex_);
-    std::vector<std::shared_ptr<GameSession>> result;
+    std::vector<std::shared_ptr<IConnection>> result;
     result.reserve(sessions_.size());
 
     for (const auto& [id, session] : sessions_) {
@@ -179,7 +179,7 @@ std::vector<std::shared_ptr<GameSession>> ConnectionManager::GetAllSessions() co
     return result;
 }
 
-std::shared_ptr<GameSession> ConnectionManager::GetSession(uint64_t sessionId) const {
+std::shared_ptr<IConnection> ConnectionManager::GetSession(uint64_t sessionId) const {
     std::shared_lock<std::shared_mutex> lock(sessionsMutex_);
     auto it = sessions_.find(sessionId);
     if (it != sessions_.end()) {
@@ -389,8 +389,8 @@ std::set<std::string> ConnectionManager::GetDefaultGroups() const {
 
 // =============== Session Query Methods ===============
 
-std::vector<std::shared_ptr<GameSession>> ConnectionManager::GetSessionsByPlayerId(int64_t playerId) const {
-    std::vector<std::shared_ptr<GameSession>> result;
+std::vector<std::shared_ptr<IConnection>> ConnectionManager::GetSessionsByPlayerId(int64_t playerId) const {
+    std::vector<std::shared_ptr<IConnection>> result;
 
     std::shared_lock<std::shared_mutex> lock(sessionsMutex_);
     for (const auto& [sessionId, session] : sessions_) {
@@ -413,8 +413,8 @@ std::vector<uint64_t> ConnectionManager::GetSessionIdsInGroup(const std::string&
     return {};
 }
 
-std::vector<std::shared_ptr<GameSession>> ConnectionManager::GetSessionsInGroup(const std::string& groupId) const {
-    std::vector<std::shared_ptr<GameSession>> result;
+std::vector<std::shared_ptr<IConnection>> ConnectionManager::GetSessionsInGroup(const std::string& groupId) const {
+    std::vector<std::shared_ptr<IConnection>> result;
 
     std::shared_lock<std::shared_mutex> groupsLock(groupsMutex_);
     auto groupIt = groups_.find(groupId);
@@ -579,7 +579,7 @@ void ConnectionManager::CleanupInactiveSessions(int timeoutSeconds) {
 
         lastCleanup_ = now;
 
-    std::vector<std::shared_ptr<GameSession>> sessionsToRemove;
+    std::vector<std::shared_ptr<IConnection>> sessionsToRemove;
 
     {
         std::shared_lock<std::shared_mutex> sessionsLock(sessionsMutex_);
@@ -633,8 +633,8 @@ void ConnectionManager::DisconnectAllInGroup(const std::string& groupId) {
 
 // =============== Load Balancing and Distribution ===============
 
-std::vector<std::shared_ptr<GameSession>> ConnectionManager::GetSessionsByWorkerId(int workerId) const {
-    std::vector<std::shared_ptr<GameSession>> result;
+std::vector<std::shared_ptr<IConnection>> ConnectionManager::GetSessionsByWorkerId(int workerId) const {
+    std::vector<std::shared_ptr<IConnection>> result;
 
     std::shared_lock<std::shared_mutex> lock(sessionsMutex_);
     for (const auto& [sessionId, session] : sessions_) {
@@ -704,7 +704,7 @@ void ConnectionManager::EmitEvent(const std::string& eventType, const nlohmann::
 // =============== Broadcast with Filters ===============
 
 void ConnectionManager::BroadcastWithFilter(const nlohmann::json& message,
-                                            std::function<bool(std::shared_ptr<GameSession>)> filter) {
+                                            std::function<bool(std::shared_ptr<IConnection>)> filter) {
     std::shared_lock<std::shared_mutex> lock(sessionsMutex_);
 
     if (sessions_.empty()) {
@@ -747,19 +747,19 @@ void ConnectionManager::BroadcastWithFilter(const nlohmann::json& message,
 
 void ConnectionManager::BroadcastExcept(uint64_t excludeSessionId,
 const nlohmann::json& message) {
-BroadcastWithFilter(message, [excludeSessionId](std::shared_ptr<GameSession> session) {
+BroadcastWithFilter(message, [excludeSessionId](std::shared_ptr<IConnection> session) {
 return session->GetSessionId() != excludeSessionId;
 });
 }
 
 void ConnectionManager::BroadcastToAuthenticated(const nlohmann::json& message) {
-BroadcastWithFilter(message, [](std::shared_ptr<GameSession> session) {
+BroadcastWithFilter(message, [](std::shared_ptr<IConnection> session) {
 return session->IsAuthenticated();
 });
 }
 
 void ConnectionManager::BroadcastToUnauthenticated(const nlohmann::json& message) {
-BroadcastWithFilter(message, [](std::shared_ptr<GameSession> session) {
+BroadcastWithFilter(message, [](std::shared_ptr<IConnection> session) {
 return !session->IsAuthenticated();
 });
 }
@@ -823,7 +823,7 @@ void ConnectionManager::EnforceGlobalRateLimit(int maxMessagesPerSecond) {
 // =============== Session Migration ===============
 
 bool ConnectionManager::MigrateSession(uint64_t sessionId,
-std::shared_ptr<GameSession> newSession) {
+std::shared_ptr<IConnection> newSession) {
     std::unique_lock<std::shared_mutex> lock(sessionsMutex_);
 
     auto it = sessions_.find(sessionId);

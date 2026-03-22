@@ -15,6 +15,7 @@
 #include "network/ConnectionManager.hpp"
 #include "network/GameSession.hpp"
 #include "network/WebSocketProtocol.hpp"
+#include "network/WebSocketSession.hpp"
 
 class GameServer {
 public:

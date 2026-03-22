@@ -100,11 +100,12 @@ void GameServer::DoAccept() {
                     }
                 } else if (groupConfig_.protocol == "websocket") {
                     if (webSocketFactory_) {
-                        auto ws_conn = webSocketFactory_(std::move(socket), sslContext_);
-                        // TODO: Add to ConnectionManager (needs adaptation)
-                        ws_conn->Start();
+                        auto wsConn = webSocketFactory_(std::move(socket), sslContext_);
+                        auto session = std::make_shared<WebSocketSession>(wsConn);
+                        ConnectionManager::GetInstance().Start(session);
+                        session->Start();
                     } else {
-                        Logger::Error("No WebSocket factory set for websocket protocol");
+                        Logger::Error("No WebSocket factory set");
                     }
                 } else {
                     Logger::Error("Unknown protocol: {}", groupConfig_.protocol);

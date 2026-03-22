@@ -4,7 +4,6 @@
 #include <iostream>
 #include <thread>
 
-//#define USE_SPDLOG 1
 #include "logging/Logger.hpp"
 
 #include "config/ConfigManager.hpp"
@@ -12,7 +11,6 @@
 #include "network/GameServer.hpp"
 #include "process/ProcessPool.hpp"
 
-//#define USE_POSTGRESQL 1
 #include "database/DbManager.hpp"
 
 #include "game/GameLogic.hpp"
@@ -107,54 +105,64 @@ void WorkerMain(int workerId, const WorkerGroupConfig& groupConfig, ProcessPool*
         GameServer server(groupConfig, config);   // Pass group config and global config
 
         // Set session factory - using lambda with necessary captures
-        server.SetSessionFactory([workerId, processPool, &groupConfig](asio::ip::tcp::socket socket) {
-            auto session = std::make_shared<GameSession>(std::move(socket));
-
-            Logger::Debug("Worker {} created new game session {}",
-                          workerId, session->GetSessionId());
-
-            // Message handler - simplified for demonstration
-            session->SetMessageHandler([session, workerId, processPool](const nlohmann::json& msg) {
-                try {
-                    std::string msgType = msg.value("type", "");
-                    Logger::Debug("Worker {} processing message type: {}", workerId, msgType);
-
-                    // Check if message is for inter-process communication
-                    if (msgType == "ipc_message" && processPool) {
-                        // Extract IPC message details
-                        if (msg.contains("target_worker") && msg.contains("payload")) {
-                            int targetWorker = msg["target_worker"];
-                            std::string payload = msg["payload"].dump();
-
-                            // Send to another worker via master using new protocol
-                            if (processPool->SendToWorker(targetWorker, payload)) {
-                                Logger::Debug("Worker {} sent IPC message to worker {}",
-                                              workerId, targetWorker);
-                            } else {
-                                Logger::Error("Worker {} failed to send IPC message to worker {}",
-                                              workerId, targetWorker);
+        if (groupConfig.protocol == "binary") {
+            server.SetSessionFactory([workerId, processPool, &groupConfig]
+                                     (asio::ip::tcp::socket socket,
+                                      std::shared_ptr<asio::ssl::context> sslCtx)
+            {
+                auto session = std::make_shared<GameSession>(std::move(socket), sslCtx);
+                Logger::Debug("Worker {} created new game session {}",
+                            workerId, session->GetSessionId());
+                // Message handler - simplified for demonstration
+                session->SetMessageHandler([session, workerId, processPool](const nlohmann::json& msg) {
+                    try {
+                        std::string msgType = msg.value("type", "");
+                        Logger::Debug("Worker {} processing message type: {}", workerId, msgType);
+                        // Check if message is for inter-process communication
+                        if (msgType == "ipc_message" && processPool) { // Extract IPC message details
+                            if (msg.contains("target_worker") && msg.contains("payload")) {
+                                int targetWorker = msg["target_worker"];
+                                std::string payload = msg["payload"].dump();
+                                // Send to another worker via master using new protocol
+                                if (processPool->SendToWorker(targetWorker, payload)) {
+                                    Logger::Debug("Worker {} sent IPC message to worker {}",
+                                                workerId, targetWorker);
+                                } else {
+                                    Logger::Error("Worker {} failed to send IPC message to worker {}",
+                                                workerId, targetWorker);
+                                }
                             }
+                        } else { // Regular game message - delegate to game logic
+                            GameLogic::GetInstance().HandleMessage(session->GetSessionId(), msg);
                         }
-                    } else {
-                        // Regular game message - delegate to game logic
-                        GameLogic::GetInstance().HandleMessage(session->GetSessionId(), msg);
+                    } catch (const std::exception& e) {
+                        Logger::Error("Worker {} error processing message: {}", workerId, e.what());
+                        session->SendError("Internal server error", 500);
                     }
-                } catch (const std::exception& e) {
-                    Logger::Error("Worker {} error processing message: {}", workerId, e.what());
-                    session->SendError("Internal server error", 500);
+                });
+                session->SetCloseHandler([session, workerId]() { // Close handler
+                    Logger::Info("Worker {} session {} closing", workerId, session->GetSessionId());
+                    GameLogic::GetInstance().OnPlayerDisconnected(session->GetSessionId());
+                    Logger::Debug("Worker {} session {} cleanup complete", workerId, session->GetSessionId());
+                });
+                return session;
+            });
+        } else if (groupConfig.protocol == "websocket") {
+            server.SetWebSocketConnectionFactory([workerId, processPool, &groupConfig](asio::ip::tcp::socket socket, std::shared_ptr<asio::ssl::context> sslCtx) {
+                // Create a WebSocketConnection (which handles the upgrade)
+                auto wsConn = std::make_shared<WebSocketProtocol::WebSocketConnection>(std::move(socket));
+                if (sslCtx) {
+                    // For wss, we need to do SSL handshake before WebSocket upgrade.
+                    // This is more complex; we might need a separate SSL stream.
+                    // For now, assume SSL is handled by the acceptor (e.g., using asio::ssl::stream).
+                    // We'll need to extend WebSocketConnection to accept an SSL stream.
+                    // This is a more advanced integration; for simplicity, we can require SSL to be handled by the listener (i.e., wss://) which will already have an SSL stream.
+                    // The current WebSocketConnection doesn't support SSL; we may need to create an SSL version.
+                    // As a simplification, we can defer SSL WebSocket support.
                 }
+                return wsConn;
             });
-
-            // Close handler
-            session->SetCloseHandler([session, workerId]() {
-                Logger::Info("Worker {} session {} closing", workerId, session->GetSessionId());
-
-                GameLogic::GetInstance().OnPlayerDisconnected(session->GetSessionId());
-                Logger::Debug("Worker {} session {} cleanup complete", workerId, session->GetSessionId());
-            });
-
-            return session;
-        });
+        }
 
         // Pass connection manager to game logic before initialization
         gameLogic.SetConnectionManager(ConnectionManager::GetInstancePtr());
