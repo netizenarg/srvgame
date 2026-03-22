@@ -172,12 +172,19 @@ public:
 
     asio::ip::tcp::endpoint GetRemoteEndpoint() const;
     bool IsEncrypted() const { return ssl_stream_ != nullptr; }
-
+    std::string GetRemoteAddress() const override {
+        try {
+            return GetRemoteEndpoint().address().to_string();
+        } catch (const std::exception& e) {
+            Logger::Error("GetRemoteAddress: {}", e.what());
+            return "unknown";
+        }
+    }
     // Binary protocol methods
     void SendPing();
     void SendPong();
     void SendBinary(uint16_t message_type, const std::vector<uint8_t>& data) override;
-    void SendBinary(uint16_t message_type, const void* data, size_t length) override;
+    void SendBinary(uint16_t message_type, const void* data, size_t length);
     void SendBinaryWithAck(uint16_t message_type, const std::vector<uint8_t>& data);
     void SendBinaryError(uint16_t message_type, const std::string& error_message, int code);
 

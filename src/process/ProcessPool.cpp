@@ -120,6 +120,8 @@ void ProcessPool::MasterProcess() {
                 // Store config for this worker
                 groupConfig_ = group;
 
+                role_ = ProcessRole::WORKER;
+
                 Logger::Info("Worker {} started (PID: {}) for group {} ({}:{})",
                              globalWorkerId, getpid(), gidx, group.protocol, group.port);
 
@@ -133,7 +135,6 @@ void ProcessPool::MasterProcess() {
             } else if (pid > 0) {
                 // Master: record worker info
                 workers_[globalWorkerId] = {pid, static_cast<int>(gidx), w, group};
-                workerPids_[globalWorkerId] = pid; // we don't have workerPids_ anymore? Actually we use workers_ vector.
 
                 // Close the read end in master
                 if (workerPipes_[globalWorkerId * 2] != -1) {
@@ -223,6 +224,15 @@ void ProcessPool::CleanupDeadWorkers() {
     }
 }
 
+void ProcessPool::CloseAllPipes() {
+    for (size_t i = 0; i < workerPipes_.size(); ++i) {
+        if (workerPipes_[i] != -1) {
+            close(workerPipes_[i]);
+            workerPipes_[i] = -1;
+        }
+    }
+}
+
 void ProcessPool::RestartWorker(int globalWorkerId) {
     // Find which group this worker belongs to
     const auto& oldInfo = workers_[globalWorkerId];
@@ -267,6 +277,8 @@ void ProcessPool::RestartWorker(int globalWorkerId) {
 
         std::string processName = "game_worker_" + std::to_string(globalWorkerId);
         prctl(PR_SET_NAME, processName.c_str(), 0, 0, 0);
+
+        role_ = ProcessRole::WORKER;
 
         Logger::Info("Restarted worker {} (PID: {})", globalWorkerId, getpid());
 

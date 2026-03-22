@@ -8,7 +8,7 @@ GameServer::GameServer(const WorkerGroupConfig& groupConfig, const ConfigManager
       globalConfig_(globalConfig),
       host_(groupConfig.host),
       port_(groupConfig.port),
-      reusePort_(globalConfig.GetReusePort()),  // reuse_port from global config (could be moved to group)
+      reuse_(groupConfig.reuse),
       ioThreads_(groupConfig.threads)
 {
     // Set up SSL context if requested
@@ -32,7 +32,7 @@ bool GameServer::Initialize() {
             port_
         );
         acceptor_.open(endpoint.protocol());
-        if (reusePort_) {
+        if (reuse_) {
             acceptor_.set_option(asio::ip::tcp::acceptor::reuse_address(true));
             int optval = 1;
             if (setsockopt(acceptor_.native_handle(),
@@ -44,7 +44,7 @@ bool GameServer::Initialize() {
             }
         }
         acceptor_.bind(endpoint);
-        acceptor_.listen(globalConfig_.GetMaxConnections());
+        acceptor_.listen(groupConfig_.max_connections);
 
         SetupSignalHandlers();
         Logger::Info("GameServer initialized for protocol '{}' on {}:{}",

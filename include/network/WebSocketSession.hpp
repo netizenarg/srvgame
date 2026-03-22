@@ -22,6 +22,7 @@ public:
     uint64_t GetSessionId() const override;
 
     void Send(const nlohmann::json& message) override;
+    void SendRaw(const std::string& data) override;
     void SendBinary(uint16_t message_type, const std::vector<uint8_t>& data) override;
 
     void SetMessageHandler(MessageHandler handler) override;
@@ -31,6 +32,11 @@ public:
     bool IsAuthenticated() const override;
     void SetPlayerId(int64_t playerId) override;
     int64_t GetPlayerId() const override;
+    std::string GetAuthToken() const override;
+
+    void SetProperty(const std::string& key, const std::string& value) override;
+    std::string GetProperty(const std::string& key, const std::string& defaultValue = "") const override;
+    std::map<std::string, std::string> GetAllProperties() const override;
 
     void JoinGroup(const std::string& groupId) override;
     void LeaveGroup(const std::string& groupId) override;
@@ -44,6 +50,8 @@ public:
     void RemoveData(const std::string& key) override;
     void ClearData() override;
     nlohmann::json GetAllData() const override;
+
+    std::string GetRemoteAddress() const override;
 
 private:
     WebSocketProtocol::WebSocketConnection::Pointer wsConn_;
@@ -64,6 +72,10 @@ private:
     // Data
     mutable std::mutex dataMutex_;
     std::map<std::string, nlohmann::json> data_;
+
+    // Properties
+    mutable std::mutex propertiesMutex_;
+    std::map<std::string, std::string> properties_;
 
     // Internal helpers
     void OnMessage(const WebSocketProtocol::WebSocketMessage& msg);

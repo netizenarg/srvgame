@@ -276,11 +276,13 @@ int main(int argc, char* argv[]) {
     std::string conf_path = "config/core.json";
     auto& config = ConfigManager::GetInstance();
     if (!config.LoadConfig(conf_path)) {
-        std::cerr << "Failed to load configuration" << std::endl;
+        //std::cerr << "Failed to load configuration" << std::endl;
+        Logger::Critical("Failed to load configuration.");
         return 1;
     }
     else {
-        std::cout << "Success to load configuration" << std::endl;
+        //std::cout << "Success to load configuration" << std::endl;
+        Logger::Info("Success to load configuration.");
     }
 
     // Initialize logger with the actual config settings

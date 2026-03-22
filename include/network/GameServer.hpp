@@ -48,7 +48,7 @@ private:
 
     std::string host_;
     uint16_t port_;
-    bool reusePort_;
+    bool reuse_;
     int ioThreads_;
 
     std::vector<std::thread> workerThreads_;

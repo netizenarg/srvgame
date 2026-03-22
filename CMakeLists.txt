@@ -102,6 +102,7 @@ set(NETWORK_SOURCES
     src/network/NetworkQualityMonitor.cpp
     src/network/PredictionSystem.cpp
     src/network/WebSocketProtocol.cpp
+    src/network/WebSocketSession.cpp
 )
 
 # Loot system source files

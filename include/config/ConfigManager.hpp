@@ -32,6 +32,8 @@ struct WorkerGroupConfig {
     std::string protocol;               // "binary" or "websocket"
     std::string host;                   // "0.0.0.0" or specific IP
     uint16_t port;                      // listening port
+    int max_connections;                // asio::ip::tcp::acceptor.listen(max_connections)
+    bool reuse;                         // asio::ip::tcp::acceptor::reuse_address
     int threads;                        // number of io_context threads for this worker
     int count;                          // number of worker processes for this group
     std::vector<int> cpu_affinity;      // CPU cores to bind to (optional)
@@ -64,7 +66,6 @@ public:
     void SetJson(const std::string& key, const nlohmann::json& value);
 
     // Worker groups API
-    bool HasProcessConfig() const;
     std::vector<WorkerGroupConfig> GetWorkerGroups() const;
 
     // Total workers and threads (derived from groups)
@@ -119,8 +120,9 @@ private:
     ConfigManager(const ConfigManager&) = delete;
     ConfigManager& operator=(const ConfigManager&) = delete;
     
-    bool ValidateConfig() const;
-    
+    bool HasProcessConfig() const;
+    bool ValidateConfig(const nlohmann::json& config) const;
+
     mutable std::mutex configMutex_;
     nlohmann::json config_;
     std::string configPath_;

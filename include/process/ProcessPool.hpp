@@ -24,7 +24,7 @@
 #include <signal.h>
 
 #include "logging/Logger.hpp"
-#include "config/ConfigManager.hpp"  // for WorkerGroupConfig
+#include "config/ConfigManager.hpp"
 
 class ProcessPool {
 public:
@@ -46,9 +46,10 @@ public:
     void Stop();
 
     ProcessRole GetRole() const { return role_; }
-    int GetWorkerId() const { return workerId_; }           // global ID (0..total-1)
+    int GetWorkerId() const { return workerId_; }
     const WorkerGroupConfig& GetWorkerGroupConfig() const { return groupConfig_; }
     pid_t GetMasterPid() const { return masterPid_; }
+    int GetTotalWorkerCount() const { return totalWorkers_; }
 
     // Callback for worker process – now receives both global ID and group config
     using WorkerMainFunc = std::function<void(int workerId, const WorkerGroupConfig& config)>;

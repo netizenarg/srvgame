@@ -4,6 +4,8 @@
 #include <functional>
 #include <string>
 #include <vector>
+#include <map>
+#include <set>
 
 #include <nlohmann/json.hpp>
 
@@ -20,6 +22,7 @@ public:
 
     // Send methods
     virtual void Send(const nlohmann::json& message) = 0;
+    virtual void SendRaw(const std::string& data) = 0;
     virtual void SendBinary(uint16_t message_type, const std::vector<uint8_t>& data) = 0;
 
     // Callback setters
@@ -34,6 +37,12 @@ public:
     virtual bool IsAuthenticated() const = 0;
     virtual void SetPlayerId(int64_t playerId) = 0;
     virtual int64_t GetPlayerId() const = 0;
+    virtual std::string GetAuthToken() const = 0;
+
+    // Properties (key‑value pairs for metadata)
+    virtual void SetProperty(const std::string& key, const std::string& value) = 0;
+    virtual std::string GetProperty(const std::string& key, const std::string& defaultValue = "") const = 0;
+    virtual std::map<std::string, std::string> GetAllProperties() const = 0;
 
     // Groups
     virtual void JoinGroup(const std::string& groupId) = 0;
@@ -42,7 +51,7 @@ public:
     virtual std::set<std::string> GetJoinedGroups() const = 0;
     virtual bool IsInGroup(const std::string& groupId) const = 0;
 
-    // Data storage
+    // Data storage (JSON)
     virtual void SetData(const std::string& key, const nlohmann::json& value) = 0;
     virtual nlohmann::json GetData(const std::string& key, const nlohmann::json& defaultValue = {}) const = 0;
     virtual bool HasData(const std::string& key) const = 0;
@@ -50,7 +59,10 @@ public:
     virtual void ClearData() = 0;
     virtual nlohmann::json GetAllData() const = 0;
 
+    // Remote info
+    virtual std::string GetRemoteAddress() const = 0;
+
     // Statistics (optional, can be empty implementations)
-    virtual void RecordMessageReceived(size_t size) {}
-    virtual void RecordMessageSent(size_t size) {}
+    virtual void RecordMessageReceived(size_t size) {(void)size;}
+    virtual void RecordMessageSent(size_t size) {(void)size;}
 };

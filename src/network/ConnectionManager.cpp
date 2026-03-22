@@ -63,21 +63,14 @@ void ConnectionManager::Start(std::shared_ptr<IConnection> session) {
     // Record session start time for statistics
     std::lock_guard<std::mutex> statsLock(statsMutex_);
     sessionStats_[sessionId] = SessionStatsInfo{std::chrono::system_clock::now(),std::chrono::system_clock::now(),0,0,0,0};
-    //     .start_time = std::chrono::system_clock::now(),
-    //     .last_activity = std::chrono::system_clock::now(),
-    //     .messages_sent = 0,
-    //     .messages_received = 0,
-    //     .bytes_sent = 0,
-    //     .bytes_received = 0
-    // };
 
     Logger::Info("Session {} started. Total connections: {}",
                  sessionId, totalConnections_.load());
 
     // Emit connection event
-    EmitEvent("connection_started", {
+    EmitEvent("connection_started", nlohmann::json{
         {"session_id", sessionId},
-        {"remote_endpoint", session->GetRemoteEndpoint().address().to_string()}
+        {"remote_endpoint", session->GetRemoteAddress()}
     });
 }
 

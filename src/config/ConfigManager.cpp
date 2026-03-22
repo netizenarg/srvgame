@@ -6,9 +6,7 @@ ConfigManager& ConfigManager::GetInstance() {
 }
 
 bool ConfigManager::LoadConfig(const std::string& configPath) {
-    std::lock_guard<std::mutex> lock(configMutex_);
-    configPath_ = configPath;
-
+    nlohmann::json loaded;
     try {
         std::ifstream configFile(configPath);
         if (!configFile.is_open()) {
@@ -18,10 +16,7 @@ bool ConfigManager::LoadConfig(const std::string& configPath) {
 
         std::stringstream buffer;
         buffer << configFile.rdbuf();
-        config_ = nlohmann::json::parse(buffer.str());
-
-        Logger::Info("Configuration loaded successfully from: {}", configPath);
-        return ValidateConfig();
+        loaded = nlohmann::json::parse(buffer.str());
 
     } catch (const nlohmann::json::parse_error& e) {
         Logger::Critical("JSON parse error in config file: {}", e.what());
@@ -30,6 +25,20 @@ bool ConfigManager::LoadConfig(const std::string& configPath) {
         Logger::Critical("Failed to load config: {}", e.what());
         return false;
     }
+
+    if (!ValidateConfig(loaded)) {
+        Logger::Critical("Configuration validation failed.");
+        return false;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(configMutex_);
+        config_ = std::move(loaded);
+        configPath_ = configPath;
+    }
+
+    Logger::Info("Configuration loaded successfully from: {}", configPath);
+    return true;
 }
 
 bool ConfigManager::ReloadConfig() {
@@ -42,16 +51,17 @@ bool ConfigManager::ReloadConfig() {
 }
 
 bool ConfigManager::HasProcessConfig() const {
-    std::lock_guard<std::mutex> lock(configMutex_);
+    //ATTENTION: RECURSIVELY CALL MUTEX LOCK, DO NOT USE LINE BELOW
+    //std::lock_guard<std::mutex> lock(configMutex_);
     return config_.contains("process") && config_["process"].contains("workers") &&
-           config_["process"]["workers"].is_array() && !config_["process"]["workers"].empty();
+    config_["process"]["workers"].is_array() && !config_["process"]["workers"].empty();
 }
 
 std::vector<WorkerGroupConfig> ConfigManager::GetWorkerGroups() const {
     std::lock_guard<std::mutex> lock(configMutex_);
     std::vector<WorkerGroupConfig> groups;
 
-    if (!HasProcessConfig())
+    if (!HasProcessConfig())//ATTENTION: RECURSIVELY CALL MUTEX LOCK
         return groups;
 
     for (const auto& w : config_["process"]["workers"]) {
@@ -59,6 +69,8 @@ std::vector<WorkerGroupConfig> ConfigManager::GetWorkerGroups() const {
         g.protocol = w.value("protocol", "binary");
         g.host = w.value("host", "0.0.0.0");
         g.port = static_cast<uint16_t>(w.value("port", 8080));
+        g.max_connections = w.value("max_connections", 1000);
+        g.reuse = w.value("reuse", true);
         g.threads = w.value("threads", 1);
         g.count = w.value("count", 1);
         g.cpu_affinity = w.value("cpu_affinity", std::vector<int>());
@@ -97,14 +109,15 @@ int ConfigManager::GetTotalThreadCount() const {
     return total;
 }
 
-bool ConfigManager::ValidateConfig() const {
+bool ConfigManager::ValidateConfig(const nlohmann::json& config) const {
     Logger::Info("Validate config started...");
     try {
-        if (!HasProcessConfig()) {
+        if (!config.contains("process") || !config["process"].contains("workers") ||
+            !config["process"]["workers"].is_array() || config["process"]["workers"].empty()) {
             throw std::runtime_error("Missing 'process.workers' array section");
         }
 
-        const auto& workers = config_["process"]["workers"];
+        const auto& workers = config["process"]["workers"];
         for (size_t i = 0; i < workers.size(); ++i) {
             const auto& w = workers[i];
             std::string proto = w.value("protocol", "binary");
@@ -134,8 +147,8 @@ bool ConfigManager::ValidateConfig() const {
         }
 
         // Validate database section
-        if (config_.contains("database")) {
-            const auto& database = config_["database"];
+        if (config.contains("database")) {
+            const auto& database = config["database"];
             if (!database.contains("name") || !database["name"].is_string()) {
                 throw std::runtime_error("Invalid or missing 'database.name'");
             }
@@ -144,8 +157,8 @@ bool ConfigManager::ValidateConfig() const {
         }
 
         // Validate game section
-        if (config_.contains("game")) {
-            const auto& game = config_["game"];
+        if (config.contains("game")) {
+            const auto& game = config["game"];
             if (!game.contains("max_players_per_session") ||
                 !game["max_players_per_session"].is_number_unsigned()) {
                 throw std::runtime_error("Invalid or missing 'game.max_players_per_session'");
@@ -155,8 +168,8 @@ bool ConfigManager::ValidateConfig() const {
         }
 
         // Validate logging section
-        if (config_.contains("logging")) {
-            const auto& logging = config_["logging"];
+        if (config.contains("logging")) {
+            const auto& logging = config["logging"];
             if (!logging.contains("level") || !logging["level"].is_string()) {
                 throw std::runtime_error("Invalid or missing 'logging.level'");
             }
