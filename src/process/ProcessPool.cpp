@@ -1,12 +1,19 @@
 #include "process/ProcessPool.hpp"
 
-// Declare the global shutdown flag from main.cpp
 extern std::atomic<bool> g_shutdown;
 
-ProcessPool::ProcessPool(int numProcesses)
-    : numProcesses_(numProcesses > 0 ? numProcesses : 1) {
-    workerPids_.resize(numProcesses_, -1);
-    workerPipes_.resize(numProcesses_ * 2, -1);
+ProcessPool::ProcessPool(const std::vector<WorkerGroupConfig>& groups)
+    : groups_(groups)
+{
+    // Compute total number of workers
+    totalWorkers_ = 0;
+    for (const auto& g : groups_) {
+        totalWorkers_ += g.count;
+    }
+
+    // Pre-allocate vectors
+    workers_.resize(totalWorkers_);
+    workerPipes_.resize(totalWorkers_ * 2, -1);
 }
 
 ProcessPool::~ProcessPool() {
@@ -14,8 +21,8 @@ ProcessPool::~ProcessPool() {
 }
 
 bool ProcessPool::Initialize() {
-    if (numProcesses_ <= 0) {
-        Logger::Error("Invalid number of processes: {}", numProcesses_);
+    if (totalWorkers_ <= 0) {
+        Logger::Error("No workers configured");
         return false;
     }
 
@@ -24,22 +31,23 @@ bool ProcessPool::Initialize() {
     running_.store(true);
     shutdownRequested_.store(false);
 
-    for (int i = 0; i < numProcesses_; ++i) {
+    // Create pipes for each worker
+    for (int i = 0; i < totalWorkers_; ++i) {
         CreateWorkerPipe(i);
     }
 
     return true;
 }
 
-void ProcessPool::CreateWorkerPipe(int workerId) {
+void ProcessPool::CreateWorkerPipe(int globalWorkerId) {
     int pipefd[2];
     if (pipe(pipefd) == -1) {
-        Logger::Error("Failed to create pipe for worker {}: {}", workerId, strerror(errno));
+        Logger::Error("Failed to create pipe for worker {}: {}", globalWorkerId, strerror(errno));
         return;
     }
 
-    int read_idx = workerId * 2;
-    int write_idx = workerId * 2 + 1;
+    int read_idx = globalWorkerId * 2;
+    int write_idx = globalWorkerId * 2 + 1;
 
     if (workerPipes_[read_idx] != -1) close(workerPipes_[read_idx]);
     if (workerPipes_[write_idx] != -1) close(workerPipes_[write_idx]);
@@ -60,7 +68,14 @@ void ProcessPool::Run() {
     if (getpid() == masterPid_) {
         masterThread_ = std::thread(&ProcessPool::MasterProcess, this);
     } else {
-        WorkerProcess(workerId_);
+        // Worker process: we need to know which global worker ID and group config we have.
+        // This is set in the child before calling Run(), but here we need to retrieve it.
+        // We'll set a member variable in the child branch before calling Run.
+        // However, the constructor only runs in the master; for workers, we need to
+        // set these after fork. The child branch of MasterProcess will set them.
+        // So this branch should never be executed directly because we call WorkerProcess
+        // explicitly from the child after fork.
+        Logger::Error("Worker process started without proper initialization");
     }
 }
 
@@ -70,64 +85,78 @@ void ProcessPool::MasterProcess() {
     sigset_t oldset;
     BlockSignals(&oldset);
 
-    for (int i = 0; i < numProcesses_; ++i) {
-        pid_t pid = fork();
+    // Spawn workers in order of groups
+    int globalWorkerId = 0;
+    for (size_t gidx = 0; gidx < groups_.size(); ++gidx) {
+        const auto& group = groups_[gidx];
+        for (int w = 0; w < group.count; ++w, ++globalWorkerId) {
+            pid_t pid = fork();
 
-        if (pid == 0) {
-            // Child
-            signal(SIGINT, SIG_IGN);
-            // SIGTERM handler: sets the global shutdown flag (async‑safe)
-            signal(SIGTERM, [](int) { g_shutdown.store(true, std::memory_order_relaxed); });
+            if (pid == 0) {
+                // Child process
+                signal(SIGINT, SIG_IGN);
+                // SIGTERM handler: sets the global shutdown flag (async‑safe)
+                signal(SIGTERM, [](int) { g_shutdown.store(true, std::memory_order_relaxed); });
 
-            UnblockSignals(&oldset);
+                UnblockSignals(&oldset);
 
-            // Permanently block SIGINT only (SIGTERM remains unblocked)
-            sigset_t block_int;
-            sigemptyset(&block_int);
-            sigaddset(&block_int, SIGINT);
-            pthread_sigmask(SIG_BLOCK, &block_int, nullptr);
+                // Permanently block SIGINT only (SIGTERM remains unblocked)
+                sigset_t block_int;
+                sigemptyset(&block_int);
+                sigaddset(&block_int, SIGINT);
+                pthread_sigmask(SIG_BLOCK, &block_int, nullptr);
 
-            workerId_ = i;
-            role_ = ProcessRole::WORKER;
-
-            for (int j = 0; j < numProcesses_ * 2; ++j) {
-                if (j != workerId_ * 2) {
-                    if (workerPipes_[j] != -1) close(workerPipes_[j]);
+                // Close all pipe ends except the one for this worker
+                for (int i = 0; i < totalWorkers_ * 2; ++i) {
+                    if (i != globalWorkerId * 2) {
+                        if (workerPipes_[i] != -1) close(workerPipes_[i]);
+                    }
                 }
+
+                // Set worker process name
+                std::string processName = "game_worker_" + std::to_string(globalWorkerId);
+                prctl(PR_SET_NAME, processName.c_str(), 0, 0, 0);
+
+                // Store config for this worker
+                groupConfig_ = group;
+
+                Logger::Info("Worker {} started (PID: {}) for group {} ({}:{})",
+                             globalWorkerId, getpid(), gidx, group.protocol, group.port);
+
+                WorkerProcess(globalWorkerId, group);
+
+                // Cleanup: close read end of pipe
+                if (workerPipes_[globalWorkerId * 2] != -1)
+                    close(workerPipes_[globalWorkerId * 2]);
+                _exit(0);
+
+            } else if (pid > 0) {
+                // Master: record worker info
+                workers_[globalWorkerId] = {pid, static_cast<int>(gidx), w, group};
+                workerPids_[globalWorkerId] = pid; // we don't have workerPids_ anymore? Actually we use workers_ vector.
+
+                // Close the read end in master
+                if (workerPipes_[globalWorkerId * 2] != -1) {
+                    close(workerPipes_[globalWorkerId * 2]);
+                    workerPipes_[globalWorkerId * 2] = -1;
+                }
+
+                // Health tracking
+                {
+                    std::lock_guard<std::mutex> lock(healthMutex_);
+                    workerHealth_[globalWorkerId] = {pid, time(nullptr)};
+                }
+
+                Logger::Info("Worker {} started with PID: {}", globalWorkerId, pid);
+            } else {
+                Logger::Error("Failed to fork worker {}: {}", globalWorkerId, strerror(errno));
             }
-
-            std::string processName = "game_worker_" + std::to_string(i);
-            prctl(PR_SET_NAME, processName.c_str(), 0, 0, 0);
-
-            Logger::Info("Worker process {} started (PID: {})", i, getpid());
-
-            WorkerProcess(i);
-
-            if (workerPipes_[workerId_ * 2] != -1)
-                close(workerPipes_[workerId_ * 2]);
-            _exit(0);
-
-        } else if (pid > 0) {
-            workerPids_[i] = pid;
-
-            if (workerPipes_[i * 2] != -1) {
-                close(workerPipes_[i * 2]);
-                workerPipes_[i * 2] = -1;
-            }
-
-            {
-                std::lock_guard<std::mutex> lock(healthMutex_);
-                workerHealth_[i] = {pid, time(nullptr)};
-            }
-
-            Logger::Info("Worker {} started with PID: {}", i, pid);
-        } else {
-            Logger::Error("Failed to fork worker {}: {}", i, strerror(errno));
         }
     }
 
     UnblockSignals(&oldset);
 
+    // Main loop: monitor workers and check for shutdown
     while (running_.load() && !shutdownRequested_.load()) {
         CleanupDeadWorkers();
         for (int i = 0; i < 10 && running_.load() && !shutdownRequested_.load(); ++i) {
@@ -135,17 +164,19 @@ void ProcessPool::MasterProcess() {
         }
     }
 
-    for (int i = 0; i < numProcesses_; ++i) {
-        if (workerPids_[i] > 0) {
-            Logger::Info("Terminating worker {} (PID: {})", i, workerPids_[i]);
-            kill(workerPids_[i], SIGTERM);
+    // Send SIGTERM to all workers
+    for (int i = 0; i < totalWorkers_; ++i) {
+        if (workers_[i].pid > 0) {
+            Logger::Info("Terminating worker {} (PID: {})", i, workers_[i].pid);
+            kill(workers_[i].pid, SIGTERM);
         }
     }
 
+    // Wait for all workers to exit
     int status;
-    for (int i = 0; i < numProcesses_; ++i) {
-        if (workerPids_[i] > 0) {
-            waitpid(workerPids_[i], &status, 0);
+    for (int i = 0; i < totalWorkers_; ++i) {
+        if (workers_[i].pid > 0) {
+            waitpid(workers_[i].pid, &status, 0);
             Logger::Info("Worker {} exited with status: {}", i, status);
         }
     }
@@ -154,23 +185,12 @@ void ProcessPool::MasterProcess() {
     Logger::Info("Master process shutdown complete");
 }
 
-void ProcessPool::CloseAllPipes() {
-    for (size_t i = 0; i < workerPipes_.size(); ++i) {
-        if (workerPipes_[i] != -1) {
-            close(workerPipes_[i]);
-            workerPipes_[i] = -1;
-        }
-    }
-}
-
-void ProcessPool::WorkerProcess(int workerId) {
-    this->workerId_ = workerId;
-
-    // No need to set signal handlers here – they are already set in the child branch.
-    // The SIGTERM handler set earlier will remain active.
+void ProcessPool::WorkerProcess(int globalWorkerId, const WorkerGroupConfig& config) {
+    this->workerId_ = globalWorkerId;
+    this->groupConfig_ = config;
 
     if (workerMainFunc_) {
-        workerMainFunc_(workerId);
+        workerMainFunc_(globalWorkerId, config);
     }
 }
 
@@ -179,8 +199,8 @@ void ProcessPool::CleanupDeadWorkers() {
     pid_t pid;
 
     while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
-        for (int i = 0; i < numProcesses_; ++i) {
-            if (workerPids_[i] == pid) {
+        for (int i = 0; i < totalWorkers_; ++i) {
+            if (workers_[i].pid == pid) {
                 Logger::Warn("Worker {} (PID: {}) died with status {}, {}...",
                              i, pid, WEXITSTATUS(status),
                              shutdownRequested_.load() ? "not restarting (shutdown)" : "restarting");
@@ -203,17 +223,22 @@ void ProcessPool::CleanupDeadWorkers() {
     }
 }
 
-void ProcessPool::RestartWorker(int workerId) {
+void ProcessPool::RestartWorker(int globalWorkerId) {
+    // Find which group this worker belongs to
+    const auto& oldInfo = workers_[globalWorkerId];
+    const auto& group = oldInfo.config;
+
+    // Create new pipe for this worker
     int pipefd[2];
     if (pipe(pipefd) == -1) {
-        Logger::Error("Failed to create pipe for worker {}: {}", workerId, strerror(errno));
+        Logger::Error("Failed to create pipe for restarting worker {}: {}", globalWorkerId, strerror(errno));
         return;
     }
 
-    int old_read = workerPipes_[workerId * 2];
-    int old_write = workerPipes_[workerId * 2 + 1];
-    workerPipes_[workerId * 2] = pipefd[0];
-    workerPipes_[workerId * 2 + 1] = pipefd[1];
+    int old_read = workerPipes_[globalWorkerId * 2];
+    int old_write = workerPipes_[globalWorkerId * 2 + 1];
+    workerPipes_[globalWorkerId * 2] = pipefd[0];
+    workerPipes_[globalWorkerId * 2 + 1] = pipefd[1];
 
     sigset_t oldset;
     BlockSignals(&oldset);
@@ -221,59 +246,61 @@ void ProcessPool::RestartWorker(int workerId) {
     pid_t pid = fork();
 
     if (pid == 0) {
+        // Child
         signal(SIGINT, SIG_IGN);
         signal(SIGTERM, [](int) { g_shutdown.store(true, std::memory_order_relaxed); });
 
         UnblockSignals(&oldset);
 
-        // Permanently block SIGINT only
+        // Block SIGINT permanently
         sigset_t block_int;
         sigemptyset(&block_int);
         sigaddset(&block_int, SIGINT);
         pthread_sigmask(SIG_BLOCK, &block_int, nullptr);
 
-        workerId_ = workerId;
-        role_ = ProcessRole::WORKER;
-
-        for (int j = 0; j < numProcesses_ * 2; ++j) {
-            if (j != workerId * 2) {
-                if (workerPipes_[j] != -1) close(workerPipes_[j]);
+        // Close all pipe ends except this worker's read end
+        for (int i = 0; i < totalWorkers_ * 2; ++i) {
+            if (i != globalWorkerId * 2) {
+                if (workerPipes_[i] != -1) close(workerPipes_[i]);
             }
         }
 
-        fcntl(workerPipes_[workerId * 2], F_SETFL, O_NONBLOCK);
-
-        std::string processName = "game_worker_" + std::to_string(workerId);
+        std::string processName = "game_worker_" + std::to_string(globalWorkerId);
         prctl(PR_SET_NAME, processName.c_str(), 0, 0, 0);
 
-        Logger::Info("Restarted worker {} (PID: {})", workerId, getpid());
+        Logger::Info("Restarted worker {} (PID: {})", globalWorkerId, getpid());
 
-        WorkerProcess(workerId);
+        WorkerProcess(globalWorkerId, group);
 
-        if (workerPipes_[workerId * 2] != -1)
-            close(workerPipes_[workerId * 2]);
+        if (workerPipes_[globalWorkerId * 2] != -1)
+            close(workerPipes_[globalWorkerId * 2]);
         _exit(0);
 
     } else if (pid > 0) {
-        workerPids_[workerId] = pid;
+        // Master
+        workers_[globalWorkerId].pid = pid;
 
-        close(workerPipes_[workerId * 2]);
-        workerPipes_[workerId * 2] = -1;
+        // Close read end in master
+        if (workerPipes_[globalWorkerId * 2] != -1) {
+            close(workerPipes_[globalWorkerId * 2]);
+            workerPipes_[globalWorkerId * 2] = -1;
+        }
 
-        fcntl(workerPipes_[workerId * 2 + 1], F_SETFL, O_NONBLOCK);
+        // Set non‑blocking for write end
+        fcntl(workerPipes_[globalWorkerId * 2 + 1], F_SETFL, O_NONBLOCK);
 
         {
             std::lock_guard<std::mutex> lock(healthMutex_);
-            workerHealth_[workerId] = {pid, time(nullptr)};
+            workerHealth_[globalWorkerId] = {pid, time(nullptr)};
         }
 
-        Logger::Info("Worker {} restarted with PID: {}", workerId, pid);
+        Logger::Info("Worker {} restarted with PID: {}", globalWorkerId, pid);
     } else {
-        Logger::Error("Failed to restart worker {}: {}", workerId, strerror(errno));
+        Logger::Error("Failed to restart worker {}: {}", globalWorkerId, strerror(errno));
         close(pipefd[0]);
         close(pipefd[1]);
-        workerPipes_[workerId * 2] = old_read;
-        workerPipes_[workerId * 2 + 1] = old_write;
+        workerPipes_[globalWorkerId * 2] = old_read;
+        workerPipes_[globalWorkerId * 2 + 1] = old_write;
     }
 
     UnblockSignals(&oldset);
@@ -404,7 +431,7 @@ bool ProcessPool::DrainPipe(int fd, size_t bytesToDrain) {
 }
 
 bool ProcessPool::SendToWorker(int workerId, const std::string& message) {
-    if (workerId < 0 || workerId >= numProcesses_) {
+    if (workerId < 0 || workerId >= totalWorkers_) {
         Logger::Error("Invalid worker ID: {}", workerId);
         return false;
     }
@@ -466,7 +493,7 @@ std::string ProcessPool::ReceiveFromMaster() {
 }
 
 bool ProcessPool::IsWorkerAlive(int workerId) const {
-    if (workerId < 0 || workerId >= numProcesses_) {
+    if (workerId < 0 || workerId >= totalWorkers_) {
         return false;
     }
     std::lock_guard<std::mutex> lock(healthMutex_);
@@ -484,7 +511,7 @@ void ProcessPool::SetupSignalHandlers() {
     signal(SIGPIPE, SIG_IGN);
 }
 
-void ProcessPool::SetWorkerMain(std::function<void(int)> workerMainFunc) {
+void ProcessPool::SetWorkerMain(WorkerMainFunc workerMainFunc) {
     workerMainFunc_ = std::move(workerMainFunc);
 }
 
