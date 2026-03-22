@@ -3,19 +3,20 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
-#include <unordered_set>
-#include <shared_mutex>
-#include <mutex>
-#include <memory>
-#include <string>
-#include <vector>
 #include <functional>
+#include <memory>
+#include <mutex>
+#include <shared_mutex>
+#include <string>
 #include <set>
+#include <vector>
+#include <unordered_set>
 #include <unordered_map>
 
-#include "logging/Logger.hpp"
-#include "network/GameSession.hpp"
 #include "nlohmann/json.hpp"
+
+#include "logging/Logger.hpp"
+#include "network/IConnection.hpp"
 
 class ConnectionManager {
 public:
@@ -29,13 +30,13 @@ public:
     // Get shared_ptr to singleton (useful for passing to other components)
     static std::shared_ptr<ConnectionManager> GetInstancePtr();
 
-    void Start(std::shared_ptr<GameSession> session);
-    void Stop(std::shared_ptr<GameSession> session);
+    void Start(std::shared_ptr<IConnection> session);
+    void Stop(std::shared_ptr<IConnection> session);
     void StopAll();
 
     size_t GetConnectionCount() const;
-    std::shared_ptr<GameSession> GetSession(uint64_t sessionId) const;
-    std::vector<std::shared_ptr<GameSession>> GetAllSessions() const;
+    std::shared_ptr<IConnection> GetSession(uint64_t sessionId) const;
+    std::vector<std::shared_ptr<IConnection>> GetAllSessions() const;
 
     // Broadcast methods
     void Broadcast(const nlohmann::json& message);
@@ -43,7 +44,7 @@ public:
     
     // New broadcast methods
     void BroadcastWithFilter(const nlohmann::json& message,
-                           std::function<bool(std::shared_ptr<GameSession>)> filter);
+                           std::function<bool(std::shared_ptr<IConnection>)> filter);
     void BroadcastExcept(uint64_t excludeSessionId, const nlohmann::json& message);
     void BroadcastToAuthenticated(const nlohmann::json& message);
     void BroadcastToUnauthenticated(const nlohmann::json& message);
@@ -54,9 +55,9 @@ public:
     void RemoveFromAllGroups(uint64_t sessionId);
 
     // Session query methods
-    std::vector<std::shared_ptr<GameSession>> GetSessionsByPlayerId(int64_t playerId) const;
+    std::vector<std::shared_ptr<IConnection>> GetSessionsByPlayerId(int64_t playerId) const;
     std::vector<uint64_t> GetSessionIdsInGroup(const std::string& groupId) const;
-    std::vector<std::shared_ptr<GameSession>> GetSessionsInGroup(const std::string& groupId) const;
+    std::vector<std::shared_ptr<IConnection>> GetSessionsInGroup(const std::string& groupId) const;
     std::set<std::string> GetGroupsForSession(uint64_t sessionId) const;
     bool IsSessionInGroup(uint64_t sessionId, const std::string& groupId) const;
     
@@ -106,7 +107,7 @@ public:
     void DisconnectAllInGroup(const std::string& groupId);
     
     // Load balancing
-    std::vector<std::shared_ptr<GameSession>> GetSessionsByWorkerId(int workerId) const;
+    std::vector<std::shared_ptr<IConnection>> GetSessionsByWorkerId(int workerId) const;
     void RedistributeSessions(const std::vector<int>& workerIds);
     
     // Event system
@@ -118,7 +119,7 @@ public:
     void EnforceGlobalRateLimit(int maxMessagesPerSecond);
     
     // Session migration
-    bool MigrateSession(uint64_t sessionId, std::shared_ptr<GameSession> newSession);
+    bool MigrateSession(uint64_t sessionId, std::shared_ptr<IConnection> newSession);
     
     // Monitoring
     void MonitorConnections();
@@ -138,7 +139,7 @@ private:
 
     // Session storage
     mutable std::shared_mutex sessionsMutex_;
-    std::unordered_map<uint64_t, std::shared_ptr<GameSession>> sessions_;
+    std::unordered_map<uint64_t, std::shared_ptr<IConnection>> sessions_;
 
     // Group management
     mutable std::shared_mutex groupsMutex_;

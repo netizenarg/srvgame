@@ -79,6 +79,32 @@ cmake .. -B . \
 # Build
 make -j$(nproc)
 
+# ========== SSL Certificate Generation ==========
+# Generate self-signed SSL certificates if missing
+if command -v openssl &> /dev/null; then
+    # Create certs directory if needed
+    mkdir -p certs
+    # Generate server certificate and key if not present
+    if [ ! -f "certs/server.crt" ] || [ ! -f "certs/server.key" ]; then
+        echo "Generating self-signed SSL certificate..."
+        openssl req -x509 -newkey rsa:4096 \
+            -keyout certs/server.key \
+            -out certs/server.crt \
+            -days 365 -nodes \
+            -subj "/CN=localhost"
+        echo "SSL certificate and key created in certs/"
+    fi
+    # Generate DH parameters if not present (optional but may be used)
+    if [ ! -f "certs/dhparam.pem" ]; then
+        echo "Generating DH parameters (this may take a moment)..."
+        openssl dhparam -out certs/dhparam.pem 2048
+        echo "DH parameters generated."
+    fi
+else
+    echo "openssl not found, skipping SSL certificate generation"
+fi
+# ================================================
+
 if [ -f "gameserver" ]; then
     echo "Build successful! Executable: $(pwd)/gameserver"
 else

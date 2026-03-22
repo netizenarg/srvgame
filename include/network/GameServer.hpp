@@ -2,28 +2,37 @@
 
 #include <functional>
 #include <memory>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
 #include <string>
-#include <sys/socket.h>
+#include <vector>
+#include <thread>
+#include <atomic>
 
 #include <asio.hpp>
-#include <asio/error.hpp>
+#include <asio/ssl.hpp>
 
 #include "logging/Logger.hpp"
 #include "config/ConfigManager.hpp"
 #include "network/ConnectionManager.hpp"
+#include "network/GameSession.hpp"
+#include "network/WebSocketProtocol.hpp"
+#include "network/WebSocketSession.hpp"
 
 class GameServer {
 public:
-    GameServer(const ConfigManager& config);
+    GameServer(const WorkerGroupConfig& groupConfig, const ConfigManager& globalConfig);
     ~GameServer();
 
     bool Initialize();
     void Run();
     void Shutdown();
 
-    void SetSessionFactory(std::function<std::shared_ptr<GameSession>(asio::ip::tcp::socket)> factory);
+    // For binary protocol
+    using SessionFactory = std::function<std::shared_ptr<GameSession>(asio::ip::tcp::socket, std::shared_ptr<asio::ssl::context>)>;
+    void SetSessionFactory(SessionFactory factory);
+
+    // For WebSocket protocol
+    using WebSocketFactory = std::function<WebSocketProtocol::WebSocketConnection::Pointer(asio::ip::tcp::socket, std::shared_ptr<asio::ssl::context>)>;
+    void SetWebSocketConnectionFactory(WebSocketFactory factory);
 
 private:
     void DoAccept();
@@ -34,15 +43,19 @@ private:
     asio::ip::tcp::acceptor acceptor_;
     asio::signal_set signals_;
 
+    WorkerGroupConfig groupConfig_;
+    const ConfigManager& globalConfig_;
+
     std::string host_;
     uint16_t port_;
-    bool reusePort_;
+    bool reuse_;
     int ioThreads_;
 
     std::vector<std::thread> workerThreads_;
     std::atomic<bool> running_{false};
 
-    std::function<std::shared_ptr<GameSession>(asio::ip::tcp::socket)> sessionFactory_;
+    std::shared_ptr<asio::ssl::context> sslContext_;   // optional, set if SSL is configured
 
-    const ConfigManager& config_;
+    SessionFactory sessionFactory_;
+    WebSocketFactory webSocketFactory_;
 };

@@ -1,14 +1,39 @@
 {
   "process": {
-    "max_message_size": 1048576,
-    "receive_timeout_ms": 1000
-  },
-  "server": {
-    "host": "127.0.0.1",
-    "port": 8080,
-    "maxConnections": 1000,
-    "processCount": 4,
-    "workerThreads": 8
+    "workers": [
+      {
+        "protocol": "binary",
+        "host": "127.0.0.1",
+        "port": 9999,
+        "max_connections": 1000,
+        "reuse": true,
+        "threads": 4,
+        "count": 2,
+        "cpu_affinity": [0, 1],
+        "tcp_nodelay": true,
+        "send_buffer_size": 65536,
+        "receive_buffer_size": 65536
+      },
+      {
+        "protocol": "websocket",
+        "host": "127.0.0.1",
+        "port": 8080,
+        "max_connections": 1000,
+        "reuse": true,
+        "threads": 2,
+        "count": 2,
+        "cpu_affinity": [2, 3],
+        "tcp_nodelay": true,
+        "path": "/game",
+        "subprotocols": ["binary", "json"],
+        "max_frame_size": 16384,
+        "ssl": {
+          "certificate": "certs/server.crt",
+          "private_key": "certs/server.key",
+          "dh_params": "certs/dhparam.pem"
+        }
+      }
+    ]
   },
 
   "world": {
@@ -85,10 +110,10 @@
   },
 
   "database": {
-    "backend": "postgresql",
+    "backend": "sqlite",
     "host": "127.0.0.1",
     "port": 5432,
-    "name": "gamedb",
+    "name": "data/game.db",
     "user": "gameuser",
     "password": "password",
     "workerNodes": [],
