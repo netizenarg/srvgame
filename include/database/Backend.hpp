@@ -4,6 +4,20 @@
 
 #ifdef USE_SPDLOG
 #include "logging/Logger.hpp"
+#else
+class Logger {
+public:
+    template<typename... Args>
+    static void Info(Args&&...) {}
+    template<typename... Args>
+    static void Warn(Args&&...) {}
+    template<typename... Args>
+    static void Debug(Args&&...) {}
+    template<typename... Args>
+    static void Error(Args&&...) {}
+    template<typename... Args>
+    static void Critical(Args&&...) {}
+};
 #endif
 
 #include "database/SQLProvider.hpp"

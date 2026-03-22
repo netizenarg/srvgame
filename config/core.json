@@ -1,94 +1,42 @@
 {
   "process": {
-    "max_message_size": 1048576,
-    "receive_timeout_ms": 1000
-  },
-  "server": {
-    "host": "127.0.0.1",
-    "port": 8080,
-    "maxConnections": 1000,
-    "processCount": 4,
-    "workerThreads": 8
-  },
-
-  "world": {
-    "seed": 12345,
-    "chunkSize": 32.0,
-    "viewDistance": 4,
-    "maxActiveChunks": 100,
-    "terrainScale": 100.0,
-    "maxTerrainHeight": 50.0,
-    "waterLevel": 10.0,
-    "preloadRadius": 100.0,
-    "preloadWorld": true
-  },
-
-  "npcs": {
-    "initialNPCCount": 50,
-    "maxNPCsPerChunk": 5,
-    "spawnInterval": 5.0,
-    "despawnDistance": 150.0
-  },
-
-  "mobs": {
-    "enabled": true,
-    "spawnZones": [
+    "workers": [
       {
-        "name": "goblin_forest",
-        "center": [100.0, 10.0, 100.0],
-        "radius": 50.0,
-        "mobType": 0,
-        "minLevel": 1,
-        "maxLevel": 5,
-        "maxMobs": 15,
-        "respawnTime": 30.0
+        "protocol": "binary",
+        "host": "0.0.0.0",
+        "port": 8080,
+        "threads": 4,
+        "count": 2,
+        "cpu_affinity": [0, 1],
+        "tcp_nodelay": true,
+        "send_buffer_size": 65536,
+        "receive_buffer_size": 65536
       },
       {
-        "name": "orc_camp",
-        "center": [500.0, 15.0, 500.0],
-        "radius": 75.0,
-        "mobType": 1,
-        "minLevel": 5,
-        "maxLevel": 15,
-        "maxMobs": 10,
-        "respawnTime": 45.0
-      },
-      {
-        "name": "dragon_lair",
-        "center": [1000.0, 30.0, 1000.0],
-        "radius": 100.0,
-        "mobType": 2,
-        "minLevel": 20,
-        "maxLevel": 30,
-        "maxMobs": 3,
-        "respawnTime": 300.0
-      },
-      {
-        "name": "slime_swamp",
-        "center": [-200.0, 5.0, -200.0],
-        "radius": 60.0,
-        "mobType": 3,
-        "minLevel": 1,
-        "maxLevel": 10,
-        "maxMobs": 20,
-        "respawnTime": 20.0
+        "protocol": "websocket",
+        "host": "0.0.0.0",
+        "port": 8081,
+        "threads": 2,
+        "count": 2,
+        "cpu_affinity": [2, 3],
+        "tcp_nodelay": true,
+        "path": "/game",
+        "subprotocols": ["binary", "json"],
+        "max_frame_size": 16384,
+        "ssl": {
+          "certificate": "certs/server.crt",
+          "private_key": "certs/server.key",
+          "dh_params": "certs/dhparam.pem"
+        }
       }
-    ],
-    "experienceMultiplier": 1.0,
-    "lootDropChance": 1.0
-  },
-
-  "collision": {
-    "enabled": true,
-    "gridCellSize": 10.0,
-    "maxCollisionChecks": 1000
+    ]
   },
 
   "database": {
-    "backend": "postgresql",
+    "backend": "sqlite",
     "host": "127.0.0.1",
     "port": 5432,
-    "name": "gamedb",
+    "name": "data/game.db",
     "user": "gameuser",
     "password": "password",
     "workerNodes": [],
@@ -98,7 +46,7 @@
   },
 
   "logging": {
-    "level": "debug",
+    "level": "info",
     "file": "logs/server.log",
     "maxSize": 10485760,
     "backupCount": 5
