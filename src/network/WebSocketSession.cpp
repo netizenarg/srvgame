@@ -135,17 +135,31 @@ std::string WebSocketSession::GetRemoteAddress() const {
 }
 
 void WebSocketSession::OnMessage(const WebSocketProtocol::WebSocketMessage& msg) {
-    if (messageHandler_) {
-        if (msg.opcode == WebSocketProtocol::OP_TEXT) {
+    if (msg.opcode == WebSocketProtocol::OP_TEXT) {
+        if (messageHandler_) {
             try {
                 auto json = nlohmann::json::parse(msg.GetText());
                 messageHandler_(json);
             } catch (const std::exception& e) {
                 Logger::Error("WebSocketSession: invalid JSON: {}", e.what());
             }
-        } else if (msg.opcode == WebSocketProtocol::OP_BINARY) {
-            // Binary message handling – can be extended to parse binary protocol
-            Logger::Debug("WebSocket binary message received, size: {}", msg.data.size());
+        }
+    } else if (msg.opcode == WebSocketProtocol::OP_BINARY) {
+        // Deserialize as BinaryMessage
+        try {
+            auto binaryMsg = BinaryProtocol::BinaryMessage::Deserialize(
+                msg.data.data(), msg.data.size());
+            if (binary_handler_) {
+                binary_handler_(binaryMsg.header.message_type, binaryMsg.data);
+            } else if (default_binary_handler_) {
+                default_binary_handler_(binaryMsg.header.message_type, binaryMsg.data);
+            } else {
+                Logger::Warn("WebSocketSession {}: no binary handler for message type {}",
+                             sessionId_, binaryMsg.header.message_type);
+            }
+        } catch (const std::exception& e) {
+            Logger::Error("WebSocketSession {}: failed to deserialize binary message: {}",
+                          sessionId_, e.what());
         }
     }
 }
@@ -155,4 +169,12 @@ void WebSocketSession::OnClose(uint16_t code, const std::string& reason) {
     if (closeHandler_) {
         closeHandler_();
     }
+}
+
+void WebSocketSession::SetBinaryMessageHandler(BinaryMessageHandler handler) {
+    binary_handler_ = std::move(handler);
+}
+
+void WebSocketSession::SetDefaultBinaryMessageHandler(BinaryMessageHandler handler) {
+    default_binary_handler_ = std::move(handler);
 }
