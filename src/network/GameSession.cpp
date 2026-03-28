@@ -101,6 +101,9 @@ void GameSession::StartProtocolNegotiation() {
     // Send protocol capabilities to client
     SendProtocolCapabilities();
 
+    // Setup default binary handlers
+    SetupDefaultHandlers();
+
     // Start reading messages
     DoBinaryRead();
 
@@ -1607,4 +1610,25 @@ void GameSession::HandleFamiliarCommand(const nlohmann::json& data) {
     if (handler_it != binary_handlers_.end()) {
         handler_it->second(BinaryProtocol::MESSAGE_TYPE_NPC_INTERACTION, writer.GetBuffer());
     }
+}
+
+void GameSession::SetPlayerStateHandler(std::function<void(const ClientInput&)> handler) {
+    player_state_handler_ = std::move(handler);
+}
+
+void GameSession::SetupDefaultHandlers() {
+    SetBinaryMessageHandler(BinaryProtocol::MESSAGE_TYPE_PLAYER_STATE,
+        [this](uint16_t type, const std::vector<uint8_t>& data) {
+            (void)type;
+            try {
+                ClientInput input = ClientInput::Deserialize(data.data(), data.size());
+                if (player_state_handler_) {
+                    player_state_handler_(input);
+                } else {
+                    Logger::Warn("Session {}: no player state handler registered", sessionId_);
+                }
+            } catch (const std::exception& e) {
+                Logger::Error("Session {}: failed to deserialize player state: {}", sessionId_, e.what());
+            }
+        });
 }

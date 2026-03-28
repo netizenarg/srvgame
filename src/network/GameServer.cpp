@@ -102,6 +102,9 @@ void GameServer::DoAccept() {
                     if (webSocketFactory_) {
                         auto wsConn = webSocketFactory_(std::move(socket), sslContext_);
                         auto session = std::make_shared<WebSocketSession>(wsConn);
+                        session->SetBinaryMessageHandler([session](uint16_t type, const std::vector<uint8_t>& data) {
+                            GameLogic::GetInstance().HandleBinaryMessage(session->GetSessionId(), type, data);
+                        });
                         ConnectionManager::GetInstance().Start(session);
                         session->Start();
                     } else {

@@ -410,8 +410,21 @@ void GameLogic::HandleGoldTransaction(uint64_t sessionId, const nlohmann::json& 
     }
 }
 
+void GameLogic::SendPositionCorrection(uint64_t sessionId, const glm::vec3& position, const glm::vec3& velocity) {
+    BinaryProtocol::BinaryWriter writer;
+    writer.WriteVector3(position);
+    writer.WriteVector3(velocity);
+    writer.WriteUInt64(GetCurrentTimestamp());
+    SendBinaryToSession(sessionId, BinaryProtocol::MESSAGE_TYPE_PLAYER_POSITION_CORRECTION, writer.GetBuffer());
+}
+
 // =============== World Message Handlers ===============
 void GameLogic::RegisterWorldHandlers() {
+    RegisterBinaryHandler(BinaryProtocol::MESSAGE_TYPE_PLAYER_STATE,
+        [this](uint64_t sessionId, uint16_t /*messageType*/, const std::vector<uint8_t>& data) {
+            HandlePlayerState(sessionId, data);
+    });
+
     RegisterHandler("world_chunk_request", [this](uint64_t sessionId, const nlohmann::json& data) {
         HandleWorldChunkRequest(sessionId, data);
     });
@@ -507,6 +520,10 @@ void GameLogic::OnPlayerConnected(uint64_t sessionId, uint64_t playerId) {
 void GameLogic::OnPlayerDisconnected(uint64_t sessionId) {
     // Capture player ID before base class removes the mapping
     uint64_t playerId = GetPlayerIdBySession(sessionId);
+    {
+        std::lock_guard<std::mutex> lock(predictionMutex_);
+        playerPrediction_.erase(playerId);
+    }
     Logger::Info("GameLogic: Player {} disconnected from session {}", playerId, sessionId);
     FirePythonEvent("player_disconnected", {
         {"sessionId", sessionId},
@@ -575,7 +592,7 @@ void GameLogic::HandlePlayerPositionUpdate(uint64_t sessionId, const nlohmann::j
             positionWriter.WriteVector3(glm::vec3(0, 0, 0));
             positionWriter.WriteUInt64(GetCurrentTimestamp());
 
-            BroadcastBinaryToNearbyPlayers(position, BinaryProtocol::MESSAGE_TYPE_PLAYER_POSITION,
+            BroadcastToNearbyPlayers(position, BinaryProtocol::MESSAGE_TYPE_PLAYER_POSITION,
                                           positionWriter.GetBuffer(), 100.0f);
 
             FirePythonEvent("player_move_3d", {
@@ -589,6 +606,77 @@ void GameLogic::HandlePlayerPositionUpdate(uint64_t sessionId, const nlohmann::j
 
     } catch (const std::exception& e) {
         Logger::Error("Error handling player position update: {}", e.what());
+    }
+}
+
+void GameLogic::HandlePlayerState(uint64_t sessionId, const std::vector<uint8_t>& data) {
+    try {
+        // Deserialize client input
+        ClientInput input = ClientInput::Deserialize(data.data(), data.size());
+        if (!input.IsValid()) {
+            Logger::Warn("Invalid client input from session {}", sessionId);
+            return;
+        }
+
+        uint64_t playerId = GetPlayerIdBySession(sessionId);
+        if (playerId == 0) {
+            Logger::Warn("No player for session {}", sessionId);
+            return;
+        }
+
+        // Store input in the player's prediction system
+        {
+            std::lock_guard<std::mutex> lock(predictionMutex_);
+            playerPrediction_[playerId].StoreClientInput(input);
+        }
+
+        // Get authoritative player state
+        auto player = GetPlayer(playerId);
+        if (!player) return;
+
+        // Simulate movement using the prediction system
+        // (We'll compute the authoritative state from the last confirmed state plus unprocessed inputs)
+        PredictionSystem* pred = &playerPrediction_[playerId];
+        auto currentTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+
+            // Get the last confirmed state from prediction system (or from player)
+            ServerState authState;
+            authState.last_processed_input = 0; // TODO: track last processed input
+            authState.timestamp = currentTime;
+            authState.position = player->GetPosition();
+            authState.velocity = player->GetVelocity(); // assuming Player has velocity
+            authState.rotation = player->GetRotation(); // assuming Player has rotation
+            authState.on_ground = player->IsOnGround(); // assuming Player has onGround
+
+            // Simulate with unprocessed inputs
+            auto unprocessed = pred->GetUnprocessedInputs(authState.last_processed_input);
+            if (!unprocessed.empty()) {
+                float deltaTime = 1.0f / 30.0f; // or compute based on time difference
+                authState = pred->SimulateMovement(authState, unprocessed, deltaTime);
+            }
+
+            // Update authoritative player state
+            player->SetPosition(authState.position);
+            player->SetVelocity(authState.velocity);
+            player->SetRotation(authState.rotation);
+            player->SetOnGround(authState.on_ground);
+
+            // Broadcast authoritative state to nearby players (optional)
+            BroadcastPlayerState(playerId, authState);
+
+            // Check if client needs a correction (compare with client's last reported position)
+            // We need to store the client's last reported position; for simplicity we can compare
+            // with the position that the client sent (which is not directly available here, but we
+            // could pass it in the input). For now, we'll just send a correction if the simulation
+            // moved significantly from the last confirmed state.
+            static float correctionThreshold = 0.5f; // 0.5 meters
+            if (glm::distance(authState.position, player->GetPosition()) > correctionThreshold) {
+                SendPositionCorrection(sessionId, authState.position, authState.velocity);
+            }
+
+    } catch (const std::exception& e) {
+        Logger::Error("HandlePlayerState error: {}", e.what());
     }
 }
 
@@ -774,11 +862,27 @@ void GameLogic::HandleEntitySpawnRequest(uint64_t sessionId, const nlohmann::jso
 }
 
 // =============== Broadcasting ===============
-void GameLogic::BroadcastBinaryToNearbyPlayers(const glm::vec3& position, uint16_t messageType,
+void GameLogic::BroadcastToNearbyPlayers(const glm::vec3& position, uint16_t messageType,
+                                         const std::vector<uint8_t>& data, float radius) {
+    if (!connectionManager_) return;
+    auto& pm = PlayerManager::GetInstance();
+    auto nearby = pm.GetPlayersInRadius(position, radius);
+    for (auto& player : nearby) {
+        uint64_t sessionId = pm.GetSessionIdByPlayerId(player->GetId());
+        if (sessionId != 0) {
+            auto session = connectionManager_->GetSession(sessionId);
+            if (session && session->IsConnected()) {
+                session->SendBinary(messageType, data);
+            }
+        }
+    }
+}
+
+void GameLogic::BroadcastToNearbyOnlinePlayers(const glm::vec3& position, uint16_t messageType,
                                               const std::vector<uint8_t>& data, float radius) {
     if (!connectionManager_) return;
     auto& pm = PlayerManager::GetInstance();
-    auto onlinePlayers = pm.GetOnlinePlayers(); // returns vector of shared_ptr<Player>
+    auto onlinePlayers = pm.GetOnlinePlayers();
     for (const auto& player : onlinePlayers) {
         if (glm::distance(player->GetPosition(), position) <= radius) {
             uint64_t sessionId = GetSessionIdByPlayer(player->GetId());
@@ -792,22 +896,16 @@ void GameLogic::BroadcastBinaryToNearbyPlayers(const glm::vec3& position, uint16
     }
 }
 
-void GameLogic::BroadcastToNearbyPlayers(const glm::vec3& position, const nlohmann::json& message, float radius) {
-    if (!connectionManager_) return;
-    auto& pm = PlayerManager::GetInstance();
-    auto onlinePlayers = pm.GetOnlinePlayers();
-    std::string serialized = message.dump();
-    for (const auto& player : onlinePlayers) {
-        if (glm::distance(player->GetPosition(), position) <= radius) {
-            uint64_t sessionId = GetSessionIdByPlayer(player->GetId());
-            if (sessionId != 0) {
-                auto session = connectionManager_->GetSession(sessionId);
-                if (session && session->IsConnected()) {
-                    session->SendRaw(serialized);
-                }
-            }
-        }
-    }
+void GameLogic::BroadcastEntitySpawn(uint64_t entityId, EntityType type, const glm::vec3& position,
+                                     float yaw, const std::string& name) {
+    BinaryProtocol::BinaryWriter writer;
+    writer.WriteUInt64(entityId);
+    writer.WriteUInt8(static_cast<uint8_t>(type));
+    writer.WriteString(name);
+    writer.WriteVector3(position);
+    writer.WriteFloat(yaw);
+    writer.WriteUInt64(GetCurrentTimestamp());
+    BroadcastToNearbyPlayers(position, BinaryProtocol::MESSAGE_TYPE_ENTITY_SPAWN, writer.GetBuffer(), 100.0f);
 }
 
 void GameLogic::SyncNearbyEntitiesToPlayer(uint64_t sessionId, const glm::vec3& position) {
@@ -1136,4 +1234,23 @@ void GameLogic::BroadcastToPlayers(const std::vector<uint64_t>& sessionIds, cons
     } catch (const std::exception& e) {
         Logger::Error("Error broadcasting to specific players: {}", e.what());
     }
+}
+
+void GameLogic::BroadcastPlayerState(uint64_t playerId, const ServerState& state) {
+    // Create a binary update message (ENTITY_UPDATE or PLAYER_STATE) for other players
+    BinaryProtocol::BinaryWriter writer;
+    writer.WriteUInt64(playerId);
+    writer.WriteVector3(state.position);
+    writer.WriteVector3(state.rotation);
+    writer.WriteVector3(state.velocity);
+    writer.WriteUInt64(state.timestamp);
+    BroadcastToNearbyPlayers(state.position, BinaryProtocol::MESSAGE_TYPE_ENTITY_UPDATE, writer.GetBuffer(), 100.0f);
+}
+
+void GameLogic::BroadcastEntityDespawn(uint64_t entityId, const glm::vec3& position) {
+    BinaryProtocol::BinaryWriter writer;
+    writer.WriteUInt64(entityId);
+    writer.WriteUInt64(GetCurrentTimestamp());
+
+    BroadcastToNearbyPlayers(position, BinaryProtocol::MESSAGE_TYPE_ENTITY_DESPAWN, writer.GetBuffer(), 100.0f);
 }

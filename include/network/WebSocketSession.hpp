@@ -7,6 +7,7 @@
 #include "logging/Logger.hpp"
 
 #include "network/IConnection.hpp"
+#include "network/BinaryProtocol.hpp"
 #include "network/WebSocketProtocol.hpp"
 
 class WebSocketSession : public IConnection, public std::enable_shared_from_this<WebSocketSession> {
@@ -53,6 +54,10 @@ public:
 
     std::string GetRemoteAddress() const override;
 
+    using BinaryMessageHandler = std::function<void(uint16_t, const std::vector<uint8_t>&)>;
+    void SetBinaryMessageHandler(BinaryMessageHandler handler);
+    void SetDefaultBinaryMessageHandler(BinaryMessageHandler handler);
+
 private:
     WebSocketProtocol::WebSocketConnection::Pointer wsConn_;
     uint64_t sessionId_;
@@ -76,6 +81,9 @@ private:
     // Properties
     mutable std::mutex propertiesMutex_;
     std::map<std::string, std::string> properties_;
+
+    BinaryMessageHandler binary_handler_;
+    BinaryMessageHandler default_binary_handler_;
 
     // Internal helpers
     void OnMessage(const WebSocketProtocol::WebSocketMessage& msg);

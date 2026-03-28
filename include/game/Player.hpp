@@ -329,9 +329,15 @@ public:
     nlohmann::json JsonGetInventory() const;
     nlohmann::json ToJson() const;
 
+    // =============== Movement state getters/setters ===============
+    bool IsOnGround() const { return onGround_; }
+    void SetOnGround(bool g) { onGround_ = g; }
+
 private:
     uint64_t id_;
     std::string username_;
+
+    bool onGround_{true};
 
     //struct Position {float x, y, z;} position_;
     std::chrono::system_clock::time_point last_movement_;
