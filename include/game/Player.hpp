@@ -337,6 +337,8 @@ private:
     uint64_t id_;
     std::string username_;
 
+    bool onGround_{true};
+
     //struct Position {float x, y, z;} position_;
     std::chrono::system_clock::time_point last_movement_;
 
@@ -365,8 +367,6 @@ private:
     std::unordered_map<std::string, nlohmann::json> active_quests_;
     std::unordered_map<std::string, nlohmann::json> completed_quests_;
     std::vector<std::string> achievements_;
-
-    bool onGround_{true};
 
     // Active buffs/debuffs
     struct ActiveBuff {

@@ -592,7 +592,7 @@ void GameLogic::HandlePlayerPositionUpdate(uint64_t sessionId, const nlohmann::j
             positionWriter.WriteVector3(glm::vec3(0, 0, 0));
             positionWriter.WriteUInt64(GetCurrentTimestamp());
 
-            BroadcastBinaryToNearbyPlayers(position, BinaryProtocol::MESSAGE_TYPE_PLAYER_POSITION,
+            BroadcastToNearbyPlayers(position, BinaryProtocol::MESSAGE_TYPE_PLAYER_POSITION,
                                           positionWriter.GetBuffer(), 100.0f);
 
             FirePythonEvent("player_move_3d", {
@@ -862,24 +862,27 @@ void GameLogic::HandleEntitySpawnRequest(uint64_t sessionId, const nlohmann::jso
 }
 
 // =============== Broadcasting ===============
-void GameLogic::BroadcastEntitySpawn(uint64_t entityId, EntityType type, const glm::vec3& position,
-                                     float yaw, const std::string& name) {
-    BinaryProtocol::BinaryWriter writer;
-    writer.WriteUInt64(entityId);
-    writer.WriteUInt8(static_cast<uint8_t>(type));
-    writer.WriteString(name);
-    writer.WriteVector3(position);
-    writer.WriteFloat(yaw);
-    writer.WriteUInt64(GetCurrentTimestamp());
-
-    BroadcastToNearbyPlayers(position, BinaryProtocol::MESSAGE_TYPE_ENTITY_SPAWN, writer.GetBuffer(), 100.0f);
+void GameLogic::BroadcastToNearbyPlayers(const glm::vec3& position, uint16_t messageType,
+                                         const std::vector<uint8_t>& data, float radius) {
+    if (!connectionManager_) return;
+    auto& pm = PlayerManager::GetInstance();
+    auto nearby = pm.GetPlayersInRadius(position, radius);
+    for (auto& player : nearby) {
+        uint64_t sessionId = pm.GetSessionIdByPlayerId(player->GetId());
+        if (sessionId != 0) {
+            auto session = connectionManager_->GetSession(sessionId);
+            if (session && session->IsConnected()) {
+                session->SendBinary(messageType, data);
+            }
+        }
+    }
 }
 
-void GameLogic::BroadcastBinaryToNearbyPlayers(const glm::vec3& position, uint16_t messageType,
+void GameLogic::BroadcastToNearbyOnlinePlayers(const glm::vec3& position, uint16_t messageType,
                                               const std::vector<uint8_t>& data, float radius) {
     if (!connectionManager_) return;
     auto& pm = PlayerManager::GetInstance();
-    auto onlinePlayers = pm.GetOnlinePlayers(); // returns vector of shared_ptr<Player>
+    auto onlinePlayers = pm.GetOnlinePlayers();
     for (const auto& player : onlinePlayers) {
         if (glm::distance(player->GetPosition(), position) <= radius) {
             uint64_t sessionId = GetSessionIdByPlayer(player->GetId());
@@ -893,22 +896,16 @@ void GameLogic::BroadcastBinaryToNearbyPlayers(const glm::vec3& position, uint16
     }
 }
 
-void GameLogic::BroadcastToNearbyPlayers(const glm::vec3& position, const nlohmann::json& message, float radius) {
-    if (!connectionManager_) return;
-    auto& pm = PlayerManager::GetInstance();
-    auto onlinePlayers = pm.GetOnlinePlayers();
-    std::string serialized = message.dump();
-    for (const auto& player : onlinePlayers) {
-        if (glm::distance(player->GetPosition(), position) <= radius) {
-            uint64_t sessionId = GetSessionIdByPlayer(player->GetId());
-            if (sessionId != 0) {
-                auto session = connectionManager_->GetSession(sessionId);
-                if (session && session->IsConnected()) {
-                    session->SendRaw(serialized);
-                }
-            }
-        }
-    }
+void GameLogic::BroadcastEntitySpawn(uint64_t entityId, EntityType type, const glm::vec3& position,
+                                     float yaw, const std::string& name) {
+    BinaryProtocol::BinaryWriter writer;
+    writer.WriteUInt64(entityId);
+    writer.WriteUInt8(static_cast<uint8_t>(type));
+    writer.WriteString(name);
+    writer.WriteVector3(position);
+    writer.WriteFloat(yaw);
+    writer.WriteUInt64(GetCurrentTimestamp());
+    BroadcastToNearbyPlayers(position, BinaryProtocol::MESSAGE_TYPE_ENTITY_SPAWN, writer.GetBuffer(), 100.0f);
 }
 
 void GameLogic::SyncNearbyEntitiesToPlayer(uint64_t sessionId, const glm::vec3& position) {

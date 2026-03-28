@@ -433,5 +433,6 @@ private:
     asio::ip::tcp::socket& GetSocket();
     const asio::ip::tcp::socket& GetSocket() const;
     void HandleNetworkError(std::error_code ec);
+    void SetupDefaultHandlers();
 };
 

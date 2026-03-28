@@ -87,6 +87,7 @@ public:
     void HandleCollisionCheck(uint64_t sessionId, const nlohmann::json& data);
     void HandleEntitySpawnRequest(uint64_t sessionId, const nlohmann::json& data);
     void HandleFamiliarCommand(uint64_t sessionId, const nlohmann::json& data);
+    void HandlePlayerState(uint64_t sessionId, const std::vector<uint8_t>& data);
 
     // Message handling
     void HandleMessage(uint64_t sessionId, const nlohmann::json& message);
@@ -96,9 +97,10 @@ public:
     void OnPlayerDisconnected(uint64_t sessionId);
 
     // Broadcasting
-    void BroadcastBinaryToNearbyPlayers(const glm::vec3& position, uint16_t messageType, 
+    void BroadcastToNearbyPlayers(const glm::vec3& position, uint16_t messageType,
+                                             const std::vector<uint8_t>& data, float radius = 50.0f);
+    void BroadcastToNearbyOnlinePlayers(const glm::vec3& position, uint16_t messageType,
                                         const std::vector<uint8_t>& data, float radius = 50.0f);
-    void BroadcastToNearbyPlayers(const glm::vec3& position, const nlohmann::json& message, float radius = 50.0f);
     void SyncNearbyEntitiesToPlayer(uint64_t sessionId, const glm::vec3& position);
 
     // Helper broadcast methods

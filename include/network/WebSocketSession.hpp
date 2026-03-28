@@ -7,6 +7,7 @@
 #include "logging/Logger.hpp"
 
 #include "network/IConnection.hpp"
+#include "network/BinaryProtocol.hpp"
 #include "network/WebSocketProtocol.hpp"
 
 class WebSocketSession : public IConnection, public std::enable_shared_from_this<WebSocketSession> {

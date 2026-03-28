@@ -17,6 +17,8 @@
 #include "network/WebSocketProtocol.hpp"
 #include "network/WebSocketSession.hpp"
 
+#include "game/GameLogic.hpp"
+
 class GameServer {
 public:
     GameServer(const WorkerGroupConfig& groupConfig, const ConfigManager& globalConfig);

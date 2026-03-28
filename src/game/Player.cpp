@@ -225,14 +225,14 @@ Player::Player(uint64_t id, const std::string& username)
 : GameEntity(EntityType::PLAYER, glm::vec3(0.0f, 0.0f, 0.0f)),
 id_(id),
 username_(username),
+onGround_(true),
 last_movement_(std::chrono::system_clock::now()),
 player_class_(PlayerClass::WARRIOR),
 race_(PlayerRace::HUMAN),
 status_(PlayerStatus::IDLE),
 inventory_system_(InventorySystem::GetInstance()),
 skill_system_(SkillSystem::GetInstance()),
-quest_manager_(QuestManager::GetInstance()),
-onGround_(true)
+quest_manager_(QuestManager::GetInstance())
 {
     ApplyRaceBonuses();
     ApplyClassBonuses();
@@ -245,14 +245,14 @@ Player::Player(const glm::vec3& position)
 : GameEntity(EntityType::PLAYER, position),
 id_(0),
 username_(""),
+onGround_(true),
 last_movement_(std::chrono::system_clock::now()),
 player_class_(PlayerClass::WARRIOR),
 race_(PlayerRace::HUMAN),
 status_(PlayerStatus::IDLE),
 inventory_system_(InventorySystem::GetInstance()),
 skill_system_(SkillSystem::GetInstance()),
-quest_manager_(QuestManager::GetInstance()),
-onGround_(true)
+quest_manager_(QuestManager::GetInstance())
 {
     ApplyRaceBonuses();
     ApplyClassBonuses();
@@ -266,14 +266,14 @@ Player::Player(const glm::vec3& position, PlayerClass player_class, PlayerRace r
 : GameEntity(EntityType::PLAYER, position),
 id_(0),
 username_(""),
+onGround_(true),
 last_movement_(std::chrono::system_clock::now()),
 player_class_(player_class),
 race_(race),
 status_(PlayerStatus::IDLE),
 inventory_system_(InventorySystem::GetInstance()),
 skill_system_(SkillSystem::GetInstance()),
-quest_manager_(QuestManager::GetInstance()),
-onGround_(true)
+quest_manager_(QuestManager::GetInstance())
 {
     ApplyRaceBonuses();
     ApplyClassBonuses();
