@@ -2,20 +2,17 @@
 
 #include <cmath>
 #include <memory>
+#include <unordered_map>
 
 #include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
 
-// #include "config/ConfigManager.hpp"
-// #include "logging/Logger.hpp"
-// #include "network/ConnectionManager.hpp"
-// #include "database/DbManager.hpp"
+#include "network/PredictionSystem.hpp"
 
 #include "game/LogicCore.hpp"
 #include "game/PlayerManager.hpp"
 #include "game/InventorySystem.hpp"
 #include "game/LootTableManager.hpp"
-//#include "game/MobSystem.hpp"
 #include "game/SkillSystem.hpp"
 #include "game/QuestManager.hpp"
 #include "game/EntityManager.hpp"
@@ -109,6 +106,13 @@ public:
     void BroadcastToAllPlayersBinary(uint16_t messageType, const std::vector<uint8_t>& data);
     void BroadcastToPlayers(const std::vector<uint64_t>& sessionIds, const nlohmann::json& message);
 
+    // Broadcast entity spawn to nearby players
+    void BroadcastEntitySpawn(uint64_t entityId, EntityType type, const glm::vec3& position,
+                              float yaw, const std::string& name);
+    void SendPositionCorrection(uint64_t sessionId, const glm::vec3& position, const glm::vec3& velocity);
+    void BroadcastPlayerState(uint64_t playerId, const ServerState& state);
+    void BroadcastEntityDespawn(uint64_t entityId, const glm::vec3& position);
+
 private:
     GameLogic();
     ~GameLogic();
@@ -124,6 +128,9 @@ private:
 
     // Connection manager for broadcasting
     std::shared_ptr<ConnectionManager> connectionManager_;
+
+    std::unordered_map<uint64_t, PredictionSystem> playerPrediction_;
+    std::mutex predictionMutex_;
 
     // Thread functions
     void GameLoop();

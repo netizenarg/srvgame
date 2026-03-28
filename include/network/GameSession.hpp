@@ -315,6 +315,8 @@ public:
                                const glm::vec3& velocity, uint32_t last_input_id);
     void SendPositionCorrection(const glm::vec3& position, const glm::vec3& velocity);
 
+    void SetPlayerStateHandler(std::function<void(const ClientInput&)> handler);
+
 private:
     // Core networking
     asio::ip::tcp::socket socket_;
@@ -398,6 +400,8 @@ private:
 
     // Queue management
     size_t max_write_queue_size_{1000};
+
+    std::function<void(const ClientInput&)> player_state_handler_;
 
     // Private methods
     void StartHeartbeat();

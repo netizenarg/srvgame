@@ -231,7 +231,8 @@ race_(PlayerRace::HUMAN),
 status_(PlayerStatus::IDLE),
 inventory_system_(InventorySystem::GetInstance()),
 skill_system_(SkillSystem::GetInstance()),
-quest_manager_(QuestManager::GetInstance())
+quest_manager_(QuestManager::GetInstance()),
+onGround_(true)
 {
     ApplyRaceBonuses();
     ApplyClassBonuses();
@@ -250,7 +251,8 @@ race_(PlayerRace::HUMAN),
 status_(PlayerStatus::IDLE),
 inventory_system_(InventorySystem::GetInstance()),
 skill_system_(SkillSystem::GetInstance()),
-quest_manager_(QuestManager::GetInstance())
+quest_manager_(QuestManager::GetInstance()),
+onGround_(true)
 {
     ApplyRaceBonuses();
     ApplyClassBonuses();
@@ -270,7 +272,8 @@ race_(race),
 status_(PlayerStatus::IDLE),
 inventory_system_(InventorySystem::GetInstance()),
 skill_system_(SkillSystem::GetInstance()),
-quest_manager_(QuestManager::GetInstance())
+quest_manager_(QuestManager::GetInstance()),
+onGround_(true)
 {
     ApplyRaceBonuses();
     ApplyClassBonuses();

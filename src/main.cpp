@@ -113,6 +113,7 @@ void WorkerMain(int workerId, const WorkerGroupConfig& groupConfig, ProcessPool*
                 auto session = std::make_shared<GameSession>(std::move(socket), sslCtx);
                 Logger::Debug("Worker {} created new game session {}",
                             workerId, session->GetSessionId());
+
                 // Message handler - simplified for demonstration
                 session->SetMessageHandler([session, workerId, processPool](const nlohmann::json& msg) {
                     try {
@@ -140,6 +141,13 @@ void WorkerMain(int workerId, const WorkerGroupConfig& groupConfig, ProcessPool*
                         session->SendError("Internal server error", 500);
                     }
                 });
+
+                // --- Binary message handler ---
+                session->SetDefaultBinaryMessageHandler([session, workerId](uint16_t type,
+                                                        const std::vector<uint8_t>& data) {
+                    GameLogic::GetInstance().HandleBinaryMessage(session->GetSessionId(), type, data);
+                });
+
                 session->SetCloseHandler([session, workerId]() { // Close handler
                     Logger::Info("Worker {} session {} closing", workerId, session->GetSessionId());
                     GameLogic::GetInstance().OnPlayerDisconnected(session->GetSessionId());
