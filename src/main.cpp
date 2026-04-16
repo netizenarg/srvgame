@@ -219,7 +219,7 @@ void WorkerMain(int workerId, const WorkerGroupConfig& groupConfig, ProcessPool*
                             try {
                                 // Parse JSON message
                                 auto jsonMsg = nlohmann::json::parse(message);
-                                Logger::Debug("Worker {} received IPC message: {}", workerId, jsonMsg.dump());
+                                //Logger::Debug("Worker {} received IPC message: {}", workerId, jsonMsg.dump());
 
                                 // Handle IPC message in game logic
                                 gameLogic.HandleIPCMessage(jsonMsg);

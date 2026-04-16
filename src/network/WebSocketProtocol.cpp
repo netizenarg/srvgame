@@ -1176,31 +1176,40 @@ std::string GenerateWebSocketKey() {
 std::string GenerateAcceptKey(const std::string& key) {
     const std::string magic_guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
     std::string combined = key + magic_guid;
-
-    unsigned char hash[SHA_DIGEST_LENGTH];
+    unsigned char hash[SHA_DIGEST_LENGTH]; // 20 bytes
     SHA1(reinterpret_cast<const unsigned char*>(combined.c_str()), combined.size(), hash);
 
-    // Base64 encode
+    // Base64 encode according to RFC 4648
     const std::string base64_chars =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
     std::string result;
     int i = 0;
-    while (i < SHA_DIGEST_LENGTH) {
-        uint32_t octet_a = i < SHA_DIGEST_LENGTH ? hash[i++] : 0;
-        uint32_t octet_b = i < SHA_DIGEST_LENGTH ? hash[i++] : 0;
-        uint32_t octet_c = i < SHA_DIGEST_LENGTH ? hash[i++] : 0;
 
-        uint32_t triple = (octet_a << 16) + (octet_b << 8) + octet_c;
-
+    // Process full 3‑byte groups
+    while (i < SHA_DIGEST_LENGTH - 2) {
+        uint32_t triple = (hash[i] << 16) | (hash[i+1] << 8) | hash[i+2];
         result += base64_chars[(triple >> 18) & 0x3F];
         result += base64_chars[(triple >> 12) & 0x3F];
         result += base64_chars[(triple >> 6) & 0x3F];
         result += base64_chars[triple & 0x3F];
+        i += 3;
     }
 
-    // Remove padding
-    result = result.substr(0, 28);
+    // Handle remaining bytes with correct padding
+    int remaining = SHA_DIGEST_LENGTH - i;
+    if (remaining == 1) {
+        uint32_t triple = (hash[i] << 16);
+        result += base64_chars[(triple >> 18) & 0x3F];
+        result += base64_chars[(triple >> 12) & 0x3F];
+        result += "==";
+    } else if (remaining == 2) {
+        uint32_t triple = (hash[i] << 16) | (hash[i+1] << 8);
+        result += base64_chars[(triple >> 18) & 0x3F];
+        result += base64_chars[(triple >> 12) & 0x3F];
+        result += base64_chars[(triple >> 6) & 0x3F];
+        result += "=";
+    }
 
     return result;
 }

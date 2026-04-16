@@ -8,6 +8,7 @@
 #include <nlohmann/json.hpp>
 
 #include "network/PredictionSystem.hpp"
+#include "network/WebSocketProtocol.hpp"
 
 #include "game/LogicCore.hpp"
 #include "game/PlayerManager.hpp"

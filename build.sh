@@ -1,5 +1,4 @@
 #!/bin/bash
-# build.sh
 
 # Clone dependencies
 mkdir -p thirdparty

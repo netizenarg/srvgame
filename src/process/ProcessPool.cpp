@@ -466,7 +466,7 @@ bool ProcessPool::SendToWorker(int workerId, const std::string& message) {
         Logger::Error("Failed to send message content to worker {}", workerId);
         return false;
     }
-    Logger::Debug("Sent {} bytes to worker {}", message.length(), workerId);
+    //Logger::Debug("Sent {} bytes to worker {}", message.length(), workerId);
     return true;
 }
 
@@ -500,7 +500,7 @@ std::string ProcessPool::ReceiveFromMaster() {
     }
     buffer[msg_len] = '\0';
     std::string message(buffer.data(), msg_len);
-    Logger::Debug("Received {} bytes from master", msg_len);
+    //Logger::Debug("Received {} bytes from master", msg_len);
     return message;
 }
 

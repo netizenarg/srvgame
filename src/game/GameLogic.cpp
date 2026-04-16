@@ -1104,25 +1104,36 @@ void GameLogic::PerformMaintenance() {
 void GameLogic::HandleIPCMessage(const nlohmann::json& message) {
     try {
         std::string msgType = message.value("type", "");
-        Logger::Debug("GameLogic handling IPC message type: {}", msgType);
-
-        if (msgType == "welcome") {
-            Logger::Info("Received welcome message from master: {}", message.value("message", ""));
-        } else if (msgType == "heartbeat") {
-            // Handle heartbeat from master
-            int count = message.value("count", 0);
-            Logger::Debug("Received heartbeat #{} from master", count);
-        } else if (msgType == "broadcast") {
-            // Broadcast message to all players
-            if (message.contains("data")) {
-                BroadcastToAllPlayers(message["data"]);
-            }
-        } else if (msgType == "shutdown") {
-            Logger::Info("Received shutdown command from master");
-            Shutdown();
-        } else if (msgType == "reload_config") {
-            Logger::Info("Received config reload command from master");
-            // Reload configuration if needed
+        auto it = WebSocketProtocol::IPCMessageTypes.find(msgType);
+        if (it == WebSocketProtocol::IPCMessageTypes.end()) {
+            Logger::Warn("Unknown IPC message type: {}", msgType);
+            return;
+        }
+        int typeCode = it->second;
+        switch (typeCode) {
+            case 1: // welcome
+                //Logger::Info("Received welcome message from master: {}", message.value("message", ""));
+                break;
+            case 2: // heartbeat
+                //int count = message.value("count", 0);
+                //Logger::Debug("Received heartbeat #{} from master", count);
+                break;
+            case 3: // broadcast
+                if (message.contains("data")) {
+                    BroadcastToAllPlayers(message["data"]);
+                }
+                break;
+            case 4: // shutdown
+                Logger::Info("Received shutdown command from master");
+                Shutdown();
+                break;
+            case 5: // reload_config
+                Logger::Info("Received config reload command from master");
+                // TODO: Reload configuration if needed
+                break;
+            default:
+                Logger::Warn("Unhandled IPC message code: {}", typeCode);
+                break;
         }
     } catch (const std::exception& e) {
         Logger::Error("Error handling IPC message: {}", e.what());
@@ -1144,7 +1155,7 @@ void GameLogic::BroadcastToAllPlayers(const nlohmann::json& message) {
         auto sessions = connectionManager_->GetAllSessions();
 
         if (sessions.empty()) {
-            Logger::Debug("No active sessions to broadcast to");
+            //Logger::Debug("No active sessions to broadcast to");
             return;
         }
 
@@ -1180,7 +1191,7 @@ void GameLogic::BroadcastToAllPlayersBinary(uint16_t messageType, const std::vec
         auto sessions = connectionManager_->GetAllSessions();
 
         if (sessions.empty()) {
-            Logger::Debug("No active sessions to broadcast binary to");
+            //Logger::Debug("No active sessions to broadcast binary to");
             return;
         }
 

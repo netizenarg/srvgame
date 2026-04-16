@@ -9,6 +9,7 @@
 #include <string>
 #include <sstream>
 #include <vector>
+#include <unordered_map>
 
 #include <zlib.h>
 #include <glm/glm.hpp>
@@ -32,6 +33,14 @@ namespace WebSocketProtocol {
         OP_CLOSE = 0x8,
         OP_PING = 0x9,
         OP_PONG = 0xA
+    };
+
+    static const std::unordered_map<std::string, int> IPCMessageTypes = {
+        {"welcome", 1},
+        {"heartbeat", 2},
+        {"broadcast", 3},
+        {"shutdown", 4},
+        {"reload_config", 5}
     };
 
     // WebSocket frame structure
