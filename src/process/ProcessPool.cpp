@@ -5,13 +5,11 @@ extern std::atomic<bool> g_shutdown;
 ProcessPool::ProcessPool(const std::vector<WorkerGroupConfig>& groups)
     : groups_(groups)
 {
-    // Compute total number of workers
     totalWorkers_ = 0;
     for (const auto& g : groups_) {
         totalWorkers_ += g.count;
     }
 
-    // Pre-allocate vectors
     workers_.resize(totalWorkers_);
     workerPipes_.resize(totalWorkers_ * 2, -1);
 }
@@ -31,7 +29,6 @@ bool ProcessPool::Initialize() {
     running_.store(true);
     shutdownRequested_.store(false);
 
-    // Create pipes for each worker
     for (int i = 0; i < totalWorkers_; ++i) {
         CreateWorkerPipe(i);
     }
@@ -45,6 +42,13 @@ void ProcessPool::CreateWorkerPipe(int globalWorkerId) {
         Logger::Error("Failed to create pipe for worker {}: {}", globalWorkerId, strerror(errno));
         return;
     }
+
+#ifdef __linux__
+    int bufferSize = 1024 * 1024;
+    if (fcntl(pipefd[0], F_SETPIPE_SZ, bufferSize) == -1) {
+        Logger::Warn("Failed to set pipe buffer size: {}", strerror(errno));
+    }
+#endif
 
     int read_idx = globalWorkerId * 2;
     int write_idx = globalWorkerId * 2 + 1;
@@ -68,13 +72,6 @@ void ProcessPool::Run() {
     if (getpid() == masterPid_) {
         masterThread_ = std::thread(&ProcessPool::MasterProcess, this);
     } else {
-        // Worker process: we need to know which global worker ID and group config we have.
-        // This is set in the child before calling Run(), but here we need to retrieve it.
-        // We'll set a member variable in the child branch before calling Run.
-        // However, the constructor only runs in the master; for workers, we need to
-        // set these after fork. The child branch of MasterProcess will set them.
-        // So this branch should never be executed directly because we call WorkerProcess
-        // explicitly from the child after fork.
         Logger::Error("Worker process started without proper initialization");
     }
 }
@@ -85,7 +82,6 @@ void ProcessPool::MasterProcess() {
     sigset_t oldset;
     BlockSignals(&oldset);
 
-    // Spawn workers in order of groups
     int globalWorkerId = 0;
     for (size_t gidx = 0; gidx < groups_.size(); ++gidx) {
         const auto& group = groups_[gidx];
@@ -93,33 +89,26 @@ void ProcessPool::MasterProcess() {
             pid_t pid = fork();
 
             if (pid == 0) {
-                // Child process
                 signal(SIGINT, SIG_IGN);
-                // SIGTERM handler: sets the global shutdown flag (async‑safe)
                 signal(SIGTERM, [](int) { g_shutdown.store(true, std::memory_order_relaxed); });
 
                 UnblockSignals(&oldset);
 
-                // Permanently block SIGINT only (SIGTERM remains unblocked)
                 sigset_t block_int;
                 sigemptyset(&block_int);
                 sigaddset(&block_int, SIGINT);
                 pthread_sigmask(SIG_BLOCK, &block_int, nullptr);
 
-                // Close all pipe ends except the one for this worker
                 for (int i = 0; i < totalWorkers_ * 2; ++i) {
                     if (i != globalWorkerId * 2) {
                         if (workerPipes_[i] != -1) close(workerPipes_[i]);
                     }
                 }
 
-                // Set worker process name
                 std::string processName = "game_worker_" + std::to_string(globalWorkerId);
                 prctl(PR_SET_NAME, processName.c_str(), 0, 0, 0);
 
-                // Store config for this worker
                 groupConfig_ = group;
-
                 role_ = ProcessRole::WORKER;
 
                 Logger::Info("Worker {} started (PID: {}) for group {} ({}:{})",
@@ -127,22 +116,18 @@ void ProcessPool::MasterProcess() {
 
                 WorkerProcess(globalWorkerId, group);
 
-                // Cleanup: close read end of pipe
                 if (workerPipes_[globalWorkerId * 2] != -1)
                     close(workerPipes_[globalWorkerId * 2]);
                 _exit(0);
 
             } else if (pid > 0) {
-                // Master: record worker info
                 workers_[globalWorkerId] = {pid, static_cast<int>(gidx), w, group};
 
-                // Close the read end in master
                 if (workerPipes_[globalWorkerId * 2] != -1) {
                     close(workerPipes_[globalWorkerId * 2]);
                     workerPipes_[globalWorkerId * 2] = -1;
                 }
 
-                // Health tracking
                 {
                     std::lock_guard<std::mutex> lock(healthMutex_);
                     workerHealth_[globalWorkerId] = {pid, time(nullptr)};
@@ -157,7 +142,6 @@ void ProcessPool::MasterProcess() {
 
     UnblockSignals(&oldset);
 
-    // Main loop: monitor workers and check for shutdown
     while (running_.load() && !shutdownRequested_.load()) {
         CleanupDeadWorkers();
         for (int i = 0; i < 10 && running_.load() && !shutdownRequested_.load(); ++i) {
@@ -165,7 +149,6 @@ void ProcessPool::MasterProcess() {
         }
     }
 
-    // Send SIGTERM to all workers
     for (int i = 0; i < totalWorkers_; ++i) {
         if (workers_[i].pid > 0) {
             Logger::Info("Terminating worker {} (PID: {})", i, workers_[i].pid);
@@ -173,7 +156,6 @@ void ProcessPool::MasterProcess() {
         }
     }
 
-    // Wait for all workers to exit
     int status;
     for (int i = 0; i < totalWorkers_; ++i) {
         if (workers_[i].pid > 0) {
@@ -234,11 +216,9 @@ void ProcessPool::CloseAllPipes() {
 }
 
 void ProcessPool::RestartWorker(int globalWorkerId) {
-    // Find which group this worker belongs to
     const auto& oldInfo = workers_[globalWorkerId];
     const auto& group = oldInfo.config;
 
-    // Create new pipe for this worker
     int pipefd[2];
     if (pipe(pipefd) == -1) {
         Logger::Error("Failed to create pipe for restarting worker {}: {}", globalWorkerId, strerror(errno));
@@ -256,19 +236,16 @@ void ProcessPool::RestartWorker(int globalWorkerId) {
     pid_t pid = fork();
 
     if (pid == 0) {
-        // Child
         signal(SIGINT, SIG_IGN);
         signal(SIGTERM, [](int) { g_shutdown.store(true, std::memory_order_relaxed); });
 
         UnblockSignals(&oldset);
 
-        // Block SIGINT permanently
         sigset_t block_int;
         sigemptyset(&block_int);
         sigaddset(&block_int, SIGINT);
         pthread_sigmask(SIG_BLOCK, &block_int, nullptr);
 
-        // Close all pipe ends except this worker's read end
         for (int i = 0; i < totalWorkers_ * 2; ++i) {
             if (i != globalWorkerId * 2) {
                 if (workerPipes_[i] != -1) close(workerPipes_[i]);
@@ -289,16 +266,13 @@ void ProcessPool::RestartWorker(int globalWorkerId) {
         _exit(0);
 
     } else if (pid > 0) {
-        // Master
         workers_[globalWorkerId].pid = pid;
 
-        // Close read end in master
         if (workerPipes_[globalWorkerId * 2] != -1) {
             close(workerPipes_[globalWorkerId * 2]);
             workerPipes_[globalWorkerId * 2] = -1;
         }
 
-        // Set non‑blocking for write end
         fcntl(workerPipes_[globalWorkerId * 2 + 1], F_SETFL, O_NONBLOCK);
 
         {
@@ -466,7 +440,6 @@ bool ProcessPool::SendToWorker(int workerId, const std::string& message) {
         Logger::Error("Failed to send message content to worker {}", workerId);
         return false;
     }
-    //Logger::Debug("Sent {} bytes to worker {}", message.length(), workerId);
     return true;
 }
 
@@ -479,6 +452,15 @@ std::string ProcessPool::ReceiveFromMaster() {
     if (read_fd == -1) {
         return "";
     }
+
+    fd_set fds;
+    FD_ZERO(&fds);
+    FD_SET(read_fd, &fds);
+    struct timeval tv = {0, 0};
+    if (select(read_fd + 1, &fds, nullptr, nullptr, &tv) <= 0) {
+        return "";
+    }
+
     uint32_t net_len = 0;
     if (!ReadAll(read_fd, &net_len, sizeof(net_len), true)) {
         return "";
@@ -499,9 +481,7 @@ std::string ProcessPool::ReceiveFromMaster() {
         return "";
     }
     buffer[msg_len] = '\0';
-    std::string message(buffer.data(), msg_len);
-    //Logger::Debug("Received {} bytes from master", msg_len);
-    return message;
+    return std::string(buffer.data(), msg_len);
 }
 
 bool ProcessPool::IsWorkerAlive(int workerId) const {

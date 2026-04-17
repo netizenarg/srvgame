@@ -16,7 +16,7 @@
 
 #include "logging/Logger.hpp"
 #include "config/ConfigManager.hpp"
-//#include "database/DbManager.hpp"
+#include "utils/Passwords.hpp"
 
 #include "game/GameEntity.hpp"
 #include "game/InventorySystem.hpp"
@@ -152,7 +152,7 @@ struct PlayerSettings {
 
 class Player : public GameEntity {
 public:
-    Player(uint64_t id, const std::string& username);
+    Player(uint64_t id, const std::string& username, const std::string& password="");
     Player(const glm::vec3& position);
     Player(const glm::vec3& position, PlayerClass player_class, PlayerRace race);
     virtual ~Player();
@@ -336,6 +336,7 @@ public:
 private:
     uint64_t id_;
     std::string username_;
+    std::string password_hash_;
 
     bool onGround_{true};
 

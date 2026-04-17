@@ -221,10 +221,11 @@ void PlayerSettings::Deserialize(const nlohmann::json& data) {
 
 // =============== Player Implementation ===============
 
-Player::Player(uint64_t id, const std::string& username)
+Player::Player(uint64_t id, const std::string& username, const std::string& password)
 : GameEntity(EntityType::PLAYER, glm::vec3(0.0f, 0.0f, 0.0f)),
 id_(id),
 username_(username),
+password_hash_(Passwords::HashPassword(password)),
 onGround_(true),
 last_movement_(std::chrono::system_clock::now()),
 player_class_(PlayerClass::WARRIOR),
@@ -245,6 +246,7 @@ Player::Player(const glm::vec3& position)
 : GameEntity(EntityType::PLAYER, position),
 id_(0),
 username_(""),
+password_hash_(""),
 onGround_(true),
 last_movement_(std::chrono::system_clock::now()),
 player_class_(PlayerClass::WARRIOR),
@@ -266,6 +268,7 @@ Player::Player(const glm::vec3& position, PlayerClass player_class, PlayerRace r
 : GameEntity(EntityType::PLAYER, position),
 id_(0),
 username_(""),
+password_hash_(""),
 onGround_(true),
 last_movement_(std::chrono::system_clock::now()),
 player_class_(player_class),
@@ -509,17 +512,6 @@ void Player::CalculateExperienceToNextLevel() {
 }
 
 // =============== Level Up Handler ===============
-// void Player::OnLevelUp() {
-//     SetMaxHealth(max_health_ + 20);
-//     SetMaxMana(max_mana_ + 15);
-//     SetHealth(max_health_); // Full heal on level up
-//     SetMana(max_mana_);     // Full mana on level up
-//     attributes_["strength"] = attributes_.value("strength", 10) + 1;
-//     attributes_["vitality"] = attributes_.value("vitality", 10) + 1;
-//     AddAchievement("level_" + std::to_string(level_));
-//     Logger::Info("Player {} leveled up to level {}", id_, level_);
-// }
-
 void Player::OnLevelUp() {
     // Increase stats
     stats_.max_health += 20;
@@ -1263,21 +1255,17 @@ bool Player::SaveToDatabase() {
             Logger::Error("No database backend available for player {}", GetId());
             return false;
         }
-
-        // Serialize player data to JSON
-        nlohmann::json player_data = Serialize();
-        std::string player_json = player_data.dump();
-        std::string escaped = backend->EscapeString(player_json);
-
-        int shardId = dbManager.GetShardId(GetId());
-        std::string query =
-        "INSERT INTO player_data (player_id, data) "
-        "VALUES (" + std::to_string(GetId()) + ", '" + escaped + "') "
-        "ON CONFLICT (player_id) DO UPDATE SET "
-        "data = EXCLUDED.data, "
-        "last_updated = NOW()";
-
-        bool success = backend->ExecuteShard(shardId, query);
+        nlohmann::json data = Serialize();
+        data["username"] = username_;
+        std::string data_json = data.dump();
+        std::string sql = dbManager.GetSQLProvider().GetQuery("save_player_data");
+        if (sql.empty()) {
+            Logger::Error("Missing SQL: save_player_data");
+            return false;
+        }
+        bool success = backend->ExecuteWithParams(sql, {
+            std::to_string(GetId()), data_json, password_hash_
+        });
         if (success) {
             Logger::Debug("Player {} data saved to database", GetId());
         } else {
@@ -1298,22 +1286,19 @@ bool Player::LoadFromDatabase() {
             Logger::Error("No database backend available for player {}", GetId());
             return false;
         }
-
-        int shardId = dbManager.GetShardId(GetId());
-        std::string query =
-        "SELECT data FROM player_data WHERE player_id = " +
-        std::to_string(GetId());
-
-        nlohmann::json result = backend->QueryShard(shardId, query);
-
+        std::string sql = dbManager.GetSQLProvider().GetQuery("load_player_data");
+        if (sql.empty()) {
+            Logger::Error("Missing SQL: load_player_data");
+            return false;
+        }
+        auto result = backend->QueryWithParams(sql, { std::to_string(GetId()) });
         if (!result.empty() && result[0].contains("data")) {
-            std::string player_json = result[0]["data"];
-            nlohmann::json data = nlohmann::json::parse(player_json);
-            Deserialize(data);
+            std::string data = result[0]["data"];
+            nlohmann::json data_json = nlohmann::json::parse(data);
+            Deserialize(data_json);
             Logger::Debug("Player {} data loaded from database", GetId());
             return true;
         }
-
         Logger::Warn("No data found for player {}", GetId());
         return false;
     } catch (const std::exception& e) {

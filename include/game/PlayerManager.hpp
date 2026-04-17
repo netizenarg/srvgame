@@ -54,13 +54,13 @@ class PlayerManager {
 public:
     static PlayerManager& GetInstance();
 
-    std::shared_ptr<Player> CreatePlayer(const std::string& username);
+    std::shared_ptr<Player> CreatePlayer(const std::string& username, const std::string& password="");
     std::shared_ptr<Player> GetPlayer(int64_t playerId);
     std::shared_ptr<Player> GetPlayerBySession(uint64_t sessionId);
     std::shared_ptr<Player> GetPlayerByUsername(const std::string& username);
     uint64_t GetSessionIdByPlayerId(int64_t playerId) const;
 
-    bool AuthenticatePlayer(const std::string& username, const std::string& password);
+    bool AuthenticatePlayer(const std::string& username, const std::string& password="");
     void PlayerConnected(uint64_t sessionId, int64_t playerId);
     void PlayerDisconnected(uint64_t sessionId);
 

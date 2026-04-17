@@ -700,5 +700,5 @@ void LogicCore::SaveGameState() {
 }
 
 void LogicCore::CleanupOldData() {
-    Logger::Debug("Cleaning up old data");
+    //Logger::Debug("Cleaning up old data");
 }

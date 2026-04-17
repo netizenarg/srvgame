@@ -1,10 +1,9 @@
 #include "game/GameLogic.hpp"
 
-// =============== Static Members ===============
+
 std::mutex GameLogic::instanceMutex_;
 GameLogic* GameLogic::instance_ = nullptr;
 
-// =============== Singleton Access ===============
 GameLogic& GameLogic::GetInstance() {
     std::lock_guard<std::mutex> lock(instanceMutex_);
     if (!instance_) {
@@ -13,9 +12,7 @@ GameLogic& GameLogic::GetInstance() {
     return *instance_;
 }
 
-// =============== Constructor and Destructor ===============
 GameLogic::GameLogic()
-//    : playerManager_(PlayerManager::GetInstance())
 {
     Logger::Debug("GameLogic created");
 }
@@ -26,7 +23,6 @@ GameLogic::~GameLogic() {
     }
 }
 
-// =============== Initialization and Shutdown ===============
 void GameLogic::Initialize() {
     if (instance_) {
         Logger::Warn("GameLogic already initialized");
@@ -37,7 +33,6 @@ void GameLogic::Initialize() {
 
     auto& config = ConfigManager::GetInstance();
 
-    // Initialize world configuration
     WorldConfig worldConfig;
     worldConfig.seed = config.GetInt("world.seed", 12345);
     worldConfig.viewDistance = config.GetInt("world.view_distance", 4);
@@ -50,16 +45,21 @@ void GameLogic::Initialize() {
 
     SetWorldConfig(worldConfig);
 
-    // Initialize component systems
     LogicWorld::GetInstance().Initialize(worldConfig);
+
+    int preloadRadius = 10;
+    for (int x = -preloadRadius; x <= preloadRadius; ++x) {
+        for (int z = -preloadRadius; z <= preloadRadius; ++z) {
+            GetOrCreateChunk(x, z);
+        }
+    }
+
     LogicEntity::GetInstance().Initialize();
 
-    // Load game data
     if (!LoadGameData()) {
         Logger::Error("Failed to load game data");
     }
 
-    // Register handlers
     RegisterWorldHandlers();
 
     Logger::Info("GameLogic world system initialized successfully");
@@ -69,17 +69,12 @@ void GameLogic::Shutdown() {
     if (!instance_) {
         return;
     }
-
     Logger::Info("Shutting down GameLogic world system...");
-
-    // Shutdown component systems
     LogicEntity::GetInstance().Shutdown();
     LogicWorld::GetInstance().Shutdown();
-
     Logger::Info("GameLogic world system shutdown complete");
 }
 
-// =============== World Configuration ===============
 void GameLogic::SetWorldConfig(const WorldConfig& config) {
     LogicWorld::GetInstance().SetConfig(config);
 }
@@ -88,15 +83,12 @@ const GameLogic::WorldConfig& GameLogic::GetWorldConfig() const {
     return static_cast<const WorldConfig&>(LogicWorld::GetInstance().GetConfig());
 }
 
-// =============== World Methods ===============
 std::shared_ptr<WorldChunk> GameLogic::GetOrCreateChunk(int chunkX, int chunkZ) {
     return LogicWorld::GetInstance().GetOrCreateChunk(chunkX, chunkZ);
 }
 
 void GameLogic::GenerateWorldAroundPlayer(uint64_t playerId, const glm::vec3& position) {
     LogicWorld::GetInstance().GenerateWorldAroundPlayer(position, GetWorldConfig().viewDistance);
-
-    // Sync entities to player
     SyncNearbyEntitiesToPlayer(GetSessionIdByPlayer(playerId), position);
 }
 
@@ -112,7 +104,6 @@ BiomeType GameLogic::GetBiomeAt(float x, float z) const {
     return LogicWorld::GetInstance().GetBiomeAt(x, z);
 }
 
-// =============== Entity Methods ===============
 uint64_t GameLogic::SpawnNPC(NPCType type, const glm::vec3& position, uint64_t ownerId) {
     return LogicEntity::GetInstance().SpawnNPC(type, position, ownerId);
 }
@@ -133,7 +124,6 @@ std::shared_ptr<Player> GameLogic::GetPlayer(uint64_t playerId) {
     return PlayerManager::GetInstance().GetPlayer(playerId);
 }
 
-// =============== Collision Methods ===============
 CollisionResult GameLogic::CheckCollision(const glm::vec3& position, float radius, uint64_t excludeEntityId) {
     return LogicEntity::GetInstance().CheckCollision(position, radius, excludeEntityId);
 }
@@ -142,9 +132,7 @@ bool GameLogic::Raycast(const glm::vec3& origin, const glm::vec3& direction, flo
     return LogicEntity::GetInstance().Raycast(origin, direction, maxDistance, hit);
 }
 
-// =============== Loot Methods ===============
 void GameLogic::CreateLootEntity(const glm::vec3& position, std::shared_ptr<LootItem> item, int quantity) {
-    // If no specific item is given, generate a random one from a default loot table
     if (!item) {
         auto& lootTables = LootTableManager::GetInstance();
         auto loot = lootTables.GenerateLoot("default_loot_table"); // configurable
@@ -183,10 +171,8 @@ void GameLogic::HandleLootPickup(uint64_t sessionId, const nlohmann::json& data)
             SendError(sessionId, "Too far to loot");
             return;
         }
-        // Add to player's inventory
         auto& inv = InventorySystem::GetInstance();
         if (inv.AddItem(playerId, LootItem(lootId, lootEntity->GetName()), quantity)) {
-            // Destroy the loot entity
             EntityManager::GetInstance().DestroyEntity(lootId);
             SendSuccess(sessionId, "Loot collected");
             FirePythonEvent("loot_pickup", {
@@ -209,12 +195,10 @@ void GameLogic::HandleInventoryMove(uint64_t sessionId, const nlohmann::json& da
         uint64_t playerId = GetPlayerIdBySession(sessionId);
         int fromSlot = data.value("fromSlot", -1);
         int toSlot = data.value("toSlot", -1);
-
         if (fromSlot < 0 || toSlot < 0) {
             SendError(sessionId, "Invalid slot indices");
             return;
         }
-
         auto& inv = InventorySystem::GetInstance();
         if (inv.MoveItem(playerId, fromSlot, toSlot)) {
             nlohmann::json response = {
@@ -239,7 +223,6 @@ void GameLogic::HandleItemUse(uint64_t sessionId, const nlohmann::json& data) {
         uint64_t playerId = GetPlayerIdBySession(sessionId);
         int slot = data.value("slot", -1);
         uint64_t itemId = data.value("itemId", 0);
-
         auto& inv = InventorySystem::GetInstance();
         std::shared_ptr<LootItem> item;
         if (slot >= 0) {
@@ -255,18 +238,12 @@ void GameLogic::HandleItemUse(uint64_t sessionId, const nlohmann::json& data) {
                 }
             }
         }
-
         if (!item) {
             SendError(sessionId, "Item not found");
             return;
         }
-
-        // Use the item (e.g., consume, apply effect)
-        // For now, assume consumable and remove one
         if (item->IsConsumable()) {
             if (inv.RemoveItem(playerId, itemId, 1)) {
-                // Trigger any game effect (skill, buff, etc.)
-                // Could integrate with SkillSystem if item grants a skill
                 SendSuccess(sessionId, "Item used");
                 FirePythonEvent("item_used", {
                     {"playerId", playerId},
@@ -277,7 +254,6 @@ void GameLogic::HandleItemUse(uint64_t sessionId, const nlohmann::json& data) {
                 SendError(sessionId, "Failed to use item");
             }
         } else {
-            // Non-consumable items might be equipped or activated
             SendError(sessionId, "Item cannot be used this way");
         }
     } catch (const std::exception& e) {
@@ -291,22 +267,17 @@ void GameLogic::HandleItemDrop(uint64_t sessionId, const nlohmann::json& data) {
         uint64_t playerId = GetPlayerIdBySession(sessionId);
         int slot = data.value("slot", -1);
         int quantity = data.value("quantity", 1);
-
         if (slot < 0) {
             SendError(sessionId, "Invalid slot");
             return;
         }
-
         auto& inv = InventorySystem::GetInstance();
         auto item = inv.GetItem(playerId, slot);
         if (!item) {
             SendError(sessionId, "No item in that slot");
             return;
         }
-
-        // Remove from inventory
         if (inv.RemoveItem(playerId, item->GetId(), quantity)) {
-            // Create loot entity at player's feet
             auto player = GetPlayer(playerId);
             if (player) {
                 CreateLootEntity(player->GetPosition(), item, quantity);
@@ -326,15 +297,11 @@ void GameLogic::HandleTradeRequest(uint64_t sessionId, const nlohmann::json& dat
         uint64_t playerId = GetPlayerIdBySession(sessionId);
         uint64_t targetPlayerId = data.value("targetPlayerId", 0ULL);
         std::string action = data.value("action", "request"); // request, accept, decline, cancel
-
         if (targetPlayerId == 0) {
             SendError(sessionId, "Invalid target player");
             return;
         }
-
-        // Simple trade state machine (simplified)
         if (action == "request") {
-            // Send trade request to target player
             uint64_t targetSession = GetSessionIdByPlayer(targetPlayerId);
             if (targetSession == 0) {
                 SendError(sessionId, "Target player not online");
@@ -349,7 +316,6 @@ void GameLogic::HandleTradeRequest(uint64_t sessionId, const nlohmann::json& dat
             SendToSession(targetSession, request);
             SendSuccess(sessionId, "Trade request sent");
         } else if (action == "accept") {
-            // Start trade session
             uint64_t targetSession = GetSessionIdByPlayer(targetPlayerId);
             nlohmann::json acceptMsg = {
                 {"type", "trade_start"},
@@ -374,12 +340,10 @@ void GameLogic::HandleGoldTransaction(uint64_t sessionId, const nlohmann::json& 
         uint64_t targetPlayerId = data.value("targetPlayerId", 0ULL);
         int64_t amount = data.value("amount", 0);
         std::string type = data.value("type", "transfer"); // transfer, gift, etc.
-
         if (targetPlayerId == 0 || amount <= 0) {
             SendError(sessionId, "Invalid target or amount");
             return;
         }
-
         auto& inv = InventorySystem::GetInstance();
         if (type == "transfer") {
             if (inv.GetGold(playerId) < amount) {
@@ -418,15 +382,25 @@ void GameLogic::SendPositionCorrection(uint64_t sessionId, const glm::vec3& posi
     SendBinaryToSession(sessionId, BinaryProtocol::MESSAGE_TYPE_PLAYER_POSITION_CORRECTION, writer.GetBuffer());
 }
 
-// =============== World Message Handlers ===============
 void GameLogic::RegisterWorldHandlers() {
+    RegisterBinaryHandler(BinaryProtocol::MESSAGE_TYPE_AUTHENTICATION,
+    [this](uint64_t sessionId, uint16_t /*type*/, const std::vector<uint8_t>& data) {
+        HandleAuthentication(sessionId, data);
+    });
+
+    RegisterHandler("authentication", [this](uint64_t sessionId, const nlohmann::json& data) {
+        std::string username = data.value("login", "");
+        std::string password = data.value("password", "");
+        HandleAuthentication(sessionId, username, password);
+    });
+
     RegisterBinaryHandler(BinaryProtocol::MESSAGE_TYPE_PLAYER_STATE,
         [this](uint64_t sessionId, uint16_t /*messageType*/, const std::vector<uint8_t>& data) {
             HandlePlayerState(sessionId, data);
     });
 
     RegisterHandler("world_chunk_request", [this](uint64_t sessionId, const nlohmann::json& data) {
-        HandleWorldChunkRequest(sessionId, data);
+        HandleWorldChunkRequestJson(sessionId, data);
     });
 
     RegisterHandler("player_position_update", [this](uint64_t sessionId, const nlohmann::json& data) {
@@ -449,7 +423,6 @@ void GameLogic::RegisterWorldHandlers() {
         HandleEntitySpawnRequest(sessionId, data);
     });
 
-    // Loot handlers
     RegisterHandler("loot_pickup", [this](uint64_t sessionId, const nlohmann::json& data) {
         HandleLootPickup(sessionId, data);
     });
@@ -469,7 +442,6 @@ void GameLogic::RegisterWorldHandlers() {
         HandleGoldTransaction(sessionId, data);
     });
 
-    // Binary handlers
     RegisterBinaryHandler(BinaryProtocol::MESSAGE_TYPE_PLAYER_POSITION,
         [this](uint64_t sessionId, uint16_t /*messageType*/, const std::vector<uint8_t>& data) {
             BinaryProtocol::BinaryReader reader(data.data(), data.size());
@@ -500,12 +472,47 @@ void GameLogic::RegisterWorldHandlers() {
 }
 
 void GameLogic::HandleMessage(uint64_t sessionId, const nlohmann::json& message) {
-    Logger::Debug("GameLogic handling message from session {}", sessionId);
+    Logger::Debug("GameLogic handling from session: {}; message: {}", sessionId, message.dump());
     FirePythonEvent("game_message", {
         {"sessionId", sessionId},
         {"message", message}
     });
-    LogicCore::HandleMessage(sessionId, message);
+
+    std::string type = message.value("type", "");
+
+    // Handle known message types directly
+    if (type == "world_chunk_request") {
+        HandleWorldChunkRequestJson(sessionId, message);
+    } else if (type == "authentication") {
+        std::string username = message.value("login", "");
+        std::string password = message.value("password", "");
+        HandleAuthentication(sessionId, username, password);
+    } else if (type == "player_position_update") {
+        HandlePlayerPositionUpdate(sessionId, message);
+    } else if (type == "npc_interaction") {
+        HandleNPCInteraction(sessionId, message);
+    } else if (type == "collision_check") {
+        HandleCollisionCheck(sessionId, message);
+    } else if (type == "familiar_command") {
+        HandleFamiliarCommand(sessionId, message);
+    } else if (type == "entity_spawn_request") {
+        HandleEntitySpawnRequest(sessionId, message);
+    } else if (type == "loot_pickup") {
+        HandleLootPickup(sessionId, message);
+    } else if (type == "inventory_move") {
+        HandleInventoryMove(sessionId, message);
+    } else if (type == "item_use") {
+        HandleItemUse(sessionId, message);
+    } else if (type == "item_drop") {
+        HandleItemDrop(sessionId, message);
+    } else if (type == "trade_request") {
+        HandleTradeRequest(sessionId, message);
+    } else if (type == "gold_transaction") {
+        HandleGoldTransaction(sessionId, message);
+    } else {
+        // Fallback to base class for unknown types
+        LogicCore::HandleMessage(sessionId, message);
+    }
 }
 
 void GameLogic::OnPlayerConnected(uint64_t sessionId, uint64_t playerId) {
@@ -518,7 +525,6 @@ void GameLogic::OnPlayerConnected(uint64_t sessionId, uint64_t playerId) {
 }
 
 void GameLogic::OnPlayerDisconnected(uint64_t sessionId) {
-    // Capture player ID before base class removes the mapping
     uint64_t playerId = GetPlayerIdBySession(sessionId);
     {
         std::lock_guard<std::mutex> lock(predictionMutex_);
@@ -537,27 +543,53 @@ void GameLogic::HandleWorldChunkRequest(uint64_t sessionId, const nlohmann::json
         int chunkX = data.value("chunkX", 0);
         int chunkZ = data.value("chunkZ", 0);
         int lod = data.value("lod", 0);
-
         Logger::Debug("World chunk request: [{}, {}] LOD: {}", chunkX, chunkZ, lod);
-
         auto chunk = GetOrCreateChunk(chunkX, chunkZ);
         if (!chunk) {
             SendError(sessionId, "Failed to generate chunk", 404);
             return;
         }
-
         BinaryProtocol::BinaryWriter writer;
         writer.WriteInt32(chunkX);
         writer.WriteInt32(chunkZ);
         writer.WriteUInt8(static_cast<uint8_t>(lod));
         writer.WriteJson(chunk->Serialize());
         writer.WriteUInt64(GetCurrentTimestamp());
-
         SendBinaryToSession(sessionId, BinaryProtocol::MESSAGE_TYPE_CHUNK_DATA, writer.GetBuffer());
-
     } catch (const std::exception& e) {
         Logger::Error("Error handling world chunk request: {}", e.what());
         SendError(sessionId, "Failed to process chunk request", 500);
+    }
+}
+
+void GameLogic::HandleWorldChunkRequestJson(uint64_t sessionId, const nlohmann::json& data) {
+    try {
+        Logger::Debug("JSON chunk request received: {}", data.dump());
+        int chunkX = data.value("chunkX", 0);
+        int chunkZ = data.value("chunkZ", 0);
+        int lod = data.value("lod", 0);
+        Logger::Debug("JSON world chunk request: [{}, {}] LOD: {}", chunkX, chunkZ, lod);
+        auto start = std::chrono::steady_clock::now();
+        auto chunk = GetOrCreateChunk(chunkX, chunkZ);
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
+        Logger::Debug("Chunk ({},{}) generated in {} ms", chunkX, chunkZ, elapsed.count());
+        if (!chunk) {
+            SendError(sessionId, "Failed to generate chunk", 404);
+            return;
+        }
+        nlohmann::json response = {
+            {"type", "world_chunk"},
+            {"chunkX", chunkX},
+            {"chunkZ", chunkZ},
+            {"lod", lod},
+            {"data", chunk->Serialize()},
+            {"timestamp", GetCurrentTimestamp()}
+        };
+        SendToSession(sessionId, response);
+        Logger::Debug("Chunk response sent for ({},{})", chunkX, chunkZ);
+    } catch (const std::exception& e) {
+        Logger::Error("Exception in HandleWorldChunkRequestJson: {}", e.what());
+        SendError(sessionId, "Internal server error", 500);
     }
 }
 
@@ -567,34 +599,26 @@ void GameLogic::HandlePlayerPositionUpdate(uint64_t sessionId, const nlohmann::j
         float y = data.value("y", 0.0f);
         float z = data.value("z", 0.0f);
         glm::vec3 position(x, y, z);
-
         uint64_t playerId = GetPlayerIdBySession(sessionId);
         if (playerId == 0) {
             return;
         }
-
         std::shared_ptr<Player> player = GetPlayer(playerId);
         if (player) {
             float collisionRadius = 0.5f;
             CollisionResult collision = CheckCollision(position, collisionRadius, playerId);
-
             if (collision.collided) {
                 position += collision.resolution;
             }
-
             player->SetPosition(position);
             GenerateWorldAroundPlayer(playerId, position);
-
-            // Broadcast position
             BinaryProtocol::BinaryWriter positionWriter;
             positionWriter.WriteUInt64(playerId);
             positionWriter.WriteVector3(position);
             positionWriter.WriteVector3(glm::vec3(0, 0, 0));
             positionWriter.WriteUInt64(GetCurrentTimestamp());
-
             BroadcastToNearbyPlayers(position, BinaryProtocol::MESSAGE_TYPE_PLAYER_POSITION,
                                           positionWriter.GetBuffer(), 100.0f);
-
             FirePythonEvent("player_move_3d", {
                 {"player_id", playerId},
                 {"x", x},
@@ -603,7 +627,6 @@ void GameLogic::HandlePlayerPositionUpdate(uint64_t sessionId, const nlohmann::j
                 {"session_id", sessionId}
             });
         }
-
     } catch (const std::exception& e) {
         Logger::Error("Error handling player position update: {}", e.what());
     }
@@ -611,36 +634,25 @@ void GameLogic::HandlePlayerPositionUpdate(uint64_t sessionId, const nlohmann::j
 
 void GameLogic::HandlePlayerState(uint64_t sessionId, const std::vector<uint8_t>& data) {
     try {
-        // Deserialize client input
         ClientInput input = ClientInput::Deserialize(data.data(), data.size());
         if (!input.IsValid()) {
             Logger::Warn("Invalid client input from session {}", sessionId);
             return;
         }
-
         uint64_t playerId = GetPlayerIdBySession(sessionId);
         if (playerId == 0) {
             Logger::Warn("No player for session {}", sessionId);
             return;
         }
-
-        // Store input in the player's prediction system
         {
             std::lock_guard<std::mutex> lock(predictionMutex_);
             playerPrediction_[playerId].StoreClientInput(input);
         }
-
-        // Get authoritative player state
         auto player = GetPlayer(playerId);
         if (!player) return;
-
-        // Simulate movement using the prediction system
-        // (We'll compute the authoritative state from the last confirmed state plus unprocessed inputs)
         PredictionSystem* pred = &playerPrediction_[playerId];
         auto currentTime = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count();
-
-            // Get the last confirmed state from prediction system (or from player)
             ServerState authState;
             authState.last_processed_input = 0; // TODO: track last processed input
             authState.timestamp = currentTime;
@@ -648,33 +660,20 @@ void GameLogic::HandlePlayerState(uint64_t sessionId, const std::vector<uint8_t>
             authState.velocity = player->GetVelocity(); // assuming Player has velocity
             authState.rotation = player->GetRotation(); // assuming Player has rotation
             authState.on_ground = player->IsOnGround(); // assuming Player has onGround
-
-            // Simulate with unprocessed inputs
             auto unprocessed = pred->GetUnprocessedInputs(authState.last_processed_input);
             if (!unprocessed.empty()) {
                 float deltaTime = 1.0f / 30.0f; // or compute based on time difference
                 authState = pred->SimulateMovement(authState, unprocessed, deltaTime);
             }
-
-            // Update authoritative player state
             player->SetPosition(authState.position);
             player->SetVelocity(authState.velocity);
             player->SetRotation(authState.rotation);
             player->SetOnGround(authState.on_ground);
-
-            // Broadcast authoritative state to nearby players (optional)
             BroadcastPlayerState(playerId, authState);
-
-            // Check if client needs a correction (compare with client's last reported position)
-            // We need to store the client's last reported position; for simplicity we can compare
-            // with the position that the client sent (which is not directly available here, but we
-            // could pass it in the input). For now, we'll just send a correction if the simulation
-            // moved significantly from the last confirmed state.
             static float correctionThreshold = 0.5f; // 0.5 meters
             if (glm::distance(authState.position, player->GetPosition()) > correctionThreshold) {
                 SendPositionCorrection(sessionId, authState.position, authState.velocity);
             }
-
     } catch (const std::exception& e) {
         Logger::Error("HandlePlayerState error: {}", e.what());
     }
@@ -684,41 +683,33 @@ void GameLogic::HandleNPCInteraction(uint64_t sessionId, const nlohmann::json& d
     try {
         uint64_t npcId = data.value("npcId", 0ULL);
         std::string interactionType = data.value("interaction", "");
-
         if (npcId == 0 || interactionType.empty()) {
             SendError(sessionId, "Invalid NPC interaction", 400);
             return;
         }
-
         NPCEntity* npc = GetNPCEntity(npcId);
         if (!npc) {
             SendError(sessionId, "NPC not found", 404);
             return;
         }
-
         uint64_t playerId = GetPlayerIdBySession(sessionId);
         std::shared_ptr<Player> player = GetPlayer(playerId);
         if (!player) {
             SendError(sessionId, "Player not found", 404);
             return;
         }
-
         float distance = glm::distance(player->GetPosition(), npc->GetPosition());
         if (distance > 15.0f) {
             SendError(sessionId, "Too far from NPC", 400);
             return;
         }
-
         if (interactionType == "attack") {
             float damage = 10.0f;
             npc->TakeDamage(damage, playerId);
-
             bool isDead = npc->IsDead();
             if (isDead) {
-                // Handle mob death via MobSystem
                 MobSystem::GetInstance().OnMobDeath(npcId, playerId);
             }
-
             BinaryProtocol::BinaryWriter writer;
             writer.WriteUInt64(playerId);
             writer.WriteUInt64(npcId);
@@ -726,10 +717,8 @@ void GameLogic::HandleNPCInteraction(uint64_t sessionId, const nlohmann::json& d
             writer.WriteFloat(npc->GetStats().health);
             writer.WriteUInt8(isDead ? 1 : 0);
             writer.WriteUInt64(GetCurrentTimestamp());
-
             SendBinaryToSession(sessionId, BinaryProtocol::MESSAGE_TYPE_COMBAT_EVENT, writer.GetBuffer());
         } else if (interactionType == "talk") {
-            // Could trigger quest dialogue via QuestManager
             auto& questMgr = QuestManager::GetInstance();
             auto quests = questMgr.GetQuestsFromNPC(playerId, npc->GetId());
             nlohmann::json response = {
@@ -740,7 +729,6 @@ void GameLogic::HandleNPCInteraction(uint64_t sessionId, const nlohmann::json& d
             };
             SendToSession(sessionId, response);
         }
-
     } catch (const std::exception& e) {
         Logger::Error("Error handling NPC interaction: {}", e.what());
         SendError(sessionId, "Failed to process NPC interaction", 500);
@@ -1248,7 +1236,6 @@ void GameLogic::BroadcastToPlayers(const std::vector<uint64_t>& sessionIds, cons
 }
 
 void GameLogic::BroadcastPlayerState(uint64_t playerId, const ServerState& state) {
-    // Create a binary update message (ENTITY_UPDATE or PLAYER_STATE) for other players
     BinaryProtocol::BinaryWriter writer;
     writer.WriteUInt64(playerId);
     writer.WriteVector3(state.position);
@@ -1262,6 +1249,104 @@ void GameLogic::BroadcastEntityDespawn(uint64_t entityId, const glm::vec3& posit
     BinaryProtocol::BinaryWriter writer;
     writer.WriteUInt64(entityId);
     writer.WriteUInt64(GetCurrentTimestamp());
-
     BroadcastToNearbyPlayers(position, BinaryProtocol::MESSAGE_TYPE_ENTITY_DESPAWN, writer.GetBuffer(), 100.0f);
+}
+
+void GameLogic::HandleAuthentication(uint64_t sessionId, const std::vector<uint8_t>& data) {
+    BinaryProtocol::BinaryReader reader(data.data(), data.size());
+    std::string username = reader.ReadString();
+    std::string password = reader.ReadString();
+    auto& pm = PlayerManager::GetInstance();
+    bool authenticated = false;
+    std::string message;
+    if (pm.PlayerExists(username)) {
+        if (password.empty() || pm.AuthenticatePlayer(username, password)) {
+            authenticated = true;
+            message = "Welcome back, " + username;
+        } else {
+            message = "Invalid password";
+        }
+    } else {
+        if (password.empty()) {
+            auto player = pm.CreatePlayer(username);
+            if (player) {
+                authenticated = true;
+                message = "Welcome, " + username;
+            } else {
+                message = "Failed to create player";
+            }
+        } else {
+            message = "Player does not exist";
+        }
+    }
+    if (authenticated) {
+        auto player = pm.GetPlayerByUsername(username);
+        if (player) {
+            pm.PlayerConnected(sessionId, player->GetId());
+            auto session = connectionManager_->GetSession(sessionId);
+            if (session) {
+                session->SetPlayerId(player->GetId());
+                session->Authenticate(password);
+            }
+            BinaryProtocol::BinaryWriter writer;
+            writer.WriteUInt8(1);
+            writer.WriteString(message);
+            SendBinaryToSession(sessionId, BinaryProtocol::MESSAGE_TYPE_AUTHENTICATION, writer.GetBuffer());
+        } else {
+            authenticated = false;
+            message = "Internal error";
+        }
+    }
+    if (!authenticated) {
+        BinaryProtocol::BinaryWriter writer;
+        writer.WriteUInt8(0);
+        writer.WriteString(message);
+        SendBinaryToSession(sessionId, BinaryProtocol::MESSAGE_TYPE_AUTHENTICATION, writer.GetBuffer());
+    }
+}
+
+void GameLogic::HandleAuthentication(uint64_t sessionId, const std::string& username, const std::string& password) {
+    bool authenticated = false;
+    std::string message;
+    auto& pm = PlayerManager::GetInstance();
+    if (pm.PlayerExists(username)) {
+        if (password.empty() || pm.AuthenticatePlayer(username, password)) {
+            authenticated = true;
+            message = "Welcome back, " + username;
+        } else {
+            message = "Invalid password";
+        }
+    } else {
+        if (password.empty()) {
+            auto player = pm.CreatePlayer(username);
+            if (player) {
+                authenticated = true;
+                message = "Welcome, " + username;
+            } else {
+                message = "Failed to create player";
+            }
+        } else {
+            message = "Player does not exist";
+        }
+    }
+    if (authenticated) {
+        auto player = pm.GetPlayerByUsername(username);
+        if (player) {
+            pm.PlayerConnected(sessionId, player->GetId());
+            auto session = connectionManager_->GetSession(sessionId);
+            if (session) {
+                session->SetPlayerId(player->GetId());
+                session->Authenticate(password);
+            }
+        } else {
+            authenticated = false;
+            message = "Internal error";
+        }
+    }
+    nlohmann::json response = {
+        {"type", "authentication_response"},
+        {"success", authenticated},
+        {"message", message}
+    };
+    SendToSession(sessionId, response);
 }

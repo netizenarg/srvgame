@@ -105,6 +105,9 @@ void GameServer::DoAccept() {
                         session->SetBinaryMessageHandler([session](uint16_t type, const std::vector<uint8_t>& data) {
                             GameLogic::GetInstance().HandleBinaryMessage(session->GetSessionId(), type, data);
                         });
+                        session->SetMessageHandler([session](const nlohmann::json& msg) {
+                            GameLogic::GetInstance().HandleMessage(session->GetSessionId(), msg);
+                        });
                         ConnectionManager::GetInstance().Start(session);
                         session->Start();
                     } else {

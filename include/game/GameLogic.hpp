@@ -83,6 +83,7 @@ public:
 
     // World message handlers
     void HandleWorldChunkRequest(uint64_t sessionId, const nlohmann::json& data);
+    void HandleWorldChunkRequestJson(uint64_t sessionId, const nlohmann::json& data);
     void HandlePlayerPositionUpdate(uint64_t sessionId, const nlohmann::json& data);
     void HandleNPCInteraction(uint64_t sessionId, const nlohmann::json& data);
     void HandleCollisionCheck(uint64_t sessionId, const nlohmann::json& data);
@@ -115,6 +116,9 @@ public:
     void SendPositionCorrection(uint64_t sessionId, const glm::vec3& position, const glm::vec3& velocity);
     void BroadcastPlayerState(uint64_t playerId, const ServerState& state);
     void BroadcastEntityDespawn(uint64_t entityId, const glm::vec3& position);
+
+    void HandleAuthentication(uint64_t sessionId, const std::vector<uint8_t>& data);
+    void HandleAuthentication(uint64_t sessionId, const std::string& username, const std::string& password);
 
 private:
     GameLogic();

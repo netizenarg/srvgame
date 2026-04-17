@@ -135,6 +135,8 @@ std::string WebSocketSession::GetRemoteAddress() const {
 }
 
 void WebSocketSession::OnMessage(const WebSocketProtocol::WebSocketMessage& msg) {
+    Logger::Debug("WebSocket received {} bytes, opcode: {}", msg.data.size(), (int)msg.opcode);
+    Logger::Debug("WebSocketSession {} received text: {}", sessionId_, msg.GetText());
     if (msg.opcode == WebSocketProtocol::OP_TEXT) {
         if (messageHandler_) {
             try {
@@ -145,7 +147,6 @@ void WebSocketSession::OnMessage(const WebSocketProtocol::WebSocketMessage& msg)
             }
         }
     } else if (msg.opcode == WebSocketProtocol::OP_BINARY) {
-        // Deserialize as BinaryMessage
         try {
             auto binaryMsg = BinaryProtocol::BinaryMessage::Deserialize(
                 msg.data.data(), msg.data.size());
