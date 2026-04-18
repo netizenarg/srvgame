@@ -28,22 +28,20 @@ public:
     void Run();
     void Shutdown();
 
-    // For binary protocol
+    asio::io_context& GetIoContext() { return ioContext_; }
+
     using SessionFactory = std::function<std::shared_ptr<GameSession>(asio::ip::tcp::socket, std::shared_ptr<asio::ssl::context>)>;
     void SetSessionFactory(SessionFactory factory);
 
-    // For WebSocket protocol
     using WebSocketFactory = std::function<WebSocketProtocol::WebSocketConnection::Pointer(asio::ip::tcp::socket, std::shared_ptr<asio::ssl::context>)>;
     void SetWebSocketConnectionFactory(WebSocketFactory factory);
 
 private:
     void DoAccept();
     void StartWorkerThreads();
-    void SetupSignalHandlers();
 
     asio::io_context ioContext_;
     asio::ip::tcp::acceptor acceptor_;
-    asio::signal_set signals_;
 
     WorkerGroupConfig groupConfig_;
     const ConfigManager& globalConfig_;
@@ -56,7 +54,7 @@ private:
     std::vector<std::thread> workerThreads_;
     std::atomic<bool> running_{false};
 
-    std::shared_ptr<asio::ssl::context> sslContext_;   // optional, set if SSL is configured
+    std::shared_ptr<asio::ssl::context> sslContext_;
 
     SessionFactory sessionFactory_;
     WebSocketFactory webSocketFactory_;

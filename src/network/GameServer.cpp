@@ -3,7 +3,6 @@
 GameServer::GameServer(const WorkerGroupConfig& groupConfig, const ConfigManager& globalConfig)
     : ioContext_(groupConfig.threads),
       acceptor_(ioContext_),
-      signals_(ioContext_),
       groupConfig_(groupConfig),
       globalConfig_(globalConfig),
       host_(groupConfig.host),
@@ -46,7 +45,6 @@ bool GameServer::Initialize() {
         acceptor_.bind(endpoint);
         acceptor_.listen(groupConfig_.max_connections);
 
-        SetupSignalHandlers();
         Logger::Info("GameServer initialized for protocol '{}' on {}:{}",
                      groupConfig_.protocol, host_, port_);
         return true;
@@ -61,15 +59,17 @@ void GameServer::Run() {
     running_ = true;
     DoAccept();
     StartWorkerThreads();
+
+    auto work = asio::make_work_guard(ioContext_);
+
     Logger::Info("GameServer started with {} IO threads for protocol '{}'",
                  ioThreads_, groupConfig_.protocol);
     try {
         ioContext_.run();
     } catch (const std::exception& err) {
         Logger::Critical("Unhandled exception in IO context: {}", err.what());
-    } catch (...) {
-        Logger::Critical("Unknown exception in IO context");
     }
+
     for (auto& thread : workerThreads_) {
         if (thread.joinable()) thread.join();
     }
@@ -160,23 +160,10 @@ void GameServer::StartWorkerThreads() {
     }
 }
 
-void GameServer::SetupSignalHandlers() {
-    signals_.add(SIGINT);
-    signals_.add(SIGTERM);
-    signals_.add(SIGQUIT);
-    signals_.async_wait([this](std::error_code ec, int signal) {
-        if (!ec) {
-            Logger::Info("Received signal {}, shutting down...", signal);
-            Shutdown();
-        }
-    });
-}
-
 void GameServer::Shutdown() {
     if (!running_) return;
     running_ = false;
     ConnectionManager::GetInstance().StopAll();
-    signals_.cancel();
     acceptor_.close();
     ioContext_.stop();
     Logger::Info("GameServer shutdown initiated for protocol '{}'", groupConfig_.protocol);

@@ -2,7 +2,6 @@
 
 #include "database/SQLiteClient.hpp"
 
-// =============== Constructor and Destructor ===============
 SQLiteClient::SQLiteClient(const nlohmann::json& config, const SQLProvider& sqlProvider)
     : db_(nullptr),
       sqlProvider_(sqlProvider),
@@ -10,7 +9,6 @@ SQLiteClient::SQLiteClient(const nlohmann::json& config, const SQLProvider& sqlP
       lastInsertId_(0),
       affectedRows_(0)
 {
-    // Determine database file path
     if (config.contains("file") && config["file"].is_string()) {
         dbPath_ = config["file"].get<std::string>();
     } else if (config.contains("name") && config["name"].is_string()) {
@@ -29,7 +27,6 @@ SQLiteClient::~SQLiteClient() {
     Logger::Debug("SQLiteClient destroyed");
 }
 
-// =============== Connection Management ===============
 bool SQLiteClient::Connect() {
     std::lock_guard<std::mutex> lock(dbMutex_);
     if (db_) return true;
@@ -48,10 +45,16 @@ bool SQLiteClient::Connect() {
         return false;
     }
 
-    // --- New: Set busy timeout to 5 seconds ---
     sqlite3_busy_timeout(db_, 5000);
 
     char* errMsg = nullptr;
+
+    rc = sqlite3_exec(db_, "PRAGMA synchronous = NORMAL;", nullptr, nullptr, &errMsg);
+    if (rc != SQLITE_OK) {
+        Logger::Warn("Failed to enable synchronous NORMAL: {}", errMsg ? errMsg : "unknown error");
+        sqlite3_free(errMsg);
+    }
+
     rc = sqlite3_exec(db_, "PRAGMA journal_mode=WAL;", nullptr, nullptr, &errMsg);
     if (rc != SQLITE_OK) {
         Logger::Warn("Failed to enable WAL mode: {}", errMsg ? errMsg : "unknown error");
@@ -115,7 +118,6 @@ void SQLiteClient::ReconnectAll() {
     Reconnect();
 }
 
-// =============== Connection Pool Management (dummy) ===============
 bool SQLiteClient::InitializeConnectionPool(size_t /*minConnections*/, size_t /*maxConnections*/) {
     Logger::Debug("SQLiteClient: connection pool not implemented");
     return true;
@@ -131,7 +133,6 @@ size_t SQLiteClient::GetIdleConnections() const {
     return 0;
 }
 
-// =============== Helper Methods ===============
 bool SQLiteClient::ExecuteSql(const std::string& sql, std::vector<std::vector<std::string>>* results) {
     std::lock_guard<std::mutex> lock(dbMutex_);
     if (!db_) {
@@ -226,7 +227,6 @@ bool SQLiteClient::TableExists(const std::string& tableName) {
     return ExecuteSql(sql, &results) && !results.empty();
 }
 
-// =============== Query Operations ===============
 nlohmann::json SQLiteClient::Query(const std::string& sql) {
     std::lock_guard<std::mutex> lock(dbMutex_);
     if (!db_) {
@@ -312,7 +312,6 @@ bool SQLiteClient::ExecuteWithParams(const std::string& sql, const std::vector<s
     return Execute(processedSql);
 }
 
-// =============== Shard Operations ===============
 nlohmann::json SQLiteClient::QueryShard(int /*shardId*/, const std::string& sql) {
     return Query(sql);
 }
@@ -328,7 +327,6 @@ bool SQLiteClient::ExecuteShardWithParams(int /*shardId*/, const std::string& sq
     return ExecuteWithParams(sql, params);
 }
 
-// =============== Utility Methods ===============
 int SQLiteClient::GetShardId(uint64_t entityId) const {
     return static_cast<int>(entityId % totalShards_);
 }
@@ -345,7 +343,6 @@ int SQLiteClient::GetAffectedRows() {
     return affectedRows_;
 }
 
-// =============== Statistics ===============
 nlohmann::json SQLiteClient::GetDatabaseStats() {
     nlohmann::json stats;
     auto now = std::chrono::steady_clock::now();
@@ -377,7 +374,6 @@ void SQLiteClient::ResetStats() {
     Logger::Info("SQLite statistics reset");
 }
 
-// =============== Transaction Operations ===============
 bool SQLiteClient::BeginTransaction() {
     std::string sql = sqlProvider_.GetQuery("begin_transaction");
     if (sql.empty()) sql = "BEGIN TRANSACTION;";
@@ -419,7 +415,6 @@ bool SQLiteClient::ExecuteTransaction(const std::function<bool()>& operation) {
     return success;
 }
 
-// =============== Player Data Operations ===============
 bool SQLiteClient::SavePlayerData(uint64_t playerId, const nlohmann::json& data) {
     std::string sql = sqlProvider_.GetQuery("save_player_data");
     if (sql.empty()) {
@@ -506,7 +501,6 @@ nlohmann::json SQLiteClient::GetPlayer(uint64_t playerId) {
     return nlohmann::json();
 }
 
-// =============== Game State Operations ===============
 bool SQLiteClient::SaveGameState(const std::string& key, const nlohmann::json& state) {
     std::string sql = sqlProvider_.GetQuery("save_game_state");
     if (sql.empty()) {
@@ -548,7 +542,6 @@ std::vector<std::string> SQLiteClient::ListGameStates() {
     return keys;
 }
 
-// =============== World Data Operations ===============
 bool SQLiteClient::SaveChunkData(int chunkX, int chunkZ, const nlohmann::json& chunkData) {
     std::lock_guard<std::mutex> lock(dbMutex_);
     if (!db_) {
@@ -561,7 +554,6 @@ bool SQLiteClient::SaveChunkData(int chunkX, int chunkZ, const nlohmann::json& c
         sql = "INSERT OR REPLACE INTO world_chunks (chunk_x, chunk_z, biome, data, last_updated) VALUES (?, ?, ?, ?, datetime('now'));";
     }
 
-    // Begin immediate transaction
     char* errMsg = nullptr;
     int rc = sqlite3_exec(db_, "BEGIN IMMEDIATE;", nullptr, nullptr, &errMsg);
     if (rc != SQLITE_OK) {
@@ -570,7 +562,6 @@ bool SQLiteClient::SaveChunkData(int chunkX, int chunkZ, const nlohmann::json& c
         return false;
     }
 
-    // Prepare and execute the INSERT statement
     sqlite3_stmt* stmt = nullptr;
     rc = sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr);
     if (rc != SQLITE_OK) {
@@ -596,7 +587,6 @@ bool SQLiteClient::SaveChunkData(int chunkX, int chunkZ, const nlohmann::json& c
 
     sqlite3_finalize(stmt);
 
-    // Commit or rollback
     if (success) {
         rc = sqlite3_exec(db_, "COMMIT;", nullptr, nullptr, &errMsg);
         if (rc != SQLITE_OK) {
@@ -667,7 +657,6 @@ std::vector<std::pair<int, int>> SQLiteClient::ListChunksInRange(int centerX, in
     return chunks;
 }
 
-// =============== Inventory Operations ===============
 bool SQLiteClient::SaveInventory(uint64_t playerId, const nlohmann::json& inventory) {
     std::string sql = sqlProvider_.GetQuery("save_inventory");
     if (sql.empty()) {
@@ -688,7 +677,6 @@ nlohmann::json SQLiteClient::LoadInventory(uint64_t playerId) {
     return nlohmann::json();
 }
 
-// =============== Quest Operations ===============
 bool SQLiteClient::SaveQuestProgress(uint64_t playerId, const std::string& questId, const nlohmann::json& progress) {
     std::string sql = sqlProvider_.GetQuery("save_quest_progress");
     if (sql.empty()) {

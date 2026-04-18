@@ -90,13 +90,14 @@ void ProcessPool::MasterProcess() {
 
             if (pid == 0) {
                 signal(SIGINT, SIG_IGN);
-                signal(SIGTERM, [](int) { g_shutdown.store(true, std::memory_order_relaxed); });
+                signal(SIGTERM, SIG_DFL);   // Restore default, ASIO will override it
+                //signal(SIGTERM, [](int) { g_shutdown.store(true, std::memory_order_relaxed); });
 
                 UnblockSignals(&oldset);
 
                 sigset_t block_int;
                 sigemptyset(&block_int);
-                sigaddset(&block_int, SIGINT);
+                sigaddset(&block_int, SIGTERM); //sigaddset(&block_int, SIGINT);
                 pthread_sigmask(SIG_BLOCK, &block_int, nullptr);
 
                 for (int i = 0; i < totalWorkers_ * 2; ++i) {
@@ -149,6 +150,10 @@ void ProcessPool::MasterProcess() {
         }
     }
 
+    // ---------- shutdown with timeout ----------
+    constexpr int SHUTDOWN_TIMEOUT_SEC = 5;
+
+    // Send SIGTERM to all workers
     for (int i = 0; i < totalWorkers_; ++i) {
         if (workers_[i].pid > 0) {
             Logger::Info("Terminating worker {} (PID: {})", i, workers_[i].pid);
@@ -156,11 +161,41 @@ void ProcessPool::MasterProcess() {
         }
     }
 
-    int status;
+    std::vector<bool> exited(totalWorkers_, false);
+    int remaining = totalWorkers_;
+    auto start = std::chrono::steady_clock::now();
+
+    while (remaining > 0) {
+        auto elapsed = std::chrono::steady_clock::now() - start;
+        if (elapsed >= std::chrono::seconds(SHUTDOWN_TIMEOUT_SEC)) {
+            Logger::Warn("Shutdown timeout reached, {} workers still alive", remaining);
+            break;
+        }
+
+        int status;
+        pid_t pid = waitpid(-1, &status, WNOHANG);
+        if (pid > 0) {
+            for (int i = 0; i < totalWorkers_; ++i) {
+                if (!exited[i] && workers_[i].pid == pid) {
+                    exited[i] = true;
+                    remaining--;
+                    Logger::Info("Worker {} exited with status: {}", i, WEXITSTATUS(status));
+                    break;
+                }
+            }
+        } else if (pid == 0) { // No child exited, sleep a bit
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        } else { // Error (e.g., no children left)
+            break;
+        }
+    }
+
+    // Force kill any remaining workers
     for (int i = 0; i < totalWorkers_; ++i) {
-        if (workers_[i].pid > 0) {
-            waitpid(workers_[i].pid, &status, 0);
-            Logger::Info("Worker {} exited with status: {}", i, status);
+        if (!exited[i] && workers_[i].pid > 0) {
+            Logger::Warn("Worker {} (PID: {}) still alive – sending SIGKILL", i, workers_[i].pid);
+            kill(workers_[i].pid, SIGKILL);
+            waitpid(workers_[i].pid, nullptr, 0);
         }
     }
 

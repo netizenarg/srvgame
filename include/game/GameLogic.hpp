@@ -100,6 +100,7 @@ public:
     void OnPlayerDisconnected(uint64_t sessionId);
 
     // Broadcasting
+    void BroadcastPlayerUpdates();
     void BroadcastToNearbyPlayers(const glm::vec3& position, uint16_t messageType,
                                              const std::vector<uint8_t>& data, float radius = 50.0f);
     void BroadcastToNearbyOnlinePlayers(const glm::vec3& position, uint16_t messageType,
@@ -107,15 +108,21 @@ public:
     void SyncNearbyEntitiesToPlayer(uint64_t sessionId, const glm::vec3& position);
 
     // Helper broadcast methods
+    void BroadcastToNearbyPlayersJson(const glm::vec3& position, const nlohmann::json& message, float radius);
     void BroadcastToAllPlayers(const nlohmann::json& message);
     void BroadcastToAllPlayersBinary(uint16_t messageType, const std::vector<uint8_t>& data);
     void BroadcastToPlayers(const std::vector<uint64_t>& sessionIds, const nlohmann::json& message);
+    void BroadcastPlayerState(uint64_t playerId, const ServerState& state);
+    void BroadcastPlayerSpawn(uint64_t playerId);
+    void BroadcastPlayerDespawn(uint64_t playerId, const glm::vec3& lastPosition);
+    void BroadcastPlayerSpawnJson(uint64_t playerId);
+    void BroadcastPlayerDespawnJson(uint64_t playerId, const glm::vec3& lastPosition);
+    void BroadcastPlayerUpdatesJson();
 
     // Broadcast entity spawn to nearby players
     void BroadcastEntitySpawn(uint64_t entityId, EntityType type, const glm::vec3& position,
                               float yaw, const std::string& name);
     void SendPositionCorrection(uint64_t sessionId, const glm::vec3& position, const glm::vec3& velocity);
-    void BroadcastPlayerState(uint64_t playerId, const ServerState& state);
     void BroadcastEntityDespawn(uint64_t entityId, const glm::vec3& position);
 
     void HandleAuthentication(uint64_t sessionId, const std::vector<uint8_t>& data);

@@ -164,6 +164,21 @@ void WorkerMain(int workerId, const WorkerGroupConfig& groupConfig, ProcessPool*
             gameLogic.PreloadWorldData(config.GetWorldPreloadRadius());
         }
 
+        std::thread signalThread([workerId, &server]() {
+            sigset_t set;
+            sigemptyset(&set);
+            sigaddset(&set, SIGTERM);
+            int sig;
+            int ret = sigwait(&set, &sig);
+            if (ret == 0) {
+                Logger::Info("Worker {} received SIGTERM via sigwait, initiating shutdown", workerId);
+                g_shutdown.store(true);
+                server.Shutdown();
+            } else {
+                Logger::Error("Worker {} sigwait failed: {}", workerId, strerror(errno));
+            }
+        });
+
         if (server.Initialize()) {
             Logger::Info("Worker {} game server initialized on {}:{} (protocol: {})",
                          workerId, groupConfig.host, groupConfig.port, groupConfig.protocol);
@@ -174,6 +189,7 @@ void WorkerMain(int workerId, const WorkerGroupConfig& groupConfig, ProcessPool*
 
                 auto lastCleanupTime = std::chrono::steady_clock::now();
                 auto lastIPCCheckTime = std::chrono::steady_clock::now();
+                auto lastPlayerUpdate = std::chrono::steady_clock::now();
 
                 while (worldMaintenanceRunning && !g_shutdown.load()) {
                     auto currentTime = std::chrono::steady_clock::now();
@@ -202,13 +218,30 @@ void WorkerMain(int workerId, const WorkerGroupConfig& groupConfig, ProcessPool*
                         lastIPCCheckTime = currentTime;
                     }
 
+                    // Player updates every 100 ms
+                    if (std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - lastPlayerUpdate).count() >= 100) {
+                        gameLogic.BroadcastPlayerUpdates();
+                        gameLogic.BroadcastPlayerUpdatesJson();
+                        lastPlayerUpdate = currentTime;
+                    }
+
                     std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 }
 
                 Logger::Info("Worker {} world maintenance thread stopped", workerId);
             });
 
-            Logger::Info("Worker {} starting server loop", workerId);
+            std::thread watchdog([workerId]() {
+                while (!g_shutdown.load()) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                }
+                std::this_thread::sleep_for(std::chrono::seconds(10));
+                Logger::Error("Worker {} watchdog triggered – forcing exit", workerId);
+                _exit(1);
+            });
+            watchdog.detach();
+
+            Logger::Info("Worker {} entering server.Run()", workerId);
             server.Run();
 
             worldMaintenanceRunning = false;
@@ -219,6 +252,8 @@ void WorkerMain(int workerId, const WorkerGroupConfig& groupConfig, ProcessPool*
         } else {
             Logger::Critical("Worker {} failed to initialize server", workerId);
         }
+
+        if (signalThread.joinable()) { signalThread.join(); }
 
         Logger::Info("Worker {} beginning cleanup...", workerId);
         gameLogic.Shutdown();
@@ -390,7 +425,7 @@ int main(int argc, char* argv[]) {
                 processPool.SendToWorker(i, broadcastSerialized);
             }
 
-            Logger::Info("Master broadcasted server status to all workers");
+            //Logger::Debug("Master broadcasted server status to all workers");
         }
     }
 
@@ -398,7 +433,7 @@ int main(int argc, char* argv[]) {
         masterMessagingThread.join();
     }
 
-    Logger::Info("Initiating graceful shutdown...");
+    Logger::Info("Initiating shutdown...");
     processPool.Shutdown();
 
     Logger::Info("Game Server shutdown complete");

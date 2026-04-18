@@ -373,6 +373,10 @@ void GameLogic::SendPositionCorrection(uint64_t sessionId, const glm::vec3& posi
 }
 
 void GameLogic::RegisterWorldHandlers() {
+    RegisterHandler("protocol_negotiation", [this](uint64_t sessionId, const nlohmann::json& data) {
+        Logger::Debug("Protocol negotiation received from session {}; data {}", sessionId, data.dump());
+    });
+
     RegisterBinaryHandler(BinaryProtocol::MESSAGE_TYPE_AUTHENTICATION,
     [this](uint64_t sessionId, uint16_t /*type*/, const std::vector<uint8_t>& data) {
         HandleAuthentication(sessionId, data);
@@ -466,7 +470,10 @@ void GameLogic::HandleMessage(uint64_t sessionId, const nlohmann::json& message)
     Logger::Debug("Message content: {}", message.dump());
     std::string type = message.value("type", "");
     Logger::Debug("Message type: '{}'", type);
-    if (type == "world_chunk_request") {
+    if (type == "protocol_negotiation") {
+        // Already handled by the registered handler, nothing else needed
+    }
+    else if (type == "world_chunk_request") {
         Logger::Debug("Dispatching to HandleWorldChunkRequestJson");
         HandleWorldChunkRequestJson(sessionId, message);
     }
@@ -1111,12 +1118,12 @@ void GameLogic::SaveChunkData() {
 
 void GameLogic::CleanupOldData() {
     LogicCore::CleanupOldData();
-    Logger::Debug("Cleaning up game data");
+    //Logger::Debug("Cleaning up game data");
 }
 
 // =============== World maintenance ===============
 void GameLogic::PerformMaintenance() {
-    Logger::Info("Performing game world maintenance");
+    //Logger::Debug("Performing game world maintenance");
 
     // Clean up old data
     CleanupOldData();
@@ -1133,7 +1140,7 @@ void GameLogic::PerformMaintenance() {
         }
     }
 
-    Logger::Info("Game world maintenance complete");
+    //Logger::Debug("Game world maintenance complete");
 }
 
 // =============== IPC message handling ===============
@@ -1278,8 +1285,41 @@ void GameLogic::BroadcastToPlayers(const std::vector<uint64_t>& sessionIds, cons
             Logger::Debug("Broadcasted to {} specific player(s)", sentCount);
         }
 
-    } catch (const std::exception& e) {
-        Logger::Error("Error broadcasting to specific players: {}", e.what());
+    } catch (const std::exception& err) {
+        Logger::Error("Error broadcasting to specific players: {}", err.what());
+    }
+}
+
+void GameLogic::BroadcastPlayerUpdates() {
+    auto sessions = connectionManager_->GetAllSessions();
+    for (auto& session : sessions) {
+        if (!session->IsAuthenticated()) continue;
+
+        uint64_t localPlayerId = session->GetPlayerId();
+        auto localPlayer = GetPlayer(localPlayerId);
+        if (!localPlayer) continue;
+
+        glm::vec3 localPos = localPlayer->GetPosition();
+
+        // Collect nearby players
+        std::vector<std::shared_ptr<Player>> nearby =
+        PlayerManager::GetInstance().GetPlayersInRadius(localPos, ConfigManager::GetInstance().GetFloat("world.interest_radius", 100.0f));
+
+        // Build payload
+        BinaryProtocol::BinaryWriter writer;
+        writer.WriteUInt32(static_cast<uint32_t>(nearby.size()));
+        for (auto& player : nearby) {
+            writer.WriteUInt32(player->GetId());
+            writer.WriteFloat(player->GetPosition().x);
+            writer.WriteFloat(player->GetPosition().y);
+            writer.WriteFloat(player->GetPosition().z);
+            writer.WriteFloat(player->GetRotation().y);
+            writer.WriteFloat(player->GetHealth());
+            writer.WriteFloat(player->GetMaxHealth());
+            writer.WriteString(player->GetName());
+        }
+
+        session->SendBinary(BinaryProtocol::MESSAGE_TYPE_PLAYER_UPDATE, writer.GetBuffer());
     }
 }
 
@@ -1290,7 +1330,105 @@ void GameLogic::BroadcastPlayerState(uint64_t playerId, const ServerState& state
     writer.WriteVector3(state.rotation);
     writer.WriteVector3(state.velocity);
     writer.WriteUInt64(state.timestamp);
-    BroadcastToNearbyPlayers(state.position, BinaryProtocol::MESSAGE_TYPE_ENTITY_UPDATE, writer.GetBuffer(), 100.0f);
+    BroadcastToNearbyPlayers(state.position, BinaryProtocol::MESSAGE_TYPE_ENTITY_UPDATE, writer.GetBuffer(), ConfigManager::GetInstance().GetFloat("world.interest_radius", 100.0f));
+}
+
+void GameLogic::BroadcastPlayerSpawn(uint64_t playerId) {
+    auto player = GetPlayer(playerId);
+    if (!player) return;
+    BinaryProtocol::BinaryWriter writer;
+    writer.WriteUInt64(playerId);
+    writer.WriteString(player->GetName());
+    writer.WriteVector3(player->GetPosition());
+    writer.WriteFloat(player->GetRotation().y); // yaw
+    writer.WriteFloat(player->GetHealth());
+    writer.WriteFloat(player->GetMaxHealth());
+    BroadcastToNearbyPlayers(player->GetPosition(),
+                             BinaryProtocol::MESSAGE_TYPE_PLAYER_SPAWN,
+                             writer.GetBuffer(),
+                             ConfigManager::GetInstance().GetFloat("world.interest_radius", 100.0f));
+}
+
+void GameLogic::BroadcastPlayerDespawn(uint64_t playerId, const glm::vec3& lastPosition) {
+    BinaryProtocol::BinaryWriter writer;
+    writer.WriteUInt64(playerId);
+    BroadcastToNearbyPlayers(lastPosition,
+                             BinaryProtocol::MESSAGE_TYPE_PLAYER_DESPAWN,
+                             writer.GetBuffer(),
+                             ConfigManager::GetInstance().GetFloat("world.interest_radius", 100.0f));
+}
+
+void GameLogic::BroadcastToNearbyPlayersJson(const glm::vec3& position, const nlohmann::json& message, float radius) {
+    if (!connectionManager_) return;
+
+    auto& pm = PlayerManager::GetInstance();
+    auto nearby = pm.GetPlayersInRadius(position, radius);
+
+    for (auto& player : nearby) {
+        uint64_t sessionId = pm.GetSessionIdByPlayerId(player->GetId());
+        if (sessionId != 0) {
+            auto session = connectionManager_->GetSession(sessionId);
+            if (session && session->IsConnected()) {
+                session->Send(message);
+            }
+        }
+    }
+}
+
+void GameLogic::BroadcastPlayerSpawnJson(uint64_t playerId) {
+    auto player = GetPlayer(playerId);
+    if (!player) return;
+    nlohmann::json msg = {
+        {"type", "player_spawn"},
+        {"player_id", playerId},
+        {"name", player->GetName()},
+        {"position", {player->GetPosition().x, player->GetPosition().y, player->GetPosition().z}},
+        {"yaw", player->GetRotation().y},
+        {"health", player->GetHealth()},
+        {"max_health", player->GetMaxHealth()},
+        {"timestamp", GetCurrentTimestamp()}
+    };
+    BroadcastToNearbyPlayersJson(player->GetPosition(), msg, ConfigManager::GetInstance().GetFloat("world.interest_radius", 100.0f));
+}
+
+void GameLogic::BroadcastPlayerDespawnJson(uint64_t playerId, const glm::vec3& lastPosition) {
+    nlohmann::json msg = {
+        {"type", "player_despawn"},
+        {"player_id", playerId},
+        {"timestamp", GetCurrentTimestamp()}
+    };
+    BroadcastToNearbyPlayersJson(lastPosition, msg, ConfigManager::GetInstance().GetFloat("world.interest_radius", 100.0f));
+}
+
+void GameLogic::BroadcastPlayerUpdatesJson() {
+    auto sessions = connectionManager_->GetAllSessions();
+    for (auto& session : sessions) {
+        if (!session->IsAuthenticated()) continue;
+        uint64_t localPlayerId = session->GetPlayerId();
+        auto localPlayer = GetPlayer(localPlayerId);
+        if (!localPlayer) continue;
+        glm::vec3 localPos = localPlayer->GetPosition();
+        auto nearby = PlayerManager::GetInstance().GetPlayersInRadius(localPos, ConfigManager::GetInstance().GetFloat("world.interest_radius", 100.0f));
+        nlohmann::json playersArray = nlohmann::json::array();
+        for (auto& player : nearby) {
+            playersArray.push_back({
+                {"id", player->GetId()},
+                {"name", player->GetName()},
+                {"x", player->GetPosition().x},
+                {"y", player->GetPosition().y},
+                {"z", player->GetPosition().z},
+                {"yaw", player->GetRotation().y},
+                {"health", player->GetHealth()},
+                {"max_health", player->GetMaxHealth()}
+            });
+        }
+        nlohmann::json msg = {
+            {"type", "player_update"},
+            {"players", playersArray},
+            {"timestamp", GetCurrentTimestamp()}
+        };
+        session->Send(msg);
+    }
 }
 
 void GameLogic::BroadcastEntityDespawn(uint64_t entityId, const glm::vec3& position) {
@@ -1338,16 +1476,19 @@ void GameLogic::HandleAuthentication(uint64_t sessionId, const std::vector<uint8
             }
             BinaryProtocol::BinaryWriter writer;
             writer.WriteUInt8(1);
+            writer.WriteUInt64(static_cast<uint64_t>(player->GetId()));
             writer.WriteString(message);
             SendBinaryToSession(sessionId, BinaryProtocol::MESSAGE_TYPE_AUTHENTICATION, writer.GetBuffer());
         } else {
             authenticated = false;
             message = "Internal error";
+            Logger::Warn("GetPlayerByUsername('{}') return null", username);
         }
     }
     if (!authenticated) {
         BinaryProtocol::BinaryWriter writer;
         writer.WriteUInt8(0);
+        writer.WriteUInt64(0);
         writer.WriteString(message);
         SendBinaryToSession(sessionId, BinaryProtocol::MESSAGE_TYPE_AUTHENTICATION, writer.GetBuffer());
     }
@@ -1396,5 +1537,11 @@ void GameLogic::HandleAuthentication(uint64_t sessionId, const std::string& user
         {"success", authenticated},
         {"message", message}
     };
+    if (authenticated) {
+        auto player = pm.GetPlayerByUsername(username);
+        if (player) {
+            response["player_id"] = player->GetId();
+        }
+    }
     SendToSession(sessionId, response);
 }
