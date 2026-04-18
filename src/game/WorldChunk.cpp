@@ -208,19 +208,26 @@ nlohmann::json WorldChunk::Serialize() const {
     data["lod"] = static_cast<int>(lod_);
     data["biome"] = static_cast<int>(biome_);
 
-    // Serialize heightmap
-    nlohmann::json heightmapArray = nlohmann::json::array();
-    for (float height : heightmap_) {
-        heightmapArray.push_back(height);
+    // Serialize vertices (position + normal as flat float array)
+    nlohmann::json verticesArray = nlohmann::json::array();
+    for (const auto& v : vertices_) {
+        verticesArray.push_back(v.position.x);
+        verticesArray.push_back(v.position.y);
+        verticesArray.push_back(v.position.z);
+        verticesArray.push_back(v.normal.x);
+        verticesArray.push_back(v.normal.y);
+        verticesArray.push_back(v.normal.z);
     }
-    data["heightmap"] = heightmapArray;
+    data["vertices"] = verticesArray;
 
-    // Serialize blocks (simplified)
-    nlohmann::json blocksArray = nlohmann::json::array();
-    for (BlockType block : blocks_) {
-        blocksArray.push_back(static_cast<int>(block));
+    // Serialize indices (using v0, v1, v2)
+    nlohmann::json indicesArray = nlohmann::json::array();
+    for (const auto& tri : triangles_) {
+        indicesArray.push_back(tri.v0);
+        indicesArray.push_back(tri.v1);
+        indicesArray.push_back(tri.v2);
     }
-    data["blocks"] = blocksArray;
+    data["indices"] = indicesArray;
 
     return data;
 }
@@ -251,4 +258,29 @@ void WorldChunk::Deserialize(const nlohmann::json& data) {
 
     // Regenerate geometry
     GenerateGeometry();
+}
+
+nlohmann::json WorldChunk::SerializeHeightmap() const {
+    nlohmann::json data;
+
+    data["chunkX"] = chunkX_;
+    data["chunkZ"] = chunkZ_;
+    data["lod"] = static_cast<int>(lod_);
+    data["biome"] = static_cast<int>(biome_);
+
+    // Serialize heightmap
+    nlohmann::json heightmapArray = nlohmann::json::array();
+    for (float height : heightmap_) {
+        heightmapArray.push_back(height);
+    }
+    data["heightmap"] = heightmapArray;
+
+    // Serialize blocks (simplified)
+    nlohmann::json blocksArray = nlohmann::json::array();
+    for (BlockType block : blocks_) {
+        blocksArray.push_back(static_cast<int>(block));
+    }
+    data["blocks"] = blocksArray;
+
+    return data;
 }

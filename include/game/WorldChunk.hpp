@@ -99,6 +99,7 @@ public:
     // Serialization
     virtual nlohmann::json Serialize() const;
     virtual void Deserialize(const nlohmann::json& data);
+    virtual nlohmann::json SerializeHeightmap() const;
 
     // Geometry generation
     virtual void GenerateGeometry() { GenerateLowPolyGeometry(); }

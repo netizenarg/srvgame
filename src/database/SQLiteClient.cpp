@@ -48,7 +48,16 @@ bool SQLiteClient::Connect() {
         return false;
     }
 
+    // --- New: Set busy timeout to 5 seconds ---
+    sqlite3_busy_timeout(db_, 5000);
+
     char* errMsg = nullptr;
+    rc = sqlite3_exec(db_, "PRAGMA journal_mode=WAL;", nullptr, nullptr, &errMsg);
+    if (rc != SQLITE_OK) {
+        Logger::Warn("Failed to enable WAL mode: {}", errMsg ? errMsg : "unknown error");
+        sqlite3_free(errMsg);
+    }
+
     rc = sqlite3_exec(db_, "PRAGMA foreign_keys = ON;", nullptr, nullptr, &errMsg);
     if (rc != SQLITE_OK) {
         Logger::Warn("Failed to enable foreign keys: {}", errMsg ? errMsg : "unknown error");
@@ -541,11 +550,73 @@ std::vector<std::string> SQLiteClient::ListGameStates() {
 
 // =============== World Data Operations ===============
 bool SQLiteClient::SaveChunkData(int chunkX, int chunkZ, const nlohmann::json& chunkData) {
+    std::lock_guard<std::mutex> lock(dbMutex_);
+    if (!db_) {
+        Logger::Error("SaveChunkData: database not connected");
+        return false;
+    }
+
     std::string sql = sqlProvider_.GetQuery("save_chunk_data");
     if (sql.empty()) {
         sql = "INSERT OR REPLACE INTO world_chunks (chunk_x, chunk_z, biome, data, last_updated) VALUES (?, ?, ?, ?, datetime('now'));";
     }
-    return ExecuteWithParams(sql, { std::to_string(chunkX), std::to_string(chunkZ), "0", chunkData.dump() });
+
+    // Begin immediate transaction
+    char* errMsg = nullptr;
+    int rc = sqlite3_exec(db_, "BEGIN IMMEDIATE;", nullptr, nullptr, &errMsg);
+    if (rc != SQLITE_OK) {
+        Logger::Error("Failed to begin transaction: {}", errMsg ? errMsg : "unknown");
+        sqlite3_free(errMsg);
+        return false;
+    }
+
+    // Prepare and execute the INSERT statement
+    sqlite3_stmt* stmt = nullptr;
+    rc = sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr);
+    if (rc != SQLITE_OK) {
+        Logger::Error("Failed to prepare chunk save statement: {}", sqlite3_errmsg(db_));
+        sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+        return false;
+    }
+
+    std::string chunkXStr = std::to_string(chunkX);
+    std::string chunkZStr = std::to_string(chunkZ);
+    std::string dataStr = chunkData.dump();
+
+    sqlite3_bind_text(stmt, 1, chunkXStr.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, chunkZStr.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 3, 0);  // biome default
+    sqlite3_bind_text(stmt, 4, dataStr.c_str(), -1, SQLITE_TRANSIENT);
+
+    rc = sqlite3_step(stmt);
+    bool success = (rc == SQLITE_DONE);
+    if (!success) {
+        Logger::Error("Failed to execute chunk save: {}", sqlite3_errmsg(db_));
+    }
+
+    sqlite3_finalize(stmt);
+
+    // Commit or rollback
+    if (success) {
+        rc = sqlite3_exec(db_, "COMMIT;", nullptr, nullptr, &errMsg);
+        if (rc != SQLITE_OK) {
+            Logger::Error("Failed to commit chunk save: {}", errMsg ? errMsg : "unknown");
+            sqlite3_free(errMsg);
+            success = false;
+        }
+    } else {
+        sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+    }
+
+    if (success) {
+        lastInsertId_ = sqlite3_last_insert_rowid(db_);
+        affectedRows_ = sqlite3_changes(db_);
+        stats_.totalQueries++;
+    } else {
+        stats_.failedQueries++;
+    }
+
+    return success;
 }
 
 nlohmann::json SQLiteClient::LoadChunkData(int chunkX, int chunkZ) {

@@ -563,17 +563,53 @@ void GameLogic::HandleWorldChunkRequest(uint64_t sessionId, const nlohmann::json
 }
 
 void GameLogic::HandleWorldChunkRequestJson(uint64_t sessionId, const nlohmann::json& data) {
-    Logger::Debug("HandleWorldChunkRequestJson called for session {}", sessionId);
-    Logger::Debug("Request data: {}", data.dump());
     try {
         int chunkX = data.value("chunkX", 0);
         int chunkZ = data.value("chunkZ", 0);
         int lod = data.value("lod", 0);
-        Logger::Debug("JSON world chunk request: [{}, {}] LOD: {}", chunkX, chunkZ, lod);
         auto start = std::chrono::steady_clock::now();
         auto chunk = GetOrCreateChunk(chunkX, chunkZ);
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
-        Logger::Debug("GetOrCreateChunk took {} ms", elapsed.count());
+        if (!chunk) {
+            Logger::Error("Failed to get or create chunk ({},{})", chunkX, chunkZ);
+            SendError(sessionId, "Failed to generate chunk", 404);
+            return;
+        }
+        chunk->GenerateLowPolyGeometry();
+        nlohmann::json response = {
+            {"type", "world_chunk"},
+            {"chunkX", chunkX},
+            {"chunkZ", chunkZ},
+            {"lod", lod},
+            {"data", chunk->Serialize()},
+            {"timestamp", GetCurrentTimestamp()}
+        };
+        SendToSession(sessionId, response);
+    } catch (const std::exception& err) {
+        Logger::Error("Exception in HandleWorldChunkRequestJson: {}", err.what());
+        try {
+            SendError(sessionId, "Internal server error", 500);
+        } catch (...) {
+            Logger::Error("Failed to send error response to session {}", sessionId);
+        }
+    } catch (...) {
+        Logger::Error("Unknown exception in HandleWorldChunkRequestJson");
+        try {
+            SendError(sessionId, "Internal server error", 500);
+        } catch (...) {
+            Logger::Error("Failed to send error response to session {}", sessionId);
+        }
+    }
+}
+
+void GameLogic::HandleWorldChunkHMapRequest(uint64_t sessionId, const nlohmann::json& data) {
+    try {
+        int chunkX = data.value("chunkX", 0);
+        int chunkZ = data.value("chunkZ", 0);
+        int lod = data.value("lod", 0);
+        auto start = std::chrono::steady_clock::now();
+        auto chunk = GetOrCreateChunk(chunkX, chunkZ);
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
         if (!chunk) {
             Logger::Error("Failed to get or create chunk ({},{})", chunkX, chunkZ);
             SendError(sessionId, "Failed to generate chunk", 404);
@@ -587,9 +623,7 @@ void GameLogic::HandleWorldChunkRequestJson(uint64_t sessionId, const nlohmann::
             {"data", chunk->Serialize()},
             {"timestamp", GetCurrentTimestamp()}
         };
-        Logger::Debug("Sending chunk response: {}", response.dump());
         SendToSession(sessionId, response);
-        Logger::Debug("Chunk response sent for ({},{})", chunkX, chunkZ);
     } catch (const std::exception& err) {
         Logger::Error("Exception in HandleWorldChunkRequestJson: {}", err.what());
         try {

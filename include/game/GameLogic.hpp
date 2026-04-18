@@ -84,6 +84,7 @@ public:
     // World message handlers
     void HandleWorldChunkRequest(uint64_t sessionId, const nlohmann::json& data);
     void HandleWorldChunkRequestJson(uint64_t sessionId, const nlohmann::json& data);
+    void HandleWorldChunkHMapRequest(uint64_t sessionId, const nlohmann::json& data);
     void HandlePlayerPositionUpdate(uint64_t sessionId, const nlohmann::json& data);
     void HandleNPCInteraction(uint64_t sessionId, const nlohmann::json& data);
     void HandleCollisionCheck(uint64_t sessionId, const nlohmann::json& data);
