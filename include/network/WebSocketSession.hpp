@@ -22,6 +22,8 @@ public:
     bool IsConnected() const override;
     uint64_t GetSessionId() const override;
 
+    void SendError(const std::string& message, int code = 500);
+
     void Send(const nlohmann::json& message) override;
     void SendRaw(const std::string& data) override;
     void SendBinary(uint16_t message_type, const std::vector<uint8_t>& data) override;

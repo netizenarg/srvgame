@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <mutex>
 #include <random>
 #include <vector>
 
@@ -42,6 +43,7 @@ private:
     GenerationConfig config_;
     std::mt19937 rng_;
     std::uniform_real_distribution<float> dist_;
+    mutable std::recursive_mutex rngMutex_;  // recursive to allow nested locks
 
     float Noise(float x, float y);
     float FractalNoise(float x, float y);

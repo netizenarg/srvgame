@@ -14,7 +14,6 @@ BlockType WorldChunk::GetBlock(int x, int y, int z) const {
     if (x < 0 || x >= CHUNK_SIZE || y < 0 || y >= CHUNK_SIZE || z < 0 || z >= CHUNK_SIZE) {
         return BlockType::AIR;
     }
-
     int index = x + y * CHUNK_SIZE + z * CHUNK_SIZE * CHUNK_SIZE;
     return blocks_[index];
 }
@@ -23,7 +22,6 @@ void WorldChunk::SetBlock(int x, int y, int z, BlockType type) {
     if (x < 0 || x >= CHUNK_SIZE || y < 0 || y >= CHUNK_SIZE || z < 0 || z >= CHUNK_SIZE) {
         return;
     }
-
     int index = x + y * CHUNK_SIZE + z * CHUNK_SIZE * CHUNK_SIZE;
     blocks_[index] = type;
 }

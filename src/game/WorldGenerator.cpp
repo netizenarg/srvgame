@@ -1,8 +1,5 @@
 #include "game/WorldGenerator.hpp"
 
-// Initialize static members
-//const float WorldChunk::BLOCK_SIZE = 1.0f;
-//const float WorldChunk::CHUNK_WIDTH = WorldChunk::CHUNK_SIZE * WorldChunk::BLOCK_SIZE;
 
 WorldGenerator::WorldGenerator(const GenerationConfig& config)
     : config_(config), rng_(config.seed), dist_(-1.0f, 1.0f) {
@@ -16,7 +13,7 @@ std::unique_ptr<WorldChunk> WorldGenerator::GenerateChunk(int chunkX, int chunkZ
     
     // Generate blocks based on heightmap
     const int chunkSize = WorldChunk::CHUNK_SIZE;
-    const int worldSize = 256; // Arbitrary world height
+    const int worldHeight = chunkSize;  // Use chunk height (can be increased later)
     
     for (int x = 0; x < chunkSize; ++x) {
         for (int z = 0; z < chunkSize; ++z) {
@@ -31,8 +28,8 @@ std::unique_ptr<WorldChunk> WorldGenerator::GenerateChunk(int chunkX, int chunkZ
             BiomeType biome = GetBiomeAt(worldX, worldZ);
             chunk->SetBiome(biome);
             
-            // Generate column of blocks
-            for (int y = 0; y < worldSize; ++y) {
+            // Generate column of blocks (only up to chunk height)
+            for (int y = 0; y < worldHeight; ++y) {
                 if (y < height) {
                     // Below ground - generate appropriate block type
                     BlockType type = BlockType::STONE;
@@ -68,7 +65,7 @@ std::unique_ptr<WorldChunk> WorldGenerator::GenerateChunk(int chunkX, int chunkZ
         }
     }
     
-    // Add biome-specific features
+    // Add biome-specific features (locking is handled inside each function)
     switch (chunk->GetBiome()) {
         case BiomeType::FOREST:
             GenerateForestFeatures(*chunk);
@@ -100,6 +97,8 @@ std::unique_ptr<WorldChunk> WorldGenerator::GenerateChunk(int chunkX, int chunkZ
 BiomeType WorldGenerator::GetBiomeAt(float x, float z) {
     // Use noise to determine biome
     float noiseValue = FractalNoise(x / 1000.0f, z / 1000.0f);
+    // Avoid division by near-zero
+    if (std::abs(noiseValue) < 0.001f) noiseValue = 0.001f;
     float temperature = FractalNoise(x / noiseValue * 8.0f, z / noiseValue * 8.0f);
     float humidity = FractalNoise(x / noiseValue * 7.0f, z / noiseValue * 7.0f);
     
@@ -145,6 +144,7 @@ float WorldGenerator::GetTerrainHeight(float x, float z) {
 }
 
 void WorldGenerator::SetSeed(int seed) {
+    std::lock_guard<std::recursive_mutex> lock(rngMutex_);
     config_.seed = seed;
     rng_.seed(seed);
 }
@@ -192,24 +192,25 @@ void WorldGenerator::GenerateLowPolyTerrain(WorldChunk& chunk, int chunkX, int c
     // This function populates the chunk's heightmap
     const int chunkSize = WorldChunk::CHUNK_SIZE;
     
-    for (int x = 0; x <= chunkSize; ++x) {
-        for (int z = 0; z <= chunkSize; ++z) {
+    // Loop over the grid size that matches heightmap_ dimensions
+    for (int x = 0; x < chunkSize; ++x) {
+        for (int z = 0; z < chunkSize; ++z) {
             float worldX = (chunkX * chunkSize + x) * WorldChunk::BLOCK_SIZE;
             float worldZ = (chunkZ * chunkSize + z) * WorldChunk::BLOCK_SIZE;
             
             float height = GetTerrainHeight(worldX, worldZ);
             
-            // Store in heightmap (need to convert to 1D index)
-            int index = z * (chunkSize + 1) + x;
-            if (index < chunkSize * chunkSize) {
-                chunk.heightmap_[index] = height;
-            }
+            // Corrected 1D index: heightmap_ is sized chunkSize * chunkSize
+            int index = z * chunkSize + x;
+            chunk.heightmap_[index] = height;
         }
     }
 }
 
 void WorldGenerator::AddTrees(WorldChunk& chunk, BiomeType biome) {
     if (biome != BiomeType::FOREST) return;
+    
+    std::lock_guard<std::recursive_mutex> lock(rngMutex_);
     
     const int chunkSize = WorldChunk::CHUNK_SIZE;
     std::uniform_int_distribution<int> treeDist(0, 10);
@@ -230,7 +231,7 @@ void WorldGenerator::AddTrees(WorldChunk& chunk, BiomeType biome) {
                     int baseY = static_cast<int>(height);
                     
                     for (int y = 0; y < treeHeight; ++y) {
-                        if (baseY + y < 256) { // World height limit
+                        if (baseY + y < chunkSize) {
                             chunk.SetBlock(x, baseY + y, z, BlockType::WOOD);
                         }
                     }
@@ -250,7 +251,7 @@ void WorldGenerator::AddTrees(WorldChunk& chunk, BiomeType biome) {
                                     
                                     if (leafX >= 0 && leafX < chunkSize &&
                                         leafZ >= 0 && leafZ < chunkSize &&
-                                        leafY < 256) {
+                                        leafY < chunkSize) {
                                         chunk.SetBlock(leafX, leafY, leafZ, BlockType::LEAVES);
                                     }
                                 }
@@ -265,6 +266,8 @@ void WorldGenerator::AddTrees(WorldChunk& chunk, BiomeType biome) {
 
 void WorldGenerator::AddRocks(WorldChunk& chunk, BiomeType biome) {
     if (biome != BiomeType::MOUNTAIN && biome != BiomeType::DESERT) return;
+    
+    std::lock_guard<std::recursive_mutex> lock(rngMutex_);
     
     const int chunkSize = WorldChunk::CHUNK_SIZE;
     std::uniform_int_distribution<int> rockDist(0, 20);
@@ -282,7 +285,7 @@ void WorldGenerator::AddRocks(WorldChunk& chunk, BiomeType biome) {
                     int baseY = static_cast<int>(height);
                     
                     // Place a 1x1x1 rock
-                    if (baseY < 255) {
+                    if (baseY < chunkSize - 1) {
                         chunk.SetBlock(x, baseY, z, BlockType::STONE);
                     }
                 }
@@ -296,7 +299,7 @@ void WorldGenerator::AddWaterPlane(WorldChunk& chunk) {
     int waterY = static_cast<int>(config_.waterLevel);
     
     // Only add water plane if water level is within chunk bounds
-    if (waterY >= 0 && waterY < 256) {
+    if (waterY >= 0 && waterY < chunkSize) {
         for (int x = 0; x < chunkSize; ++x) {
             for (int z = 0; z < chunkSize; ++z) {
                 // Check if this position should have water
@@ -314,12 +317,15 @@ void WorldGenerator::AddWaterPlane(WorldChunk& chunk) {
 }
 
 void WorldGenerator::GenerateForestFeatures(WorldChunk& chunk) {
+    // Locking is done inside AddTrees and AddRocks
     AddTrees(chunk, BiomeType::FOREST);
     AddRocks(chunk, BiomeType::FOREST);
 }
 
 void WorldGenerator::GenerateMountainFeatures(WorldChunk& chunk) {
     AddRocks(chunk, BiomeType::MOUNTAIN);
+    
+    std::lock_guard<std::recursive_mutex> lock(rngMutex_);
     
     // Add snow on high mountains
     const int chunkSize = WorldChunk::CHUNK_SIZE;
@@ -334,7 +340,7 @@ void WorldGenerator::GenerateMountainFeatures(WorldChunk& chunk) {
             
             if (height > snowLevel) {
                 int snowY = static_cast<int>(height);
-                if (snowY < 256) {
+                if (snowY < chunkSize) {
                     // Replace top block with snow
                     chunk.SetBlock(x, snowY, z, BlockType::SNOW);
                 }
@@ -345,6 +351,8 @@ void WorldGenerator::GenerateMountainFeatures(WorldChunk& chunk) {
 
 void WorldGenerator::GenerateDesertFeatures(WorldChunk& chunk) {
     AddRocks(chunk, BiomeType::DESERT);
+    
+    std::lock_guard<std::recursive_mutex> lock(rngMutex_);
     
     // Add occasional cactus
     const int chunkSize = WorldChunk::CHUNK_SIZE;
@@ -363,7 +371,7 @@ void WorldGenerator::GenerateDesertFeatures(WorldChunk& chunk) {
                     int cactusHeight = 2 + (rng_() % 3);
                     
                     for (int y = 0; y < cactusHeight; ++y) {
-                        if (baseY + y < 256) {
+                        if (baseY + y < chunkSize) {
                             // Use wood block as placeholder for cactus
                             chunk.SetBlock(x, baseY + y, z, BlockType::WOOD);
                         }
@@ -375,6 +383,8 @@ void WorldGenerator::GenerateDesertFeatures(WorldChunk& chunk) {
 }
 
 void WorldGenerator::GeneratePlainsFeatures(WorldChunk& chunk) {
+    std::unique_lock<std::recursive_mutex> lock(rngMutex_);
+    
     // Plains have few features - just occasional grass/trees
     const int chunkSize = WorldChunk::CHUNK_SIZE;
     std::uniform_int_distribution<int> featureDist(0, 50);
@@ -392,10 +402,12 @@ void WorldGenerator::GeneratePlainsFeatures(WorldChunk& chunk) {
                     
                     // Small chance for a tree
                     if (rng_() % 10 == 0) {
+                        lock.unlock();
                         AddTrees(chunk, BiomeType::FOREST);
+                        lock.lock();
                     }
                     // Otherwise just place a tall grass block (using leaves as placeholder)
-                    else if (baseY < 255) {
+                    else if (baseY < chunkSize - 1) {
                         chunk.SetBlock(x, baseY, z, BlockType::LEAVES);
                     }
                 }

@@ -660,8 +660,9 @@ void WebSocketConnection::DoWrite() {
         return;
     }
     asio::async_write(socket_, asio::buffer(write_buffer_),
-        [self](std::error_code ec, size_t bytes_transferred) {
-            //Logger::Debug("WebSocketConnection::DoWrite asio::async_write {}", bytes_transferred);
+    [self](std::error_code ec, size_t bytes_transferred) {
+        Logger::Debug("WebSocketConnection::DoWrite asio::async_write {}", bytes_transferred);
+        try {
             if (ec) {
                 self->HandleError(ec);
                 return;
@@ -672,7 +673,14 @@ void WebSocketConnection::DoWrite() {
             if (!self->write_buffer_.empty()) {
                 self->DoWrite();
             }
-        });
+        } catch (const std::exception& err) {
+            Logger::Critical("Exception in WebSocket write handler: {}", err.what());
+            self->Close(1011, "Internal error");
+        } catch (...) {
+            Logger::Critical("Unknown exception in WebSocket write handler");
+            self->Close(1011, "Internal error");
+        }
+    });
 }
 
 void WebSocketConnection::SendText(const std::string& text) {

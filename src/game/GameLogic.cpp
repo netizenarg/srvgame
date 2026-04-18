@@ -28,11 +28,8 @@ void GameLogic::Initialize() {
         Logger::Warn("GameLogic already initialized");
         return;
     }
-
     Logger::Info("Initializing GameLogic with world system...");
-
     auto& config = ConfigManager::GetInstance();
-
     WorldConfig worldConfig;
     worldConfig.seed = config.GetInt("world.seed", 12345);
     worldConfig.viewDistance = config.GetInt("world.view_distance", 4);
@@ -42,26 +39,19 @@ void GameLogic::Initialize() {
     worldConfig.maxTerrainHeight = config.GetFloat("world.max_terrain_height", 50.0f);
     worldConfig.waterLevel = config.GetFloat("world.water_level", 10.0f);
     worldConfig.chunkUnloadDistance = config.GetFloat("world.chunk_unload_distance", 200.0f);
-
     SetWorldConfig(worldConfig);
-
     LogicWorld::GetInstance().Initialize(worldConfig);
-
-    int preloadRadius = 10;
+    int preloadRadius = 1;
     for (int x = -preloadRadius; x <= preloadRadius; ++x) {
         for (int z = -preloadRadius; z <= preloadRadius; ++z) {
             GetOrCreateChunk(x, z);
         }
     }
-
     LogicEntity::GetInstance().Initialize();
-
     if (!LoadGameData()) {
         Logger::Error("Failed to load game data");
     }
-
     RegisterWorldHandlers();
-
     Logger::Info("GameLogic world system initialized successfully");
 }
 
@@ -472,45 +462,55 @@ void GameLogic::RegisterWorldHandlers() {
 }
 
 void GameLogic::HandleMessage(uint64_t sessionId, const nlohmann::json& message) {
-    Logger::Debug("GameLogic handling from session: {}; message: {}", sessionId, message.dump());
-    FirePythonEvent("game_message", {
-        {"sessionId", sessionId},
-        {"message", message}
-    });
-
+    Logger::Debug("GameLogic::HandleMessage called for session {}", sessionId);
+    Logger::Debug("Message content: {}", message.dump());
     std::string type = message.value("type", "");
-
-    // Handle known message types directly
+    Logger::Debug("Message type: '{}'", type);
     if (type == "world_chunk_request") {
+        Logger::Debug("Dispatching to HandleWorldChunkRequestJson");
         HandleWorldChunkRequestJson(sessionId, message);
-    } else if (type == "authentication") {
+    }
+    else if (type == "authentication") {
         std::string username = message.value("login", "");
         std::string password = message.value("password", "");
+        Logger::Debug("Dispatching authentication for user '{}'", username);
         HandleAuthentication(sessionId, username, password);
-    } else if (type == "player_position_update") {
+    }
+    else if (type == "player_position_update") {
         HandlePlayerPositionUpdate(sessionId, message);
-    } else if (type == "npc_interaction") {
+    }
+    else if (type == "npc_interaction") {
         HandleNPCInteraction(sessionId, message);
-    } else if (type == "collision_check") {
+    }
+    else if (type == "collision_check") {
         HandleCollisionCheck(sessionId, message);
-    } else if (type == "familiar_command") {
+    }
+    else if (type == "familiar_command") {
         HandleFamiliarCommand(sessionId, message);
-    } else if (type == "entity_spawn_request") {
+    }
+    else if (type == "entity_spawn_request") {
         HandleEntitySpawnRequest(sessionId, message);
-    } else if (type == "loot_pickup") {
+    }
+    else if (type == "loot_pickup") {
         HandleLootPickup(sessionId, message);
-    } else if (type == "inventory_move") {
+    }
+    else if (type == "inventory_move") {
         HandleInventoryMove(sessionId, message);
-    } else if (type == "item_use") {
+    }
+    else if (type == "item_use") {
         HandleItemUse(sessionId, message);
-    } else if (type == "item_drop") {
+    }
+    else if (type == "item_drop") {
         HandleItemDrop(sessionId, message);
-    } else if (type == "trade_request") {
+    }
+    else if (type == "trade_request") {
         HandleTradeRequest(sessionId, message);
-    } else if (type == "gold_transaction") {
+    }
+    else if (type == "gold_transaction") {
         HandleGoldTransaction(sessionId, message);
-    } else {
-        // Fallback to base class for unknown types
+    }
+    else {
+        Logger::Warn("Unknown message type '{}' from session {}", type, sessionId);
         LogicCore::HandleMessage(sessionId, message);
     }
 }
@@ -563,8 +563,9 @@ void GameLogic::HandleWorldChunkRequest(uint64_t sessionId, const nlohmann::json
 }
 
 void GameLogic::HandleWorldChunkRequestJson(uint64_t sessionId, const nlohmann::json& data) {
+    Logger::Debug("HandleWorldChunkRequestJson called for session {}", sessionId);
+    Logger::Debug("Request data: {}", data.dump());
     try {
-        Logger::Debug("JSON chunk request received: {}", data.dump());
         int chunkX = data.value("chunkX", 0);
         int chunkZ = data.value("chunkZ", 0);
         int lod = data.value("lod", 0);
@@ -572,8 +573,9 @@ void GameLogic::HandleWorldChunkRequestJson(uint64_t sessionId, const nlohmann::
         auto start = std::chrono::steady_clock::now();
         auto chunk = GetOrCreateChunk(chunkX, chunkZ);
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
-        Logger::Debug("Chunk ({},{}) generated in {} ms", chunkX, chunkZ, elapsed.count());
+        Logger::Debug("GetOrCreateChunk took {} ms", elapsed.count());
         if (!chunk) {
+            Logger::Error("Failed to get or create chunk ({},{})", chunkX, chunkZ);
             SendError(sessionId, "Failed to generate chunk", 404);
             return;
         }
@@ -585,11 +587,23 @@ void GameLogic::HandleWorldChunkRequestJson(uint64_t sessionId, const nlohmann::
             {"data", chunk->Serialize()},
             {"timestamp", GetCurrentTimestamp()}
         };
+        Logger::Debug("Sending chunk response: {}", response.dump());
         SendToSession(sessionId, response);
         Logger::Debug("Chunk response sent for ({},{})", chunkX, chunkZ);
-    } catch (const std::exception& e) {
-        Logger::Error("Exception in HandleWorldChunkRequestJson: {}", e.what());
-        SendError(sessionId, "Internal server error", 500);
+    } catch (const std::exception& err) {
+        Logger::Error("Exception in HandleWorldChunkRequestJson: {}", err.what());
+        try {
+            SendError(sessionId, "Internal server error", 500);
+        } catch (...) {
+            Logger::Error("Failed to send error response to session {}", sessionId);
+        }
+    } catch (...) {
+        Logger::Error("Unknown exception in HandleWorldChunkRequestJson");
+        try {
+            SendError(sessionId, "Internal server error", 500);
+        } catch (...) {
+            Logger::Error("Failed to send error response to session {}", sessionId);
+        }
     }
 }
 

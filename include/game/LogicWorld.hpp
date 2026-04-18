@@ -78,4 +78,5 @@ private:
     std::unordered_map<uint64_t, std::shared_ptr<GameEntity>> entities_;
     mutable std::mutex entitiesMutex_;
     std::atomic<float> currentTimeOfDay_{0.0f};  // 0.0 to 1.0
+    uint32_t canary_ = 0xDEADBEEF;
 };

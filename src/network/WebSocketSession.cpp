@@ -20,6 +20,23 @@ void WebSocketSession::Disconnect() { wsConn_->Close(1000, "Disconnect"); }
 bool WebSocketSession::IsConnected() const { return wsConn_->IsOpen(); }
 uint64_t WebSocketSession::GetSessionId() const { return sessionId_; }
 
+void WebSocketSession::SendError(const std::string& message, int code) {
+    try {
+        nlohmann::json error = {
+            {"type", "error"},
+            {"code", code},
+            {"message", message},
+            {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count()}
+        };
+        Send(error);
+    } catch (const std::exception& err) {
+        Logger::Error("WebSocketSession::SendError failed: {}", err.what());
+    } catch (...) {
+        Logger::Error("WebSocketSession::SendError failed with unknown exception");
+    }
+}
+
 void WebSocketSession::Send(const nlohmann::json& message) {
     wsConn_->SendJson(message);
 }
@@ -135,21 +152,30 @@ std::string WebSocketSession::GetRemoteAddress() const {
 }
 
 void WebSocketSession::OnMessage(const WebSocketProtocol::WebSocketMessage& msg) {
-    Logger::Debug("WebSocket received {} bytes, opcode: {}", msg.data.size(), (int)msg.opcode);
-    Logger::Debug("WebSocketSession {} received text: {}", sessionId_, msg.GetText());
+    Logger::Debug("WebSocketSession {} received {} bytes, opcode: {}",
+                  sessionId_, msg.data.size(), (int)msg.opcode);
+
     if (msg.opcode == WebSocketProtocol::OP_TEXT) {
+        std::string text = msg.GetText();
+        Logger::Debug("WebSocketSession {} received TEXT: {}", sessionId_, text);
+
         if (messageHandler_) {
             try {
-                auto json = nlohmann::json::parse(msg.GetText());
+                auto json = nlohmann::json::parse(text);
+                Logger::Debug("WebSocketSession {} parsed JSON: {}", sessionId_, json.dump());
                 messageHandler_(json);
             } catch (const std::exception& e) {
-                Logger::Error("WebSocketSession: invalid JSON: {}", e.what());
+                Logger::Error("WebSocketSession {} invalid JSON: {}", sessionId_, e.what());
             }
+        } else {
+            Logger::Error("WebSocketSession {} has no messageHandler_ set!", sessionId_);
         }
-    } else if (msg.opcode == WebSocketProtocol::OP_BINARY) {
+    }
+    else if (msg.opcode == WebSocketProtocol::OP_BINARY) {
+        Logger::Debug("WebSocketSession {} received BINARY ({} bytes)", sessionId_, msg.data.size());
         try {
-            auto binaryMsg = BinaryProtocol::BinaryMessage::Deserialize(
-                msg.data.data(), msg.data.size());
+            auto binaryMsg = BinaryProtocol::BinaryMessage::Deserialize(msg.data.data(), msg.data.size());
+            Logger::Debug("WebSocketSession {} binary message type: {}", sessionId_, binaryMsg.header.message_type);
             if (binary_handler_) {
                 binary_handler_(binaryMsg.header.message_type, binaryMsg.data);
             } else if (default_binary_handler_) {

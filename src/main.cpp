@@ -4,6 +4,9 @@
 #include <iostream>
 #include <thread>
 
+#include <execinfo.h>
+//#include <signal.h>
+
 #include "logging/Logger.hpp"
 
 #include "config/ConfigManager.hpp"
@@ -21,6 +24,14 @@ std::atomic<bool> g_shutdown(false);
 void SignalHandler(int signal) {
     (void)signal;
     g_shutdown.store(true);
+}
+
+void crash_handler(int sig) {
+    void* array[20];
+    size_t size = backtrace(array, 20);
+    fprintf(stderr, "Error: signal %d:\n", sig);
+    backtrace_symbols_fd(array, size, STDERR_FILENO);
+    _exit(1);
 }
 
 // Worker main signature: receives group config
@@ -231,6 +242,8 @@ void WorkerMain(int workerId, const WorkerGroupConfig& groupConfig, ProcessPool*
 int main(int argc, char* argv[]) {
     std::signal(SIGINT, SignalHandler);
     std::signal(SIGTERM, SignalHandler);
+    //std::signal(SIGSEGV, crash_handler);
+    //std::signal(SIGABRT, crash_handler);
 
     Logger::InitializeDefaults();
 

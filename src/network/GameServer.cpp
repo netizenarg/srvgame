@@ -63,11 +63,15 @@ void GameServer::Run() {
     StartWorkerThreads();
     Logger::Info("GameServer started with {} IO threads for protocol '{}'",
                  ioThreads_, groupConfig_.protocol);
-    ioContext_.run();
+    try {
+        ioContext_.run();
+    } catch (const std::exception& err) {
+        Logger::Critical("Unhandled exception in IO context: {}", err.what());
+    } catch (...) {
+        Logger::Critical("Unknown exception in IO context");
+    }
     for (auto& thread : workerThreads_) {
-        if (thread.joinable()) {
-            thread.join();
-        }
+        if (thread.joinable()) thread.join();
     }
     Logger::Info("GameServer run finished for protocol '{}'", groupConfig_.protocol);
 }
@@ -76,7 +80,6 @@ void GameServer::DoAccept() {
     acceptor_.async_accept(
         [this](std::error_code ec, asio::ip::tcp::socket socket) {
             if (!ec) {
-                // Apply socket options
                 if (groupConfig_.tcp_nodelay) {
                     asio::ip::tcp::no_delay option(true);
                     socket.set_option(option);
@@ -89,7 +92,6 @@ void GameServer::DoAccept() {
                     asio::socket_base::receive_buffer_size option(groupConfig_.receive_buffer_size);
                     socket.set_option(option);
                 }
-
                 if (groupConfig_.protocol == "binary") {
                     if (sessionFactory_) {
                         auto session = sessionFactory_(std::move(socket), sslContext_);
@@ -106,8 +108,29 @@ void GameServer::DoAccept() {
                             GameLogic::GetInstance().HandleBinaryMessage(session->GetSessionId(), type, data);
                         });
                         session->SetMessageHandler([session](const nlohmann::json& msg) {
-                            GameLogic::GetInstance().HandleMessage(session->GetSessionId(), msg);
+                            try {
+                                GameLogic::GetInstance().HandleMessage(session->GetSessionId(), msg);
+                            } catch (const std::exception& err) {
+                                Logger::Error("Exception in message handler for session {}: {}",
+                                              session->GetSessionId(), err.what());
+                                try {
+                                    session->SendError("Internal server error", 500);
+                                } catch (...) {
+                                    Logger::Error("Failed to send error response to session {}",
+                                                  session->GetSessionId());
+                                }
+                            } catch (...) {
+                                Logger::Error("Unknown exception in message handler for session {}",
+                                              session->GetSessionId());
+                                try {
+                                    session->SendError("Internal server error", 500);
+                                } catch (...) {
+                                    Logger::Error("Failed to send error response to session {}",
+                                                  session->GetSessionId());
+                                }
+                            }
                         });
+                        Logger::Debug("WebSocket message handlers set for session {}", session->GetSessionId());
                         ConnectionManager::GetInstance().Start(session);
                         session->Start();
                     } else {
