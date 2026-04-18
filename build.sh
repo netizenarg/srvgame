@@ -41,6 +41,7 @@ sudo apt-get install -y \
 USE_CITUS=OFF
 USE_SQLITE=OFF
 ENABLE_ASAN=OFF
+CLEAR_PREVIOUS=OFF
 
 for arg in "$@"; do
     case $arg in
@@ -58,6 +59,10 @@ for arg in "$@"; do
             echo "Enabling AddressSanitizer and UndefinedBehaviorSanitizer"
             ENABLE_ASAN=ON
             ;;
+        --clear)
+            echo "Enabling clear previous compilations"
+            CLEAR_PREVIOUS=ON
+            ;;
         *)
             ;;
     esac
@@ -73,7 +78,10 @@ rm -rf CMakeFiles
 # Create build directory and copy related folders
 mkdir -p build
 cd build
-find . -mindepth 1 -maxdepth 1 ! -name "certs" -exec rm -rf {} +
+if $CLEAR_PREVIOUS; then
+    echo "Clearing previous compilations..."
+    find . -mindepth 1 -maxdepth 1 ! -name "certs" -exec rm -rf {} +
+fi
 
 # Run CMake
 cmake .. -B . \
