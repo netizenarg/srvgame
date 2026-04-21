@@ -788,4 +788,16 @@ bool CitusClient::ConnectToDatabase(const std::string& dbname) {
     return true;
 }
 
+bool CitusClient::ExecuteDatabase(const std::string& sql) { return Execute(sql); }
+
+nlohmann::json CitusClient::QueryDatabase(const std::string& sql) { return Query(sql); }
+
+static CitusClient* CitusClient::GetInstancePtr() {
+    std::lock_guard<std::mutex> lock(instanceMutex_);
+    return instance_;
+}
+
+bool CitusClient::IsCitusEnabled() const { return citusEnabled_; }
+
+
 #endif // USE_CITUS

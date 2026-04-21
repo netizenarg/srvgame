@@ -50,6 +50,8 @@ public:
         GetLogger()->critical(fmt, args...);
     }
 
+    static void Flush();
+
 private:
     static std::shared_ptr<spdlog::logger> logger_;
 

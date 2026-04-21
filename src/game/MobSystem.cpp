@@ -209,44 +209,89 @@ void MobSystem::SetZoneLootTable(const std::string& zoneName, const std::string&
 }
 
 void MobSystem::LoadMobConfig(const nlohmann::json& config) {
+    //Logger::Trace("MobSystem::LoadMobConfig: started");
+    if (!config.is_object()) {
+        Logger::Error("MobSystem::LoadMobConfig: config is not a JSON object");
+        return;
+    }
+    //Logger::Trace("Checking for 'spawnZones' key...");
     if (config.contains("spawnZones")) {
-        for (const auto& zoneData : config["spawnZones"]) {
-            MobSpawnZone zone;
-            zone.name = zoneData.value("name", "");
-            zone.center.x = zoneData["center"][0];
-            zone.center.y = zoneData["center"][1];
-            zone.center.z = zoneData["center"][2];
-            zone.radius = zoneData.value("radius", 50.0f);
-            zone.mobType = static_cast<NPCType>(zoneData.value("mobType", 0));
-            zone.minLevel = zoneData.value("minLevel", 1);
-            zone.maxLevel = zoneData.value("maxLevel", 10);
-            zone.maxMobs = zoneData.value("maxMobs", 10);
-            zone.respawnTime = zoneData.value("respawnTime", 30.0f);
-            zone.lootTableId = zoneData.value("lootTableId", "");
-
-            RegisterSpawnZone(zone);
-
-            // Set zone loot table if specified
-            if (!zone.lootTableId.empty()) {
-                SetZoneLootTable(zone.name, zone.lootTableId);
+        //Logger::Trace("'spawnZones' key exists");
+        if (config["spawnZones"].is_array()) {
+            //Logger::Trace("'spawnZones' is an array with {} elements", config["spawnZones"].size());
+            int zoneIndex = 0;
+            for (const auto& zoneData : config["spawnZones"]) {
+                //Logger::Trace("Processing spawn zone index {}", zoneIndex);
+                if (!zoneData.is_object()) {
+                    Logger::Warn("Spawn zone entry is not an object, skipping");
+                    zoneIndex++;
+                    continue;
+                }
+                MobSpawnZone zone;
+                zone.name = zoneData.value("name", "");
+                if (zone.name.empty()) {
+                    Logger::Warn("Spawn zone missing name, skipping");
+                    zoneIndex++;
+                    continue;
+                }
+                //Logger::Trace("Zone name: {}", zone.name);
+                if (zoneData.contains("center") && zoneData["center"].is_array() && zoneData["center"].size() >= 3) {
+                    zone.center.x = zoneData["center"][0].get<float>();
+                    zone.center.y = zoneData["center"][1].get<float>();
+                    zone.center.z = zoneData["center"][2].get<float>();
+                    //Logger::Trace("Center: ({}, {}, {})", zone.center.x, zone.center.y, zone.center.z);
+                } else {
+                    Logger::Warn("Spawn zone '{}' missing or invalid 'center', skipping", zone.name);
+                    zoneIndex++;
+                    continue;
+                }
+                zone.radius = zoneData.value("radius", 50.0f);
+                zone.mobType = static_cast<NPCType>(zoneData.value("mobType", 0));
+                zone.minLevel = zoneData.value("minLevel", 1);
+                zone.maxLevel = zoneData.value("maxLevel", 10);
+                zone.maxMobs = zoneData.value("maxMobs", 10);
+                zone.respawnTime = zoneData.value("respawnTime", 30.0f);
+                zone.lootTableId = zoneData.value("lootTableId", "");
+                //Logger::Trace("Registering spawn zone '{}'", zone.name);
+                RegisterSpawnZone(zone);
+                if (!zone.lootTableId.empty()) {
+                    SetZoneLootTable(zone.name, zone.lootTableId);
+                }
+                zoneIndex++;
             }
+        } else {
+            Logger::Warn("'spawnZones' is not an array, skipping");
         }
+    //} else {
+        //Logger::Trace("No 'spawnZones' key found");
     }
-
+    //Logger::Trace("Checking for 'mobLootTables' key...");
     if (config.contains("mobLootTables")) {
-        for (const auto& [typeStr, tableId] : config["mobLootTables"].items()) {
-            NPCType type = static_cast<NPCType>(std::stoi(typeStr));
-            SetMobLootTable(type, tableId.get<std::string>());
+        Logger::Trace("'mobLootTables' key exists");
+        if (config["mobLootTables"].is_object()) {
+            //Logger::Trace("Processing mobLootTables object");
+            for (const auto& [typeStr, tableId] : config["mobLootTables"].items()) {
+                try {
+                    //Logger::Trace("Processing mob loot table for type '{}'", typeStr);
+                    NPCType type = static_cast<NPCType>(std::stoi(typeStr));
+                    SetMobLootTable(type, tableId.get<std::string>());
+                } catch (const std::exception& e) {
+                    Logger::Error("Invalid mob loot table entry: {}", e.what());
+                }
+            }
+        } else {
+            Logger::Warn("'mobLootTables' is not an object, skipping");
         }
+    //} else {
+        //Logger::Trace("No 'mobLootTables' key found");
     }
+    //Logger::Trace("MobSystem::LoadMobConfig: finished successfully");
 }
 
 // ==================== Missing Function Implementations ====================
 
 void MobSystem::InitializeDefaultVariants() {
-    // Register default mob variants based on NPC type and level
-    // For now, we register a few common variants
-    Logger::Debug("MobSystem::InitializeDefaultVariants() called");
+    Logger::Trace("MobSystem::InitializeDefaultVariants() called");
 
     // Example: Goblin variants for levels 1-5
     for (int level = 1; level <= 5; ++level) {
@@ -285,17 +330,12 @@ void MobSystem::InitializeDefaultVariants() {
 
 void MobSystem::UpdateSpawnZones(float deltaTime) {
     (void)deltaTime;
-    // This function should check each spawn zone and spawn mobs if needed
-    // For now, we'll implement a simple timer-based spawning
     for (auto& [zoneName, zone] : spawnZones_) {
-        // Check if we need to spawn more mobs
         auto& mobIds = zoneMobs_[zoneName];
         if (static_cast<int>(mobIds.size()) < zone.maxMobs) {
-            // Check last spawn time
             auto now = std::chrono::steady_clock::now();
             auto& lastSpawn = zoneLastSpawn_[zoneName];
             if (std::chrono::duration_cast<std::chrono::seconds>(now - lastSpawn).count() >= zone.respawnTime) {
-                // Spawn a new mob
                 uint64_t mobId = SpawnMobInZone(zoneName);
                 if (mobId != 0) {
                     mobIds.push_back(mobId);
@@ -309,11 +349,9 @@ void MobSystem::UpdateSpawnZones(float deltaTime) {
 
 void MobSystem::ProcessRespawns(float deltaTime) {
     (void)deltaTime;
-    // Check pending respawns and spawn mobs when time is reached
     auto now = std::chrono::steady_clock::now();
     for (auto it = pendingRespawns_.begin(); it != pendingRespawns_.end(); ) {
         if (now >= it->respawnTime) {
-            // Spawn the mob in its zone
             uint64_t mobId = SpawnMob(it->mobType, GetRandomSpawnPosition(spawnZones_[it->zoneName]), it->level);
             if (mobId != 0) {
                 zoneMobs_[it->zoneName].push_back(mobId);
@@ -328,12 +366,14 @@ void MobSystem::ProcessRespawns(float deltaTime) {
 
 uint64_t MobSystem::SpawnMob(NPCType type, const glm::vec3& position, int level) {
     // TODO: Create and register a new NPCEntity using EntityManager
-    Logger::Warn("MobSystem::SpawnMob not fully implemented – returning mock ID");
-    // Simulate a new mob ID (in real implementation, use EntityManager to create an entity)
+    (void)type;
+    (void)position;
+    (void)level;
+    Logger::Warn("MobSystem::SpawnMob not implemented – returning mock ID");
     static uint64_t nextId = 1000;
     uint64_t newId = ++nextId;
-    Logger::Debug("Spawned mob {} of type {} at ({:.1f},{:.1f},{:.1f}) level {}",
-                  newId, static_cast<int>(type), position.x, position.y, position.z, level);
+    // Logger::Trace("Spawned mob {} of type {} at ({:.1f},{:.1f},{:.1f}) level {}",
+    //               newId, static_cast<int>(type), position.x, position.y, position.z, level);
     return newId;
 }
 
@@ -350,7 +390,6 @@ uint64_t MobSystem::SpawnMobInZone(const std::string& zoneName) {
 }
 
 void MobSystem::DespawnMob(uint64_t mobId) {
-    // Remove from zone tracking and entity manager
     auto zoneIt = mobToZone_.find(mobId);
     if (zoneIt != mobToZone_.end()) {
         auto& mobIds = zoneMobs_[zoneIt->second];
@@ -358,14 +397,14 @@ void MobSystem::DespawnMob(uint64_t mobId) {
         mobToZone_.erase(zoneIt);
     }
     // TODO: Also remove from EntityManager
-    Logger::Debug("Despawned mob {}", mobId);
+    //Logger::Trace("Despawned mob {}", mobId);
 }
 
 void MobSystem::RegisterSpawnZone(const MobSpawnZone& zone) {
     spawnZones_[zone.name] = zone;
     zoneMobs_[zone.name] = {}; // initialize empty mob list
     zoneLastSpawn_[zone.name] = std::chrono::steady_clock::now(); // set last spawn to now
-    Logger::Debug("Registered spawn zone '{}'", zone.name);
+    //Logger::Trace("Registered spawn zone '{}'", zone.name);
 }
 
 void MobSystem::UnregisterSpawnZone(const std::string& zoneName) {
@@ -378,14 +417,14 @@ void MobSystem::UnregisterSpawnZone(const std::string& zoneName) {
         spawnZones_.erase(it);
         zoneMobs_.erase(zoneName);
         zoneLastSpawn_.erase(zoneName);
-        Logger::Debug("Unregistered spawn zone '{}'", zoneName);
+        //Logger::Trace("Unregistered spawn zone '{}'", zoneName);
     }
 }
 
 void MobSystem::RegisterMobVariant(const MobVariant& variant) {
     std::string key = GetVariantKey(variant.baseType, variant.level);
     mobVariants_[key] = variant;
-    Logger::Debug("Registered mob variant: {} level {}", static_cast<int>(variant.baseType), variant.level);
+    //Logger::Trace("Registered mob variant: {} level {}", static_cast<int>(variant.baseType), variant.level);
 }
 
 MobVariant MobSystem::GetMobVariant(NPCType type, int level) const {

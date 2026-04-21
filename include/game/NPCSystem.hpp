@@ -16,6 +16,11 @@ class NPCManager {
 public:
     NPCManager();
 
+    // Accessors
+    const std::unordered_map<uint64_t, std::unique_ptr<NPCEntity>>& GetNPCs() const { return npcs_; }
+    const std::unordered_map<uint64_t, std::unique_ptr<NPCEntity>>& GetAllNPCs() const { return npcs_; }
+    size_t GetNPCCount() const { return npcs_.size(); }
+
     uint64_t SpawnNPC(NPCType type, const glm::vec3& position, uint64_t ownerId = 0);
     void DespawnNPC(uint64_t npcId);
     NPCEntity* GetNPC(uint64_t npcId);
@@ -32,7 +37,7 @@ public:
 
 private:
     std::unordered_map<uint64_t, std::unique_ptr<NPCEntity>> npcs_;
-    std::unordered_map<uint64_t, std::vector<uint64_t>> squads_; // squadId -> npcIds
+    std::unordered_map<uint64_t, std::vector<uint64_t>> squads_;
 
     uint64_t nextNPCId_ = 1000;
     uint64_t nextSquadId_ = 1;

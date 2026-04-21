@@ -304,7 +304,7 @@ ServerState ServerState::Interpolate(const ServerState& a, const ServerState& b,
     return result;
 }
 
-void PredictionSystem::PredictionStats::Reset() {
+void PredictionStats::Reset() {
     total_predictions = 0;
     corrections_sent = 0;
     corrections_received = 0;
@@ -312,7 +312,7 @@ void PredictionSystem::PredictionStats::Reset() {
     last_correction_time = 0;
 }
 
-std::string PredictionSystem::PredictionStats::ToString() const {
+std::string PredictionStats::ToString() const {
     std::stringstream ss;
     ss << "Prediction Stats:\n";
     ss << "  Total Predictions: " << total_predictions << "\n";
@@ -323,6 +323,14 @@ std::string PredictionSystem::PredictionStats::ToString() const {
     
     return ss.str();
 }
+
+ServerState PredictionSystem::GetLastConfirmedState() const { return last_confirmed_state_; }
+
+ServerState PredictionSystem::GetLatestPredictedState() const { return latest_predicted_state_; }
+
+const std::deque<ClientInput>& PredictionSystem::GetInputHistory() const { return input_history_; }
+
+const PredictionStats& PredictionSystem::GetStats() const { return stats_; }
 
 // InputBuffer implementation
 InputBuffer::InputBuffer(size_t max_size) : max_size_(max_size) {}
@@ -385,3 +393,7 @@ void InputBuffer::Clear() {
     std::lock_guard<std::mutex> lock(mutex_);
     inputs_.clear();
 }
+
+bool InputBuffer::HasInputs() const { return !inputs_.empty(); }
+
+size_t InputBuffer::Size() const { return inputs_.size(); }

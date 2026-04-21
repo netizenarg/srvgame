@@ -3,7 +3,7 @@
 std::atomic<uint64_t> WebSocketSession::nextSessionId_{1};
 
 WebSocketSession::WebSocketSession(WebSocketProtocol::WebSocketConnection::Pointer wsConn)
-    : wsConn_(std::move(wsConn)), sessionId_(nextSessionId_++) {
+    : protocolMode_(ProtocolMode::Json), wsConn_(std::move(wsConn)), sessionId_(nextSessionId_++) {
     wsConn_->SetMessageHandler([this](const WebSocketProtocol::WebSocketMessage& msg) {
         OnMessage(msg);
     });
@@ -45,8 +45,18 @@ void WebSocketSession::SendRaw(const std::string& data) {
     wsConn_->SendText(data);
 }
 
-void WebSocketSession::SendBinary(uint16_t /*message_type*/, const std::vector<uint8_t>& data) {
-    wsConn_->SendBinary(data);
+void WebSocketSession::SendBinary(uint16_t message_type, const std::vector<uint8_t>& data) {
+    BinaryProtocol::BinaryMessage msg;
+    msg.header.version = BinaryProtocol::CURRENT_PROTOCOL_VERSION;
+    msg.header.message_type = message_type;
+    msg.header.sequence = 0;
+    msg.header.timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+        msg.data = data;
+        msg.header.length = static_cast<uint32_t>(data.size());
+        msg.header.checksum = BinaryProtocol::CalculateCRC32(data.data(), data.size());
+        auto serialized = msg.Serialize();
+        wsConn_->SendBinary(serialized);
 }
 
 void WebSocketSession::SetMessageHandler(MessageHandler handler) {
@@ -151,31 +161,54 @@ std::string WebSocketSession::GetRemoteAddress() const {
     }
 }
 
-void WebSocketSession::OnMessage(const WebSocketProtocol::WebSocketMessage& msg) {
-    Logger::Debug("WebSocketSession {} received {} bytes, opcode: {}",
-                  sessionId_, msg.data.size(), (int)msg.opcode);
 
+void WebSocketSession::OnMessage(const WebSocketProtocol::WebSocketMessage& msg) {
+    Logger::Trace("WebSocketSession {} received {} bytes, opcode: {}", sessionId_, msg.data.size(), (int)msg.opcode);
     if (msg.opcode == WebSocketProtocol::OP_TEXT) {
         std::string text = msg.GetText();
-        Logger::Debug("WebSocketSession {} received TEXT: {}", sessionId_, text);
-
+        Logger::Trace("WebSocketSession {} received TEXT: {}", sessionId_, text);
+        if (protocolMode_ == ProtocolMode::Binary) {
+            Logger::Warn("Session {} sent TEXT frame but negotiated BINARY – ignoring", sessionId_);
+            return;
+        }
+        protocolMode_ = ProtocolMode::Json;
         if (messageHandler_) {
             try {
                 auto json = nlohmann::json::parse(text);
-                Logger::Debug("WebSocketSession {} parsed JSON: {}", sessionId_, json.dump());
+                Logger::Trace("WebSocketSession {} parsed JSON: {}", sessionId_, json.dump());
                 messageHandler_(json);
-            } catch (const std::exception& e) {
-                Logger::Error("WebSocketSession {} invalid JSON: {}", sessionId_, e.what());
+                if (json.value("type", "") == "protocol_negotiation" &&
+                    json.value("protocol", "") == "websocket") {
+                    protocolMode_ = ProtocolMode::Json;
+                    Logger::Trace("WebSocketSession {} switched to JSON protocol mode", sessionId_);
+                    return;
+                }
+                else if (json.value("type", "") == "get_chunk") {
+                    ChunkRequestData req;
+                    nlohmann::json data = msg.ToJson();
+                    req.chunk_x = data.value("x", 0);
+                    req.chunk_z = data.value("z", 0);
+                    req.lod = data.value("lod", 0);
+                    req.session_id = sessionId_;
+                    GameLogic::GetInstance().OnChunkRequest(req);
+                }
+            } catch (const std::exception& err) {
+                Logger::Error("WebSocketSession {} invalid: {}", sessionId_, err.what());
             }
         } else {
             Logger::Error("WebSocketSession {} has no messageHandler_ set!", sessionId_);
         }
     }
     else if (msg.opcode == WebSocketProtocol::OP_BINARY) {
-        Logger::Debug("WebSocketSession {} received BINARY ({} bytes)", sessionId_, msg.data.size());
+        Logger::Trace("WebSocketSession {} received BINARY ({} bytes)", sessionId_, msg.data.size());
+        if (protocolMode_ == ProtocolMode::Json) {
+            Logger::Warn("Session {} sent BINARY frame but negotiated JSON – ignoring", sessionId_);
+            return;
+        }
+        protocolMode_ = ProtocolMode::Binary;
         try {
             auto binaryMsg = BinaryProtocol::BinaryMessage::Deserialize(msg.data.data(), msg.data.size());
-            Logger::Debug("WebSocketSession {} binary message type: {}", sessionId_, binaryMsg.header.message_type);
+            Logger::Trace("WebSocketSession {} binary message type: {}", sessionId_, binaryMsg.header.message_type);
             if (binary_handler_) {
                 binary_handler_(binaryMsg.header.message_type, binaryMsg.data);
             } else if (default_binary_handler_) {

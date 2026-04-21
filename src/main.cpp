@@ -4,20 +4,17 @@
 #include <iostream>
 #include <thread>
 
-#include <execinfo.h>
-//#include <signal.h>
-
 #include "logging/Logger.hpp"
 
 #include "config/ConfigManager.hpp"
 
-#include "network/GameServer.hpp"
-#include "process/ProcessPool.hpp"
-
 #include "database/DbManager.hpp"
+#include "database/DbService.hpp"
+
+#include "process/ProcessPool.hpp"
+#include "network/GameServer.hpp"
 
 #include "game/GameLogic.hpp"
-
 
 std::atomic<bool> g_shutdown(false);
 
@@ -26,16 +23,18 @@ void SignalHandler(int signal) {
     g_shutdown.store(true);
 }
 
-void crash_handler(int sig) {
-    void* array[20];
-    size_t size = backtrace(array, 20);
-    fprintf(stderr, "Error: signal %d:\n", sig);
-    backtrace_symbols_fd(array, size, STDERR_FILENO);
-    _exit(1);
-}
+//#include <execinfo.h>
+//#include <signal.h>
+// void crash_handler(int sig) {
+//     void* array[20];
+//     size_t size = backtrace(array, 20);
+//     fprintf(stderr, "Error: signal %d:\n", sig);
+//     backtrace_symbols_fd(array, size, STDERR_FILENO);
+//     _exit(1);
+// }
 
-// Worker main signature: receives group config
-void WorkerMain(int workerId, const WorkerGroupConfig& groupConfig, ProcessPool* processPool = nullptr, const std::string& path_config = "config.json") {
+
+void worker(int workerId, const WorkerGroupConfig& groupConfig, ProcessPool* processPool = nullptr, const std::string& path_config = "config.json") {
     try {
         auto& config = ConfigManager::GetInstance();
 
@@ -70,9 +69,9 @@ void WorkerMain(int workerId, const WorkerGroupConfig& groupConfig, ProcessPool*
         dbConfig["user"] = config.GetDatabaseUser();
         dbConfig["password"] = config.GetDatabasePassword();
 
-        dbConfig["max_connections"] = config.GetInt("database.max_connections", 20);
-        dbConfig["min_connections"] = config.GetInt("database.min_connections", 5);
-        dbConfig["connection_timeout_ms"] = config.GetInt("database.connection_timeout_ms", 5000);
+        dbConfig["max_connections"] = config.GetInt("database.connection_pool.max_connections", 20);
+        dbConfig["min_connections"] = config.GetInt("database.connection_pool.min_connections", 5);
+        dbConfig["connection_timeout_ms"] = config.GetInt("database.connection_pool.connection_timeout_ms", 5000);
 
         if (!dbManager.Initialize(path_config)) {
             Logger::Error("Worker {} failed to initialize database", workerId);
@@ -102,80 +101,26 @@ void WorkerMain(int workerId, const WorkerGroupConfig& groupConfig, ProcessPool*
 
         GameServer server(groupConfig, config);
 
-        if (groupConfig.protocol == "binary") {
-            server.SetSessionFactory([workerId, processPool, &groupConfig]
-                                     (asio::ip::tcp::socket socket,
-                                      std::shared_ptr<asio::ssl::context> sslCtx)
-            {
-                auto session = std::make_shared<GameSession>(std::move(socket), sslCtx);
-                Logger::Debug("Worker {} created new game session {}",
-                            workerId, session->GetSessionId());
-
-                session->SetMessageHandler([session, workerId, processPool](const nlohmann::json& msg) {
-                    try {
-                        std::string msgType = msg.value("type", "");
-                        Logger::Debug("Worker {} processing message type: {}", workerId, msgType);
-                        if (msgType == "ipc_message" && processPool) {
-                            if (msg.contains("target_worker") && msg.contains("payload")) {
-                                int targetWorker = msg["target_worker"];
-                                std::string payload = msg["payload"].dump();
-                                if (processPool->SendToWorker(targetWorker, payload)) {
-                                    Logger::Debug("Worker {} sent IPC message to worker {}",
-                                                workerId, targetWorker);
-                                } else {
-                                    Logger::Error("Worker {} failed to send IPC message to worker {}",
-                                                workerId, targetWorker);
-                                }
-                            }
-                        } else {
-                            GameLogic::GetInstance().HandleMessage(session->GetSessionId(), msg);
-                        }
-                    } catch (const std::exception& e) {
-                        Logger::Error("Worker {} error processing message: {}", workerId, e.what());
-                        session->SendError("Internal server error", 500);
-                    }
-                });
-
-                session->SetDefaultBinaryMessageHandler([session, workerId](uint16_t type,
-                                                        const std::vector<uint8_t>& data) {
-                    GameLogic::GetInstance().HandleBinaryMessage(session->GetSessionId(), type, data);
-                });
-
-                session->SetCloseHandler([session, workerId]() {
-                    Logger::Info("Worker {} session {} closing", workerId, session->GetSessionId());
-                    GameLogic::GetInstance().OnPlayerDisconnected(session->GetSessionId());
-                    Logger::Debug("Worker {} session {} cleanup complete", workerId, session->GetSessionId());
-                });
-                return session;
-            });
-        } else if (groupConfig.protocol == "websocket") {
-            server.SetWebSocketConnectionFactory([workerId, processPool, &groupConfig](asio::ip::tcp::socket socket, std::shared_ptr<asio::ssl::context> /*sslCtx*/) {
-                auto wsConn = std::make_shared<WebSocketProtocol::WebSocketConnection>(std::move(socket));
-                // SSL handling would be added later if needed
-                return wsConn;
-            });
-        }
+        server.InitSessionFactory(workerId, processPool, gameLogic);
+        server.RegisterCallbacks(groupConfig.protocol, gameLogic);
 
         gameLogic.SetConnectionManager(ConnectionManager::GetInstancePtr());
         gameLogic.Initialize();
+
+        DatabaseService dbService(server.GetIoContext(), config.GetInt("database.pool_threads", 2));
+        gameLogic.SetDatabaseService(&dbService);
 
         if (config.ShouldPreloadWorld()) {
             Logger::Info("Worker {} preloading world data...", workerId);
             gameLogic.PreloadWorldData(config.GetWorldPreloadRadius());
         }
 
-        std::thread signalThread([workerId, &server]() {
-            sigset_t set;
-            sigemptyset(&set);
-            sigaddset(&set, SIGTERM);
-            int sig;
-            int ret = sigwait(&set, &sig);
-            if (ret == 0) {
-                Logger::Info("Worker {} received SIGTERM via sigwait, initiating shutdown", workerId);
+        asio::signal_set signals(server.GetIoContext(), SIGINT, SIGTERM);
+        signals.async_wait([&](std::error_code ec, int signum) {
+            if (!ec) {
+                Logger::Info("Worker {} received signal {}, shutting down", workerId, signum);
                 g_shutdown.store(true);
                 server.Shutdown();
-            } else {
-                Logger::Error("Worker {} sigwait failed: {}", workerId, strerror(errno));
             }
         });
 
@@ -189,7 +134,7 @@ void WorkerMain(int workerId, const WorkerGroupConfig& groupConfig, ProcessPool*
 
                 auto lastCleanupTime = std::chrono::steady_clock::now();
                 auto lastIPCCheckTime = std::chrono::steady_clock::now();
-                auto lastPlayerUpdate = std::chrono::steady_clock::now();
+                //auto lastPlayerUpdate = std::chrono::steady_clock::now();
 
                 while (worldMaintenanceRunning && !g_shutdown.load()) {
                     auto currentTime = std::chrono::steady_clock::now();
@@ -201,7 +146,6 @@ void WorkerMain(int workerId, const WorkerGroupConfig& groupConfig, ProcessPool*
                         lastCleanupTime = currentTime;
                     }
 
-                    // Check for IPC messages every 10 ms and drain all pending
                     auto elapsedIPC = std::chrono::duration_cast<std::chrono::milliseconds>(
                         currentTime - lastIPCCheckTime);
                     if (elapsedIPC.count() >= 10 && processPool) {
@@ -219,11 +163,11 @@ void WorkerMain(int workerId, const WorkerGroupConfig& groupConfig, ProcessPool*
                     }
 
                     // Player updates every 100 ms
-                    if (std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - lastPlayerUpdate).count() >= 100) {
-                        gameLogic.BroadcastPlayerUpdates();
-                        gameLogic.BroadcastPlayerUpdatesJson();
-                        lastPlayerUpdate = currentTime;
-                    }
+                    // if (std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - lastPlayerUpdate).count() >= 100) {
+                    //     gameLogic.BroadcastPlayerUpdates();
+                    //     gameLogic.BroadcastPlayerUpdatesJson();
+                    //     lastPlayerUpdate = currentTime;
+                    // }
 
                     std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 }
@@ -235,7 +179,7 @@ void WorkerMain(int workerId, const WorkerGroupConfig& groupConfig, ProcessPool*
                 while (!g_shutdown.load()) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 }
-                std::this_thread::sleep_for(std::chrono::seconds(10));
+                std::this_thread::sleep_for(std::chrono::seconds(60));
                 Logger::Error("Worker {} watchdog triggered – forcing exit", workerId);
                 _exit(1);
             });
@@ -253,11 +197,10 @@ void WorkerMain(int workerId, const WorkerGroupConfig& groupConfig, ProcessPool*
             Logger::Critical("Worker {} failed to initialize server", workerId);
         }
 
-        if (signalThread.joinable()) { signalThread.join(); }
-
         Logger::Info("Worker {} beginning cleanup...", workerId);
         gameLogic.Shutdown();
 
+        dbService.shutdown();
         dbManager.Disconnect();
         dbManager.Shutdown();
 
@@ -332,11 +275,11 @@ int main(int argc, char* argv[]) {
     Logger::Info("Process pool configured: max message size = {} bytes, timeout = {}ms",
                  maxMessageSize, receiveTimeout);
 
-    auto workerMainWithPool = [&processPool, &conf_path](int workerId, const WorkerGroupConfig& groupConfig) {
-        WorkerMain(workerId, groupConfig, &processPool, conf_path);
+    auto worker_pool = [&processPool, &conf_path](int workerId, const WorkerGroupConfig& groupConfig) {
+        worker(workerId, groupConfig, &processPool, conf_path);
     };
 
-    processPool.SetWorkerMain(workerMainWithPool);
+    processPool.SetWorkerMain(worker_pool);
 
     Logger::Info("Starting {} worker processes", processPool.GetTotalWorkerCount());
     processPool.Run();

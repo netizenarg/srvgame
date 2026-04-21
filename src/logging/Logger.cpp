@@ -3,6 +3,12 @@
 // Static member initialization (no longer inline in header)
 std::shared_ptr<spdlog::logger> Logger::logger_;
 
+void Logger::Flush() {
+    if (logger_) {
+        logger_->flush();
+    }
+}
+
 void Logger::InitializeDefaults() {
     auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
     console_sink->set_level(spdlog::level::info);
@@ -44,15 +50,13 @@ void Logger::SetupLogger(const std::string& loggerName) {
             }
 
             auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-                logFilePath,
-                config.GetMaxLogFileSize() * 1024 * 1024, // Convert MB to bytes
-                config.GetMaxLogFiles()
+                logFilePath, config.GetMaxLogFileSize(), config.GetMaxLogFiles()
             );
             file_sink->set_level(logLevel);
             file_sink->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%l] [%n] [%P] %v");
             sinks.push_back(file_sink);
-        } catch (const std::exception& e) {
-            // If file logging fails, fall back to console only
+        } catch (const std::exception& err) {
+            std::cerr << "[LOGGER ERROR] " << err.what() << std::endl;
             if (sinks.empty()) {
                 auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
                 console_sink->set_level(logLevel);

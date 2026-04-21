@@ -6,12 +6,25 @@
 #include <vector>
 #include <map>
 #include <set>
+#include <unordered_map>
 
 #include <nlohmann/json.hpp>
+
+enum class ProtocolMode { Binary, Json, Unknown };
+
+static const std::unordered_map<std::string, int> IPCMessageTypes = {
+    {"welcome", 1},
+    {"heartbeat", 2},
+    {"broadcast", 3},
+    {"shutdown", 4},
+    {"reload_config", 5}
+};
 
 class IConnection {
 public:
     virtual ~IConnection() = default;
+
+    virtual ProtocolMode GetProtocolMode() const = 0;
 
     // Core methods
     virtual void Start() = 0;

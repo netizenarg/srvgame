@@ -12,7 +12,7 @@ LogicWorld& LogicWorld::GetInstance() {
 }
 
 LogicWorld::LogicWorld() {
-    Logger::Debug("LogicWorld created");
+    Logger::Info("LogicWorld created");
 }
 
 LogicWorld::~LogicWorld() {
@@ -46,7 +46,7 @@ std::string LogicWorld::GetChunkKey(int chunkX, int chunkZ) const {
 
 std::shared_ptr<WorldChunk> LogicWorld::GetOrCreateChunk(int chunkX, int chunkZ) {
     std::lock_guard<std::mutex> lock(chunksMutex_);
-    Logger::Debug("worldGenerator_ raw pointer: {}", static_cast<void*>(worldGenerator_.get()));
+    //Logger::Trace("worldGenerator_ raw pointer: {}", static_cast<void*>(worldGenerator_.get()));
     if (canary_ != 0xDEADBEEF) {
         Logger::Critical("LogicWorld memory corrupted! canary=0x{:x}", canary_);
         std::abort();
@@ -87,7 +87,7 @@ std::shared_ptr<WorldChunk> LogicWorld::GetOrCreateChunk(int chunkX, int chunkZ)
     std::shared_ptr<WorldChunk> chunk = std::move(uniqueChunk);
     loadedChunks_[chunkKey] = chunk;
     activeChunkCount_++;
-    Logger::Debug("Generated chunk [{}, {}], total: {}", chunkX, chunkZ, activeChunkCount_.load());
+    //Logger::Trace("Generated chunk [{}, {}], total: {}", chunkX, chunkZ, activeChunkCount_.load());
     return chunk;
 }
 

@@ -12,11 +12,13 @@ public:
     template<typename... Args>
     static void Warn(Args&&...) {}
     template<typename... Args>
-    static void Debug(Args&&...) {}
-    template<typename... Args>
     static void Error(Args&&...) {}
     template<typename... Args>
     static void Critical(Args&&...) {}
+    template<typename... Args>
+    static void Debug(Args&&...) {}
+    template<typename... Args>
+    static void Trace(Args&&...) {}
 };
 #endif
 

@@ -18,7 +18,7 @@
 #include <nlohmann/json.hpp>
 #include "logging/Logger.hpp"
 #include "network/ConnectionManager.hpp"
-#include "network/GameSession.hpp"
+#include "network/BinarySession.hpp"
 #include "utils/Passwords.hpp"
 
 #include "database/DbManager.hpp"

@@ -23,7 +23,7 @@ public:
         float terrainScale = 100.0f;
         float maxTerrainHeight = 50.0f;
         float waterLevel = 10.0f;
-        float chunkUnloadDistance = 200.0f;
+        float unloadDistance = 200.0f;
     };
 
     static LogicWorld& GetInstance();

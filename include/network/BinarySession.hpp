@@ -21,10 +21,14 @@
 
 #include "logging/Logger.hpp"
 #include "config/ConfigManager.hpp"
+
 #include "network/BinaryProtocol.hpp"
 #include "network/NetworkQualityMonitor.hpp"
 #include "network/PredictionSystem.hpp"
 #include "network/IConnection.hpp"
+
+#include "game/GameData.hpp"
+#include "game/GameLogic.hpp"
 
 struct SessionStats {
     // Message statistics
@@ -153,14 +157,16 @@ struct RateLimitConfig {
     bool exempt_authenticated_users{false};    // Whether authenticated users are exempt
 };
 
-class GameSession : public IConnection, public std::enable_shared_from_this<GameSession> {
+class BinarySession : public IConnection, public std::enable_shared_from_this<BinarySession> {
 public:
-    using Pointer = std::shared_ptr<GameSession>;
+    using Pointer = std::shared_ptr<BinarySession>;
 
     // Constructor with SSL context option
-    explicit GameSession(asio::ip::tcp::socket socket,
+    explicit BinarySession(asio::ip::tcp::socket socket,
                          std::shared_ptr<asio::ssl::context> ssl_context = nullptr);
-    ~GameSession();
+    ~BinarySession();
+
+    ProtocolMode GetProtocolMode() const override { return ProtocolMode::Binary; }
 
     // Core session management
     void Start() override;

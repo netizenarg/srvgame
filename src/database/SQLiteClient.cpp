@@ -16,7 +16,7 @@ SQLiteClient::SQLiteClient(const nlohmann::json& config, const SQLProvider& sqlP
     } else {
         dbPath_ = "game.db";
     }
-    int shards = config.value("shards", 1);
+    int shards = config.value("citus.shard_count", 1);
     totalShards_ = (shards > 0) ? shards : 1;
     stats_.startTime = std::chrono::steady_clock::now();
     Logger::Debug("SQLiteClient created with database file: {}", dbPath_);
@@ -135,6 +135,7 @@ size_t SQLiteClient::GetIdleConnections() const {
 
 bool SQLiteClient::ExecuteSql(const std::string& sql, std::vector<std::vector<std::string>>* results) {
     std::lock_guard<std::mutex> lock(dbMutex_);
+    Logger::Trace("SQLite ExecuteSql start: {}", sql.substr(0, 100));
     if (!db_) {
         Logger::Error("ExecuteSql: database not connected");
         stats_.failedQueries++;
@@ -182,6 +183,7 @@ bool SQLiteClient::ExecuteSql(const std::string& sql, std::vector<std::vector<st
     }
 
     sqlite3_finalize(stmt);
+    Logger::Trace("SQLite ExecuteSql end");
     return success;
 }
 
@@ -229,6 +231,7 @@ bool SQLiteClient::TableExists(const std::string& tableName) {
 
 nlohmann::json SQLiteClient::Query(const std::string& sql) {
     std::lock_guard<std::mutex> lock(dbMutex_);
+    Logger::Trace("SQLite Query start: {}", sql.substr(0, 100));
     if (!db_) {
         Logger::Error("Query: database not connected");
         stats_.failedQueries++;
@@ -281,6 +284,7 @@ nlohmann::json SQLiteClient::Query(const std::string& sql) {
 
     sqlite3_finalize(stmt);
     stats_.totalQueries++;
+    Logger::Trace("SQLite Query end");
     return result;
 }
 

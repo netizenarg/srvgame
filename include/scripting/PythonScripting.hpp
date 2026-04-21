@@ -17,10 +17,6 @@
 #include "scripting/PythonAPI.hpp"
 #include "scripting/PythonModule.hpp"
 
-// Forward declarations
-//class Player;
-//class GameSession;
-
 
 // Python object wrapper for RAII
 class PyObjectRef {

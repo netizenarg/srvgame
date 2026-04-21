@@ -10,10 +10,16 @@
 #include "network/BinaryProtocol.hpp"
 #include "network/WebSocketProtocol.hpp"
 
+#include "game/GameData.hpp"
+#include "game/GameLogic.hpp"
+
 class WebSocketSession : public IConnection, public std::enable_shared_from_this<WebSocketSession> {
 public:
     WebSocketSession(WebSocketProtocol::WebSocketConnection::Pointer wsConn);
     ~WebSocketSession();
+
+    void SetProtocolMode(ProtocolMode mode) { protocolMode_ = mode; }
+    ProtocolMode GetProtocolMode() const override { return protocolMode_; }
 
     // IConnection implementation
     void Start() override;
@@ -61,6 +67,8 @@ public:
     void SetDefaultBinaryMessageHandler(BinaryMessageHandler handler);
 
 private:
+    ProtocolMode protocolMode_;
+
     WebSocketProtocol::WebSocketConnection::Pointer wsConn_;
     uint64_t sessionId_;
     static std::atomic<uint64_t> nextSessionId_;

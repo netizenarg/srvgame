@@ -150,10 +150,8 @@ void ProcessPool::MasterProcess() {
         }
     }
 
-    // ---------- shutdown with timeout ----------
-    constexpr int SHUTDOWN_TIMEOUT_SEC = 5;
+    constexpr int SHUTDOWN_TIMEOUT_SEC = 30;
 
-    // Send SIGTERM to all workers
     for (int i = 0; i < totalWorkers_; ++i) {
         if (workers_[i].pid > 0) {
             Logger::Info("Terminating worker {} (PID: {})", i, workers_[i].pid);
