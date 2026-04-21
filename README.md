@@ -82,20 +82,20 @@ cd gameserver
 
 ### Dual Protocol Architecture
 The GameServer supports two communication
-protocols running in parallel:__
-Client ↔ Server Communication__
-├── JSON Protocol (Development)__
-│ ├── Human-readable format__
-│ ├── Easy debugging and testing__
-│ ├── Slower, higher bandwidth__
-│ └── Used for configuration,__
-│     chat, admin commands__
-│__
-├── Binary Protocol (Production)__
-├── High-performance binary format__
-├── Minimal bandwidth usage__
-├── Fast serialization/deserialization__
-└── Used for real-time gameplay,__
+protocols running in parallel:\
+Client ↔ Server Communication\
+├── JSON Protocol (Development)\
+│ ├── Human-readable format\
+│ ├── Easy debugging and testing\
+│ ├── Slower, higher bandwidth\
+│ └── Used for configuration,\
+│     chat, admin commands\
+│\
+├── Binary Protocol (Production)\
+├── High-performance binary format\
+├── Minimal bandwidth usage\
+├── Fast serialization/deserialization\
+└── Used for real-time gameplay,\
     entity updates, world data
 
 
