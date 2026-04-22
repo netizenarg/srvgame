@@ -22,6 +22,8 @@ GameServer::GameServer(const WorkerGroupConfig& groupConfig, const ConfigManager
 
 GameServer::~GameServer() = default;
 
+asio::io_context& GameServer::GetIoContext() { return ioContext_; }
+
 bool GameServer::Initialize() {
     try {
         asio::ip::tcp::endpoint endpoint(
@@ -70,6 +72,63 @@ void GameServer::Run() {
     Logger::Info("GameServer run finished for protocol '{}'", groupConfig_.protocol);
 }
 
+// void GameServer::HandleIPCMessage(const nlohmann::json& data, GameLogic& game_logic) {
+//     try {
+//         std::string msgType = data.value("msg", "");
+//         if (msgType == "shutdown") {
+//             Logger::Info("Received shutdown command via IPC");
+//             game_logic.Shutdown();
+//             Shutdown();
+//         } else if (msgType == "reload_config") {
+//             Logger::Info("Received config reload command via IPC");
+//         } else if (msgType == "broadcast") {
+//             if (data.contains("data")) {
+//                 game_logic.BroadcastToAllPlayers(data["data"]);
+//             }
+//         } else {
+//             Logger::Warn("Unknown IPC message type: {}", msgType);
+//         }
+//     } catch (const std::exception& err) {
+//         Logger::Error("Error handling IPC message: {}", err.what());
+//     }
+// }
+
+void GameServer::HandleIPCMessage(const nlohmann::json& data, GameLogic& game_logic) {
+    try {
+        std::string msgType = data.value("msg", "");
+        auto it = IPCMessageTypes.find(msgType);
+        if (it == IPCMessageTypes.end()) {
+            Logger::Warn("Unknown IPC message: {}", msgType);
+            return;
+        }
+        int typeCode = it->second;
+        switch (typeCode) {
+            case 1://welcome
+                break;
+            case 2://heartbeat
+                break;
+            case 3://broadcast
+                if (data.contains("data")) {
+                    game_logic.BroadcastToAllPlayers(data["data"]);
+                }
+                break;
+            case 4://shutdown
+                Logger::Info("Received shutdown command from master");
+                game_logic.Shutdown();
+                Shutdown();
+                break;
+            case 5://reload_config
+                Logger::Info("Received config reload command from master");
+                break;
+            default:
+                Logger::Warn("Unhandled IPC message: {}({})", typeCode, msgType);
+                break;
+        }
+    } catch (const std::exception& err) {
+        Logger::Error("Error handling IPC message: {}", err.what());
+    }
+}
+
 void GameServer::InitSessionFactory(int workerId, ProcessPool* processPool, GameLogic& game_logic) {
     if (groupConfig_.protocol == "binary") {
         sessionFactory_ = [workerId, processPool, &game_logic, this]
@@ -79,16 +138,16 @@ void GameServer::InitSessionFactory(int workerId, ProcessPool* processPool, Game
             session->SetMessageHandler([session, workerId, processPool, &game_logic]
             (const nlohmann::json& msg) mutable{
                 try {
-                    std::string msgType = msg.value("type", "");
-                    Logger::Trace("Worker {} processing message type: {}", workerId, msgType);
+                    std::string msgType = msg.value("msg", "");
+                    Logger::Trace("Worker {} processing message: {}", workerId, msgType);
                     if (msgType == "ipc_message" && processPool) {
                         if (msg.contains("target_worker") && msg.contains("payload")) {
                             int targetWorker = msg["target_worker"];
                             std::string payload = msg["payload"].dump();
                             if (processPool->SendToWorker(targetWorker, payload)) {
-                                Logger::Trace("Worker {} sent IPC message to worker {}", workerId, targetWorker);
+                                Logger::Trace("Worker {} sent IPC message {} to worker {}", workerId, msgType, targetWorker);
                             } else {
-                                Logger::Error("Worker {} failed to send IPC message to worker {}", workerId, targetWorker);
+                                Logger::Error("Worker {} failed to send IPC message {} to worker {}", workerId, msgType, targetWorker);
                             }
                         }
                     } else {
@@ -96,7 +155,7 @@ void GameServer::InitSessionFactory(int workerId, ProcessPool* processPool, Game
                     }
                 } catch (const std::exception& e) {
                     Logger::Error("Worker {} error processing message: {}", workerId, e.what());
-                    session->SendError("Internal server error", 500);
+                    session->SendError(BinaryProtocol::MESSAGE_TYPE_ERROR, "Internal server error", 500);
                 }
             });
             session->SetDefaultBinaryMessageHandler([session, workerId, &game_logic]
@@ -113,12 +172,21 @@ void GameServer::InitSessionFactory(int workerId, ProcessPool* processPool, Game
                     }
                     case BinaryProtocol::MESSAGE_TYPE_CHUNK_REQUEST: {
                         BinaryProtocol::BinaryReader reader(data.data(), data.size());
-                        ChunkRequestData req;
+                        ChunkData req;
                         req.chunk_x = reader.ReadInt32();
                         req.chunk_z = reader.ReadInt32();
                         req.lod = reader.ReadUInt8();
                         req.session_id = session->GetSessionId();
                         game_logic.OnChunkRequest(req);
+                        break;
+                    }
+                    case BinaryProtocol::MESSAGE_TYPE_COLLISION_CHECK: {
+                        BinaryProtocol::BinaryReader reader(data.data(), data.size());
+                        CollisionData req;
+                        req.position = reader.ReadVector3();
+                        req.radius = reader.ReadFloat();
+                        req.session_id = session->GetSessionId();
+                        game_logic.OnCollisionCheck(req);
                         break;
                     }
                     case BinaryProtocol::MESSAGE_TYPE_PLAYER_STATE: {
@@ -146,6 +214,58 @@ void GameServer::InitSessionFactory(int workerId, ProcessPool* processPool, Game
                         game_logic.OnPlayerPosition(posData);
                         break;
                     }
+                    case BinaryProtocol::MESSAGE_TYPE_NPC_INTERACTION: {
+                        BinaryProtocol::BinaryReader reader(data.data(), data.size());
+                        NpcData req;
+                        req.npc_id = reader.ReadUInt64();
+                        req.type = reader.ReadString();
+                        req.session_id = session->GetSessionId();
+                        game_logic.OnNPCInteraction(req);
+                        break;
+                    }
+                    case BinaryProtocol::MESSAGE_TYPE_FAMILIAR_COMMAND: {
+                        BinaryProtocol::BinaryReader reader(data.data(), data.size());
+                        FamiliarData req;
+                        req.session_id = session->GetSessionId();
+                        req.familiar_id = reader.ReadUInt64();
+                        req.target_id = reader.ReadUInt64();
+                        req.command = reader.ReadString();
+                        game_logic.OnFamiliarCommand(req);
+                        break;
+                    }
+                    case BinaryProtocol::MESSAGE_TYPE_ENTITY_SPAWN: {
+                        BinaryProtocol::BinaryReader reader(data.data(), data.size());
+                        EntitySpawnData req;
+                        req.session_id = session->GetSessionId();
+                        req.entity_id = reader.ReadUInt64();
+                        req.type = reader.ReadInt32();
+                        req.position = reader.ReadVector3();
+                        game_logic.OnEntitySpawnRequest(req);
+                        break;
+                    }
+                    case BinaryProtocol::MESSAGE_TYPE_LOOT_PICKUP: {
+                        BinaryProtocol::BinaryReader reader(data.data(), data.size());
+                        LootPickupData req;
+                        req.loot_id = reader.ReadUInt64();
+                        req.quantity = reader.ReadUInt16();
+                        req.session_id = session->GetSessionId();
+                        game_logic.OnLootPickup(req);
+                        break;
+                    }
+                    case BinaryProtocol::MESSAGE_TYPE_INVENTORY_MOVE: {
+                        BinaryProtocol::BinaryReader reader(data.data(), data.size());
+                        InventoryData req;
+                        req.loot_id = reader.ReadUInt64();
+                        req.target_id = reader.ReadUInt64();
+                        req.move_type = static_cast<InventoryMoveType>(reader.ReadUInt8());
+                        req.inv_slot_id = reader.ReadInt32();
+                        req.use_slot_id = reader.ReadInt32();
+                        req.quantity = reader.ReadUInt16();
+                        req.session_id = session->GetSessionId();
+                        game_logic.OnInventory(req);
+                        break;
+                    }
+                    //TODO: add all game_logic MESSAGE_TYPE_XXX
                     default:
                         game_logic.HandleBinaryMessage(session->GetSessionId(), type, data);
                         break;
@@ -167,7 +287,7 @@ void GameServer::InitSessionFactory(int workerId, ProcessPool* processPool, Game
             Logger::Trace("Worker {} created new game session {}; protocol: websocket", workerId, session->GetSessionId());
             session->SetMessageHandler([session, workerId, processPool, &game_logic]
             (const nlohmann::json& msg) mutable{
-                std::string msgType = msg.value("type", "");
+                std::string msgType = msg.value("msg", "");
                 if (msgType == "authentication") {
                     AuthenticationData authData;
                     authData.username = msg.value("login", "");
@@ -176,12 +296,21 @@ void GameServer::InitSessionFactory(int workerId, ProcessPool* processPool, Game
                     game_logic.OnAuthentication(authData);
                 }
                 else if (msgType == "get_chunk") {
-                    ChunkRequestData req;
+                    ChunkData req;
                     req.chunk_x = msg.value("x", 0);
                     req.chunk_z = msg.value("z", 0);
                     req.lod = static_cast<uint8_t>(msg.value("lod", 0));
                     req.session_id = session->GetSessionId();
                     game_logic.OnChunkRequest(req);
+                }
+                else if (msgType == "collision") {
+                    CollisionData req;
+                    req.position.x = msg.value("x", 0.0f);
+                    req.position.y = msg.value("y", 0.0f);
+                    req.position.z = msg.value("z", 0.0f);
+                    req.radius = msg.value("radius", 0.5f);
+                    req.session_id = session->GetSessionId();
+                    game_logic.OnCollisionCheck(req);
                 }
                 else if (msgType == "player_state") {
                     // TODO: fill full state data format
@@ -204,32 +333,54 @@ void GameServer::InitSessionFactory(int workerId, ProcessPool* processPool, Game
                     posData.session_id = session->GetSessionId();
                     game_logic.OnPlayerPosition(posData);
                 }
+                else if (msgType == "npc_interaction") {
+                    NpcData req;
+                    req.npc_id = msg.value("npc_id", 0);
+                    req.type = msg.value("npc_type", "");
+                    req.session_id = session->GetSessionId();
+                    game_logic.OnNPCInteraction(req);
+                }
+                else if (msgType == "familiar") {
+                    FamiliarData req;
+                    req.session_id = session->GetSessionId();
+                    req.familiar_id = msg.value("familiarId", 0ULL);
+                    req.target_id = msg.value("targetId", 0ULL);
+                    req.command = msg.value("command", "");
+                    game_logic.OnFamiliarCommand(req);
+                }
+                else if (msgType == "entity_spawn") {
+                    EntitySpawnData req;
+                    req.entity_id = msg.value("id", 0);
+                    req.type = msg.value("entity_type", 0);
+                    req.position.x = msg.value("x", 0.0f);
+                    req.position.y = msg.value("y", 0.0f);
+                    req.position.z = msg.value("z", 0.0f);
+                    req.session_id = session->GetSessionId();
+                    game_logic.OnEntitySpawnRequest(req);
+                }
+                else if (msgType == "loot_pickup") {
+                    LootPickupData req;
+                    req.loot_id = msg.value("loot_id", 0ULL);
+                    req.quantity = msg.value("quantity", 1);
+                    req.session_id = session->GetSessionId();
+                    game_logic.OnLootPickup(req);
+                }
+                else if (msgType == "inventory") {
+                    InventoryData req;
+                    req.loot_id = msg.value("loot_id", 0ULL);
+                    req.target_id = msg.value("target_id", 0ULL);
+                    req.move_type = static_cast<InventoryMoveType>(msg.value("move_type", 0));
+                    req.inv_slot_id = msg.value("inv_slot_id", -1);
+                    req.use_slot_id = msg.value("use_slot_id", -1);
+                    req.quantity = msg.value("quantity", 1);
+                    req.session_id = session->GetSessionId();
+                    game_logic.OnInventory(req);
+                }
+                //TODO: add all game_logic msgType
                 else {
                     game_logic.HandleMessage(session->GetSessionId(), msg);
                 }
             });
-            // session->SetMessageHandler([session, workerId, processPool](const nlohmann::json& msg) {
-            //     try {
-            //         std::string msgType = msg.value("type", "");
-            //         Logger::Trace("Worker {} processing message type: {}", workerId, msgType);
-            //         if (msgType == "ipc_message" && processPool) {
-            //             if (msg.contains("target_worker") && msg.contains("payload")) {
-            //                 int targetWorker = msg["target_worker"];
-            //                 std::string payload = msg["payload"].dump();
-            //                 if (processPool->SendToWorker(targetWorker, payload)) {
-            //                     Logger::Trace("Worker {} sent IPC message to worker {}", workerId, targetWorker);
-            //                 } else {
-            //                     Logger::Error("Worker {} failed to send IPC message to worker {}", workerId, targetWorker);
-            //                 }
-            //             }
-            //         } else {
-            //             game_logic.HandleMessage(session->GetSessionId(), msg);
-            //         }
-            //     } catch (const std::exception& e) {
-            //         Logger::Error("Worker {} error processing message: {}", workerId, e.what());
-            //         session->SendError("Internal server error", 500);
-            //     }
-            // });
             session->SetBinaryMessageHandler([session, workerId, &game_logic]
             (uint16_t type, const std::vector<uint8_t>& data) mutable{
                 game_logic.HandleBinaryMessage(session->GetSessionId(), type, data);
@@ -339,7 +490,7 @@ void GameServer::RegisterCallbacks(const std::string& protocol, GameLogic& game_
             writer.WriteString(message);
             auto session = ConnectionManager::GetInstance().GetSession(session_id);
             if (session) {
-                session->SendBinary(BinaryProtocol::MESSAGE_TYPE_AUTHENTICATION, writer.GetBuffer());
+                session->Send(BinaryProtocol::MESSAGE_TYPE_AUTHENTICATION, writer.GetBuffer());
             }
         });
         game_logic.SetSendChunkCallback([&](uint64_t session_id, const ChunkData& data) {
@@ -351,7 +502,19 @@ void GameServer::RegisterCallbacks(const std::string& protocol, GameLogic& game_
             writer.WriteUInt64(data.timestamp);
             auto session = ConnectionManager::GetInstance().GetSession(session_id);
             if (session) {
-                session->SendBinary(BinaryProtocol::MESSAGE_TYPE_CHUNK_DATA, writer.GetBuffer());
+                session->Send(BinaryProtocol::MESSAGE_TYPE_CHUNK_DATA, writer.GetBuffer());
+            }
+        });
+        game_logic.SetSendCollisionResponseCallback([&](uint64_t session_id, const CollisionResult& result) {
+            BinaryProtocol::BinaryWriter writer;
+            writer.WriteUInt8(result.collided ? 1 : 0);
+            writer.WriteUInt64(result.collidedWith);
+            writer.WriteFloat(result.penetration);
+            writer.WriteVector3(result.resolution);
+            writer.WriteUInt64(game_logic.GetCurrentTimestamp());
+            auto session = ConnectionManager::GetInstance().GetSession(session_id);
+            if (session) {
+                session->Send(BinaryProtocol::MESSAGE_TYPE_COLLISION_CHECK, writer.GetBuffer());
             }
         });
         game_logic.SetPlayerStateCallback([&](const PlayerStateData& state) {
@@ -364,7 +527,7 @@ void GameServer::RegisterCallbacks(const std::string& protocol, GameLogic& game_
             writer.WriteUInt64(state.timestamp);
             auto nearbySessions = GetSessionsInRadius(state.position, 100.0f);
             for (auto& session : nearbySessions) {
-                session->SendBinary(BinaryProtocol::MESSAGE_TYPE_ENTITY_UPDATE, writer.GetBuffer());
+                session->Send(BinaryProtocol::MESSAGE_TYPE_ENTITY_UPDATE, writer.GetBuffer());
             }
         });
         game_logic.SetBroadcastPlayerPositionCallback([&](const PlayerPositionData& data, float radius) {
@@ -375,13 +538,82 @@ void GameServer::RegisterCallbacks(const std::string& protocol, GameLogic& game_
             writer.WriteUInt64(data.timestamp);
             auto nearbySessions = GetSessionsInRadius(data.position, radius);
             for (auto& session : nearbySessions) {
-                session->SendBinary(BinaryProtocol::MESSAGE_TYPE_PLAYER_POSITION, writer.GetBuffer());
+                session->Send(BinaryProtocol::MESSAGE_TYPE_PLAYER_POSITION, writer.GetBuffer());
             }
         });
+        game_logic.SetSendNPCInteractionResponseCallback([&](uint64_t session_id, const NpcData& response) {
+            BinaryProtocol::BinaryWriter writer;
+            if (response.type == "combat") {
+                writer.WriteUInt64(response.timestamp);
+                writer.WriteUInt64(response.player_id);
+                writer.WriteUInt64(response.npc_id);
+                writer.WriteFloat(response.damage);
+                writer.WriteFloat(response.health);
+                writer.WriteUInt8(response.is_dead ? 1 : 0);
+                auto session = ConnectionManager::GetInstance().GetSession(session_id);
+                if (session) session->Send(BinaryProtocol::MESSAGE_TYPE_COMBAT_EVENT, writer.GetBuffer());
+            } else if (response.type == "dialogue") {
+                writer.WriteUInt64(response.npc_id);
+                writer.WriteJson(response.quests);
+                writer.WriteUInt64(response.timestamp);
+                auto session = ConnectionManager::GetInstance().GetSession(session_id);
+                if (session) session->Send(BinaryProtocol::MESSAGE_TYPE_NPC_INTERACTION, writer.GetBuffer());
+            } else {
+                auto session = ConnectionManager::GetInstance().GetSession(session_id);
+                if (session)
+                    session->SendError(BinaryProtocol::MESSAGE_TYPE_ERROR, "NPC interaction failed", 400);
+            }
+        });
+        game_logic.SetSendFamiliarCommandResponseCallback([&](uint64_t session_id, const FamiliarData& response) {
+            BinaryProtocol::BinaryWriter writer;
+            writer.WriteUInt64(response.timestamp);
+            writer.WriteUInt64(response.familiar_id);
+            writer.WriteUInt64(response.target_id);
+            writer.WriteString(response.command);
+            writer.WriteUInt8(response.success ? 1 : 0);
+            auto session = ConnectionManager::GetInstance().GetSession(session_id);
+            if (session) session->Send(BinaryProtocol::MESSAGE_TYPE_FAMILIAR_COMMAND, writer.GetBuffer());
+        });
+        game_logic.SetSendEntitySpawnResponseCallback([&](uint64_t session_id, const EntitySpawnData& response) {
+            BinaryProtocol::BinaryWriter writer;
+            writer.WriteUInt64(response.timestamp);
+            writer.WriteUInt64(response.entity_id);
+            writer.WriteInt32(response.type);
+            writer.WriteVector3(response.position);
+            auto session = ConnectionManager::GetInstance().GetSession(session_id);
+            if (session) {
+                session->Send(BinaryProtocol::MESSAGE_TYPE_ENTITY_SPAWN, writer.GetBuffer());
+            }
+        });
+        game_logic.SetSendLootPickupResponseCallback([&](uint64_t session_id, const LootPickupData& response) {
+            BinaryProtocol::BinaryWriter writer;
+            writer.WriteUInt64(response.loot_id);
+            writer.WriteUInt16(response.quantity);
+            writer.WriteUInt64(response.timestamp);
+            auto session = ConnectionManager::GetInstance().GetSession(session_id);
+            if (session) {
+                session->Send(BinaryProtocol::MESSAGE_TYPE_LOOT_PICKUP, writer.GetBuffer());
+            }
+        });
+        game_logic.SetSendInventoryResponseCallback([&](uint64_t session_id, const InventoryData& response) {
+            BinaryProtocol::BinaryWriter writer;
+            writer.WriteUInt64(response.loot_id);
+            writer.WriteUInt64(response.target_id);
+            writer.WriteUInt8(static_cast<uint8_t>(response.move_type));
+            writer.WriteInt32(response.inv_slot_id);
+            writer.WriteInt32(response.use_slot_id);
+            writer.WriteUInt16(response.quantity);
+            writer.WriteUInt64(response.timestamp);
+            auto session = ConnectionManager::GetInstance().GetSession(session_id);
+            if (session) {
+                session->Send(BinaryProtocol::MESSAGE_TYPE_INVENTORY_MOVE, writer.GetBuffer());
+            }
+        });
+        //TODO: add all game_logic
     } else { // websocket
         game_logic.SetSendAuthenticationResponseCallback([&](uint64_t session_id, bool success, const std::string& message, uint64_t player_id) {
             nlohmann::json response = {
-                {"type", "authentication_response"},
+                {"msg", "authentication_response"},
                 {"success", success},
                 {"message", message},
                 {"player_id", player_id},
@@ -389,26 +621,40 @@ void GameServer::RegisterCallbacks(const std::string& protocol, GameLogic& game_
             };
             auto session = ConnectionManager::GetInstance().GetSession(session_id);
             if (session) {
-                session->Send(response);
+                session->SendJson(response);
             }
         });
         game_logic.SetSendChunkCallback([&](uint64_t session_id, const ChunkData& data) {
             nlohmann::json msg = {
-                {"type", "world_chunk"},
-                {"chunk_x", data.chunk_x},
-                {"chunk_z", data.chunk_z},
+                {"msg", "get_chunk"},
+                {"x", data.chunk_x},
+                {"z", data.chunk_z},
                 {"lod", data.lod},
                 {"data", data.chunk_json},
                 {"timestamp", data.timestamp}
             };
             auto session = ConnectionManager::GetInstance().GetSession(session_id);
             if (session) {
-                session->Send(msg);
+                session->SendJson(msg);
+            }
+        });
+        game_logic.SetSendCollisionResponseCallback([&](uint64_t session_id, const CollisionResult& result) {
+            nlohmann::json response = {
+                {"msg", "collision"},
+                {"collided", result.collided},
+                {"collidedWith", result.collidedWith},
+                {"penetration", result.penetration},
+                {"resolution", {result.resolution.x, result.resolution.y, result.resolution.z}},
+                {"timestamp", game_logic.GetCurrentTimestamp()}
+            };
+            auto session = ConnectionManager::GetInstance().GetSession(session_id);
+            if (session) {
+                session->SendJson(response);
             }
         });
         game_logic.SetPlayerStateCallback([&](const PlayerStateData& state) {
             nlohmann::json jsonMsg = {
-                {"type", "entity_update"},
+                {"msg", "entity_update"},
                 {"entity_id", state.player_id},
                 {"x", state.position.x}, {"y", state.position.y}, {"z", state.position.z},
                 {"rx", state.rotation.x}, {"ry", state.rotation.y}, {"rz", state.rotation.z},
@@ -417,12 +663,12 @@ void GameServer::RegisterCallbacks(const std::string& protocol, GameLogic& game_
             };
             auto nearbySessions = GetSessionsInRadius(state.position, 100.0f);
             for (auto& session : nearbySessions) {
-                session->Send(jsonMsg);
+                session->SendJson(jsonMsg);
             }
         });
         game_logic.SetBroadcastPlayerPositionCallback([&](const PlayerPositionData& data, float radius) {
             nlohmann::json jsonMsg = {
-                {"type", "player_position"},
+                {"msg", "player_position"},
                 {"player_id", data.player_id},
                 {"x", data.position.x}, {"y", data.position.y}, {"z", data.position.z},
                 {"vx", data.velocity.x}, {"vy", data.velocity.y}, {"vz", data.velocity.z},
@@ -430,8 +676,81 @@ void GameServer::RegisterCallbacks(const std::string& protocol, GameLogic& game_
             };
             auto nearbySessions = GetSessionsInRadius(data.position, radius);
             for (auto& session : nearbySessions) {
-                session->Send(jsonMsg);
+                session->SendJson(jsonMsg);
             }
         });
+        game_logic.SetSendNPCInteractionResponseCallback([&](uint64_t session_id, const NpcData& response) {
+            nlohmann::json jsonMsg;
+            if (response.type == "combat") {
+                jsonMsg = {
+                    {"msg", "combat"},
+                    {"player_id", response.player_id},
+                    {"npc_id", response.npc_id},
+                    {"damage", response.damage},
+                    {"health", response.health},
+                    {"is_dead", response.is_dead},
+                    {"timestamp", response.timestamp}
+                };
+            } else if (response.type == "dialogue") {
+                jsonMsg = {
+                    {"msg", "dialogue"},
+                    {"npc_id", response.npc_id},
+                    {"quests", response.quests},
+                    {"timestamp", response.timestamp}
+                };
+            } else {
+                jsonMsg = {{"msg", "error"}, {"desc", "NPC interaction failed"}};
+            }
+            auto session = ConnectionManager::GetInstance().GetSession(session_id);
+            if (session) session->SendJson(jsonMsg);
+        });
+        game_logic.SetSendFamiliarCommandResponseCallback([&](uint64_t session_id, const FamiliarData& response) {
+            nlohmann::json jsonMsg = {
+                {"msg", "familiar"},
+                {"familiar_id", response.familiar_id},
+                {"target_id", response.target_id},
+                {"command", response.command},
+                {"success", response.success},
+                {"timestamp", response.timestamp}
+            };
+            auto session = ConnectionManager::GetInstance().GetSession(session_id);
+            if (session) session->SendJson(jsonMsg);
+        });
+        game_logic.SetSendEntitySpawnResponseCallback([&](uint64_t session_id, const EntitySpawnData& response) {
+            nlohmann::json jsonMsg = {
+                {"msg", "entity_spawn"},
+                {"id", response.entity_id},
+                {"type", response.type},
+                {"position", {response.position.x, response.position.y, response.position.z}},
+                {"timestamp", response.timestamp}
+            };
+            auto session = ConnectionManager::GetInstance().GetSession(session_id);
+            if (session) session->SendJson(jsonMsg);
+        });
+        game_logic.SetSendLootPickupResponseCallback([&](uint64_t session_id, const LootPickupData& response) {
+            nlohmann::json jsonMsg = {
+                {"msg", "loot_pickup"},
+                {"loot_id", response.loot_id},
+                {"quantity", response.quantity},
+                {"timestamp", response.timestamp}
+            };
+            auto session = ConnectionManager::GetInstance().GetSession(session_id);
+            if (session) session->SendJson(jsonMsg);
+        });
+        game_logic.SetSendInventoryResponseCallback([&](uint64_t session_id, const InventoryData& response) {
+            nlohmann::json jsonMsg = {
+                {"msg", "inventory"},
+                {"loot_id", response.loot_id},
+                {"target_id", response.target_id},
+                {"move_type", static_cast<int>(response.move_type)},
+                {"inv_slot_id", response.inv_slot_id},
+                {"use_slot_id", response.use_slot_id},
+                {"quantity", response.quantity},
+                {"timestamp", response.timestamp}
+            };
+            auto session = ConnectionManager::GetInstance().GetSession(session_id);
+            if (session) session->SendJson(jsonMsg);
+        });
+        //TODO: add all game_logic
     }
 }

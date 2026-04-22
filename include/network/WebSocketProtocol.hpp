@@ -35,14 +35,6 @@ namespace WebSocketProtocol {
         OP_PONG = 0xA
     };
 
-    static const std::unordered_map<std::string, int> IPCMessageTypes = {
-        {"welcome", 1},
-        {"heartbeat", 2},
-        {"broadcast", 3},
-        {"shutdown", 4},
-        {"reload_config", 5}
-    };
-
     // WebSocket frame structure
     struct WebSocketFrame {
         bool fin{true};

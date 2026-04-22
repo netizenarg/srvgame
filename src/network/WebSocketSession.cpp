@@ -20,36 +20,11 @@ void WebSocketSession::Disconnect() { wsConn_->Close(1000, "Disconnect"); }
 bool WebSocketSession::IsConnected() const { return wsConn_->IsOpen(); }
 uint64_t WebSocketSession::GetSessionId() const { return sessionId_; }
 
-void WebSocketSession::SendError(const std::string& message, int code) {
-    try {
-        nlohmann::json error = {
-            {"type", "error"},
-            {"code", code},
-            {"message", message},
-            {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count()}
-        };
-        Send(error);
-    } catch (const std::exception& err) {
-        Logger::Error("WebSocketSession::SendError failed: {}", err.what());
-    } catch (...) {
-        Logger::Error("WebSocketSession::SendError failed with unknown exception");
-    }
-}
-
-void WebSocketSession::Send(const nlohmann::json& message) {
-    wsConn_->SendJson(message);
-}
-
-void WebSocketSession::SendRaw(const std::string& data) {
-    wsConn_->SendText(data);
-}
-
-void WebSocketSession::SendBinary(uint16_t message_type, const std::vector<uint8_t>& data) {
+void WebSocketSession::Send(uint16_t message_type, const std::vector<uint8_t>& data) {
     BinaryProtocol::BinaryMessage msg;
     msg.header.version = BinaryProtocol::CURRENT_PROTOCOL_VERSION;
     msg.header.message_type = message_type;
-    msg.header.sequence = 0;
+    msg.header.sequence = 0;  // sequence not used for websocket
     msg.header.timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
         msg.data = data;
@@ -57,6 +32,26 @@ void WebSocketSession::SendBinary(uint16_t message_type, const std::vector<uint8
         msg.header.checksum = BinaryProtocol::CalculateCRC32(data.data(), data.size());
         auto serialized = msg.Serialize();
         wsConn_->SendBinary(serialized);
+}
+
+void WebSocketSession::SendRaw(const std::string& data) {
+    wsConn_->SendText(data);
+}
+
+void WebSocketSession::SendJson(const nlohmann::json& message) {
+    wsConn_->SendJson(message);
+}
+
+void WebSocketSession::SendError(uint16_t message_type, const std::string& error_message, int code) {
+    nlohmann::json error = {
+        {"msg", "error"},
+        {"type", message_type},
+        {"code", code},
+        {"message", error_message},
+        {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count()}
+    };
+    SendJson(error);
 }
 
 void WebSocketSession::SetMessageHandler(MessageHandler handler) {
@@ -184,7 +179,7 @@ void WebSocketSession::OnMessage(const WebSocketProtocol::WebSocketMessage& msg)
                     return;
                 }
                 else if (json.value("type", "") == "get_chunk") {
-                    ChunkRequestData req;
+                    ChunkData req;
                     nlohmann::json data = msg.ToJson();
                     req.chunk_x = data.value("x", 0);
                     req.chunk_z = data.value("z", 0);

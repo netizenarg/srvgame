@@ -28,11 +28,10 @@ public:
     bool IsConnected() const override;
     uint64_t GetSessionId() const override;
 
-    void SendError(const std::string& message, int code = 500);
-
-    void Send(const nlohmann::json& message) override;
+    void Send(uint16_t message_type, const std::vector<uint8_t>& data) override;
     void SendRaw(const std::string& data) override;
-    void SendBinary(uint16_t message_type, const std::vector<uint8_t>& data) override;
+    void SendJson(const nlohmann::json& message) override;
+    void SendError(uint16_t message_type, const std::string& error_message, int code) override;
 
     void SetMessageHandler(MessageHandler handler) override;
     void SetCloseHandler(CloseHandler handler) override;

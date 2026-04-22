@@ -34,9 +34,10 @@ public:
     virtual uint64_t GetSessionId() const = 0;
 
     // Send methods
-    virtual void Send(const nlohmann::json& message) = 0;
+    virtual void Send(uint16_t message_type, const std::vector<uint8_t>& data) = 0;
     virtual void SendRaw(const std::string& data) = 0;
-    virtual void SendBinary(uint16_t message_type, const std::vector<uint8_t>& data) = 0;
+    virtual void SendJson(const nlohmann::json& message) = 0;
+    virtual void SendError(uint16_t message_type, const std::string& error_message, int code) = 0;
 
     // Callback setters
     using MessageHandler = std::function<void(const nlohmann::json&)>;

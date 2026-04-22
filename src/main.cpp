@@ -129,7 +129,7 @@ void worker(int workerId, const WorkerGroupConfig& groupConfig, ProcessPool* pro
                          workerId, groupConfig.host, groupConfig.port, groupConfig.protocol);
 
             std::atomic<bool> worldMaintenanceRunning{true};
-            std::thread worldMaintenanceThread([&gameLogic, &worldMaintenanceRunning, workerId, processPool]() {
+            std::thread worldMaintenanceThread([&server, &gameLogic, &worldMaintenanceRunning, workerId, processPool]() {
                 Logger::Info("Worker {} starting world maintenance thread", workerId);
 
                 auto lastCleanupTime = std::chrono::steady_clock::now();
@@ -153,7 +153,7 @@ void worker(int workerId, const WorkerGroupConfig& groupConfig, ProcessPool* pro
                         while (!message.empty()) {
                             try {
                                 auto jsonMsg = nlohmann::json::parse(message);
-                                gameLogic.HandleIPCMessage(jsonMsg);
+                                server.HandleIPCMessage(jsonMsg, gameLogic);
                             } catch (const std::exception& e) {
                                 Logger::Error("Worker {} failed to parse IPC message: {}", workerId, e.what());
                             }
@@ -298,11 +298,11 @@ int main(int argc, char* argv[]) {
             }
 
             nlohmann::json testMsg;
-            testMsg["type"] = "welcome";
+            testMsg["msg"] = "welcome";
             testMsg["from"] = "master";
             testMsg["timestamp"] = std::chrono::system_clock::now().time_since_epoch().count();
             testMsg["worker_id"] = i;
-            testMsg["message"] = "Welcome to the game server!";
+            testMsg["desc"] = "Welcome to the game server!";
 
             std::string serialized = testMsg.dump();
 
@@ -340,7 +340,7 @@ int main(int argc, char* argv[]) {
                 if (!processPool.IsWorkerAlive(i)) continue;
 
                 nlohmann::json heartbeat;
-                heartbeat["type"] = "heartbeat";
+                heartbeat["msg"] = "heartbeat";
                 heartbeat["count"] = heartbeatCount;
                 heartbeat["timestamp"] = std::chrono::system_clock::now().time_since_epoch().count();
 
@@ -353,12 +353,12 @@ int main(int argc, char* argv[]) {
         statusUpdateCount++;
         if (statusUpdateCount % 15 == 0) { // every 30 seconds
             nlohmann::json serverStatus;
-            serverStatus["type"] = "server_status";
+            serverStatus["msg"] = "server_status";
             serverStatus["online_workers"] = totalWorkers;
             serverStatus["timestamp"] = std::chrono::system_clock::now().time_since_epoch().count();
 
             nlohmann::json broadcastMsg;
-            broadcastMsg["type"] = "broadcast";
+            broadcastMsg["msg"] = "broadcast";
             broadcastMsg["data"] = serverStatus;
 
             std::string broadcastSerialized = broadcastMsg.dump();

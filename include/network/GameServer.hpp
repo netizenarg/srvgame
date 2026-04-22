@@ -14,6 +14,7 @@
 #include "config/ConfigManager.hpp"
 #include "process/ProcessPool.hpp"
 
+#include "network/IConnection.hpp"
 #include "network/ConnectionManager.hpp"
 #include "network/BinarySession.hpp"
 #include "network/WebSocketProtocol.hpp"
@@ -32,7 +33,8 @@ public:
     void Run();
     void Shutdown();
 
-    asio::io_context& GetIoContext() { return ioContext_; }
+    asio::io_context& GetIoContext();
+    void HandleIPCMessage(const nlohmann::json& data, GameLogic& game_logic);
 
     void InitSessionFactory(int workerId, ProcessPool* processPool, GameLogic& game_logic);
     void RegisterCallbacks(const std::string& protocol, GameLogic& game_logic);

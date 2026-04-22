@@ -77,11 +77,11 @@ float LogicCore::CalculateDistance(const glm::vec3& a, const glm::vec3& b) {
 }
 
 void LogicCore::HandleMessage(uint64_t sessionId, const nlohmann::json& message) {
-    if (!message.contains("type") || !message["type"].is_string()) {
+    if (!message.contains("msg") || !message["msg"].is_string()) {
         SendError(sessionId, "Invalid message format");
         return;
     }
-    std::string messageType = message["type"];
+    std::string messageType = message["msg"];
     Logger::Debug("Handling message type '{}' from session {}", messageType, sessionId);
     try {
         if (!CheckRateLimit(sessionId)) {
@@ -109,7 +109,7 @@ void LogicCore::HandleBinaryMessage(uint64_t sessionId, uint16_t messageType, co
             writer.WriteUInt8(1);
             writer.WriteString("Rate limit exceeded");
             writer.WriteUInt32(429);
-            SendBinaryToSession(sessionId, BinaryProtocol::MESSAGE_TYPE_ERROR, writer.GetBuffer());
+            SendToSession(sessionId, BinaryProtocol::MESSAGE_TYPE_ERROR, writer.GetBuffer());
             return;
         }
         std::lock_guard<std::mutex> lock(handlersMutex_);
@@ -126,11 +126,11 @@ void LogicCore::HandleBinaryMessage(uint64_t sessionId, uint16_t messageType, co
                 writer.WriteUInt8(1);
                 writer.WriteString("Unknown binary message type");
                 writer.WriteUInt32(400);
-                SendBinaryToSession(sessionId, BinaryProtocol::MESSAGE_TYPE_ERROR, writer.GetBuffer());
+                SendToSession(sessionId, BinaryProtocol::MESSAGE_TYPE_ERROR, writer.GetBuffer());
             }
         }
-    } catch (const std::exception& e) {
-        Logger::Error("Error handling binary message: {}", e.what());
+    } catch (const std::exception& err) {
+        Logger::Error("Error handling binary message: {}", err.what());
         SendError(sessionId, "Internal server error", 500);
     }
 }
@@ -187,39 +187,39 @@ uint64_t LogicCore::GetSessionIdByPlayer(uint64_t playerId) const {
     return it != playerToSessionMap_.end() ? it->second : 0;
 }
 
-void LogicCore::SendError(uint64_t sessionId, const std::string& message, int code) {
+void LogicCore::SendError(uint64_t sessionId, const std::string& description, int code) {
     nlohmann::json errorMsg = {
-        {"type", "error"},
-        {"message", message},
+        {"msg", "error"},
+        {"desc", description},
         {"code", code},
         {"timestamp", GetCurrentTimestamp()}
     };
-    SendToSession(sessionId, errorMsg);
+    SendToSessionJson(sessionId, errorMsg);
 }
 
-void LogicCore::SendSuccess(uint64_t sessionId, const std::string& message, const nlohmann::json& data) {
+void LogicCore::SendSuccess(uint64_t sessionId, const std::string& description, const nlohmann::json& data) {
     nlohmann::json successMsg = {
-        {"type", "success"},
-        {"message", message},
+        {"msg", "success"},
+        {"desc", description},
         {"data", data},
         {"timestamp", GetCurrentTimestamp()}
     };
-    SendToSession(sessionId, successMsg);
+    SendToSessionJson(sessionId, successMsg);
 }
 
-void LogicCore::SendToSession(uint64_t sessionId, const nlohmann::json& message) {
+void LogicCore::SendToSessionJson(uint64_t sessionId, const nlohmann::json& message) {
     auto& connMgr = ConnectionManager::GetInstance();
     auto session = connMgr.GetSession(sessionId);
     if (session) {
-        session->Send(message);
+        session->SendJson(message);
     }
 }
 
-void LogicCore::SendBinaryToSession(uint64_t sessionId, uint16_t messageType, const std::vector<uint8_t>& data) {
+void LogicCore::SendToSession(uint64_t sessionId, uint16_t messageType, const std::vector<uint8_t>& data) {
     auto& connMgr = ConnectionManager::GetInstance();
     auto session = connMgr.GetSession(sessionId);
     if (session) {
-        session->SendBinary(messageType, data);
+        session->Send(messageType, data);
     }
 }
 

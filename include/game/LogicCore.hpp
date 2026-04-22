@@ -54,10 +54,10 @@ public:
     uint64_t GetPlayerIdBySession(uint64_t sessionId) const;
     uint64_t GetSessionIdByPlayer(uint64_t playerId) const;
 
-    void SendError(uint64_t sessionId, const std::string& message, int code = 0);
-    void SendSuccess(uint64_t sessionId, const std::string& message, const nlohmann::json& data = {});
-    void SendToSession(uint64_t sessionId, const nlohmann::json& message);
-    void SendBinaryToSession(uint64_t sessionId, uint16_t messageType, const std::vector<uint8_t>& data);
+    void SendError(uint64_t sessionId, const std::string& description, int code = 0);
+    void SendSuccess(uint64_t sessionId, const std::string& description, const nlohmann::json& data = {});
+    void SendToSession(uint64_t sessionId, uint16_t messageType, const std::vector<uint8_t>& data);
+    void SendToSessionJson(uint64_t sessionId, const nlohmann::json& message);
 
     // Python scripting – virtual, to be overridden by GameLogic
     virtual void FirePythonEvent(const std::string& eventName, const nlohmann::json& data);

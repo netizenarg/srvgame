@@ -207,7 +207,7 @@ void PlayerManager::BroadcastToNearbyPlayers(int64_t playerId, const nlohmann::j
     for (int64_t id : nearby) {
         if (auto sessionId = GetSessionIdByPlayerId(id)) {
             if (auto session = connMgr.GetSession(sessionId))
-                session->Send(message);
+                session->SendJson(message);
         }
     }
 }
@@ -524,7 +524,7 @@ void PlayerManager::SendToPlayer(int64_t playerId, const nlohmann::json& message
     if (auto sessionId = GetSessionIdByPlayerId(playerId)) {
         auto& connMgr = ConnectionManager::GetInstance();
         if (auto session = connMgr.GetSession(sessionId))
-            session->Send(message);
+            session->SendJson(message);
     } else {
         Logger::Warn("Player {} is not online", playerId);
     }
@@ -535,7 +535,7 @@ void PlayerManager::SendToPlayers(const std::vector<int64_t>& playerIds, const n
     for (int64_t id : playerIds) {
         if (auto sessionId = GetSessionIdByPlayerId(id)) {
             if (auto session = connMgr.GetSession(sessionId))
-                session->Send(message);
+                session->SendJson(message);
         }
     }
 }
@@ -556,8 +556,8 @@ void PlayerManager::BanPlayer(int64_t playerId, const std::string& reason, int64
     if (auto sessionId = GetSessionIdByPlayerId(playerId)) {
         auto& connMgr = ConnectionManager::GetInstance();
         if (auto session = connMgr.GetSession(sessionId)) {
-            nlohmann::json msg = {{"type", "banned"}, {"reason", reason}, {"duration", durationSeconds}};
-            session->Send(msg);
+            nlohmann::json msg = {{"msg", "banned"}, {"reason", reason}, {"duration", durationSeconds}};
+            session->SendJson(msg);
             session->Stop();
         }
     }

@@ -341,7 +341,7 @@ std::shared_ptr<LootItem> LootTableManager::CreateItemFromEntry(
     item->SetRarity(rarity);
     item->SetLevelRequirement(itemLevel);
     ApplyRarityStats(item, rarity);
-    if (item->GetType() == ItemType::WEAPON || item->GetType() == ItemType::ARMOR) {
+    if (item->GetType() == LootType::WEAPON || item->GetType() == LootType::AMMO || item->GetType() == LootType::ARMOR) {
         GenerateRandomStats(item, itemLevel);
     }
     if (static_cast<int>(rarity) >= static_cast<int>(LootRarity::RARE)) {
@@ -473,7 +473,7 @@ void LootTableManager::GenerateRandomStats(std::shared_ptr<LootItem> item, int i
 }
 
 void LootTableManager::ApplyRandomEnchantment(std::shared_ptr<LootItem> item, LootRarity rarity) const {
-    std::vector<ItemModifier> possibleEnchantments = {
+    std::vector<LootModifier> possibleEnchantments = {
         {"multiply", "attack_damage", 1.25f, 0, "enchantment"},
         {"multiply", "attack_speed", 1.15f, 0, "enchantment"},
         {"add", "critical_chance", 0.05f, 0, "enchantment"},
