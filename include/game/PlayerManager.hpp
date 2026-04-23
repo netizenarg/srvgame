@@ -25,9 +25,6 @@
 #include "game/RAIIThread.hpp"
 #include "game/Player.hpp"
 
-// Forward declarations
-//class Player;
-
 struct GlobalPlayerStats {
     int total_players = 0;
     int online_players = 0;
@@ -63,6 +60,9 @@ public:
     bool AuthenticatePlayer(const std::string& username, const std::string& password="");
     void PlayerConnected(uint64_t sessionId, int64_t playerId);
     void PlayerDisconnected(uint64_t sessionId);
+
+    void UpdatePosition(uint64_t playerId, float x, float y, float z);
+    std::vector<uint64_t> GetDirtyPlayersAndClear();
 
     void BroadcastToNearbyPlayers(int64_t playerId, const nlohmann::json& message);
     std::vector<int64_t> GetNearbyPlayers(int64_t playerId, float radius);
@@ -100,7 +100,7 @@ public:
     std::vector<int64_t> GetPartyMembers(int64_t partyId) const;
     int64_t GeneratePartyId();
 
-    void Shutdown();   // Added missing declaration
+    void Shutdown();
 
 private:
     PlayerManager();
@@ -143,6 +143,12 @@ private:
     std::mutex saveMutex_;
     std::mutex cleanupMutex_;
 
-    static constexpr float DEFAULT_BROADCAST_RANGE = 100.0f;  // Added
-    static constexpr size_t MAX_PARTY_SIZE = 5;               // Added
+    static constexpr float DEFAULT_BROADCAST_RANGE = 100.0f;
+    static constexpr size_t MAX_PARTY_SIZE = 5;
+
+    mutable std::shared_mutex dirtyMutex_;
+    std::unordered_set<uint64_t> dirtyPlayers_;
+
+    void MarkDirty(uint64_t playerId);
+
 };

@@ -201,6 +201,26 @@ void PlayerManager::UpdateConnectionStats(int64_t playerId, bool connected) {
     }
 }
 
+void PlayerManager::MarkDirty(uint64_t playerId) {
+    std::unique_lock<std::shared_mutex> lock(dirtyMutex_);
+    dirtyPlayers_.insert(playerId);
+}
+
+std::vector<uint64_t> PlayerManager::GetDirtyPlayersAndClear() {
+    std::unique_lock<std::shared_mutex> lock(dirtyMutex_);
+    std::vector<uint64_t> result(dirtyPlayers_.begin(), dirtyPlayers_.end());
+    dirtyPlayers_.clear();
+    return result;
+}
+
+void PlayerManager::UpdatePosition(uint64_t playerId, float x, float y, float z) {
+    auto player = GetPlayer(playerId);
+    if (player) {
+        player->UpdatePosition(x, y, z);
+        MarkDirty(playerId);
+    }
+}
+
 void PlayerManager::BroadcastToNearbyPlayers(int64_t playerId, const nlohmann::json& message) {
     auto nearby = GetNearbyPlayers(playerId, DEFAULT_BROADCAST_RANGE);
     auto& connMgr = ConnectionManager::GetInstance();

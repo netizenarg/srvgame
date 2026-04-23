@@ -40,6 +40,8 @@ namespace BinaryProtocol {
         MESSAGE_TYPE_PLAYER_UPDATE = 205,
         MESSAGE_TYPE_PLAYER_SPAWN   = 206,
         MESSAGE_TYPE_PLAYER_DESPAWN = 207,
+        // Players messages
+        MESSAGE_TYPE_PLAYERS_UPDATE = 250,
 
         // Entity messages
         MESSAGE_TYPE_ENTITY_SPAWN = 300,

@@ -59,31 +59,35 @@ public:
     void OnPlayerConnected(uint64_t sessionId, uint64_t playerId) override;
     void OnPlayerDisconnected(uint64_t sessionId) override;
 
-    void BroadcastToNearbyPlayers(const glm::vec3& position, uint16_t messageType,
-                                  const std::vector<uint8_t>& data, float radius = 50.0f);
-    void BroadcastToNearbyOnlinePlayers(const glm::vec3& position, uint16_t messageType,
-                                        const std::vector<uint8_t>& data, float radius = 50.0f);
+    // void BroadcastToNearbyPlayers(const glm::vec3& position, uint16_t messageType,
+    //                               const std::vector<uint8_t>& data, float radius = 50.0f);
+    // void BroadcastToNearbyOnlinePlayers(const glm::vec3& position, uint16_t messageType,
+    //                                     const std::vector<uint8_t>& data, float radius = 50.0f);
     void SyncNearbyEntitiesToPlayer(uint64_t sessionId, const glm::vec3& position);
-    void BroadcastToNearbyPlayersJson(const glm::vec3& position, const nlohmann::json& message, float radius);
+    // void BroadcastToNearbyPlayersJson(const glm::vec3& position, const nlohmann::json& message, float radius);
     void BroadcastToAllPlayers(const nlohmann::json& message);
-    void BroadcastToAllPlayersBinary(uint16_t messageType, const std::vector<uint8_t>& data);
-    void BroadcastToPlayers(const std::vector<uint64_t>& sessionIds, const nlohmann::json& message);
-    void BroadcastPlayerSpawn(uint64_t playerId);
-    void BroadcastPlayerDespawn(uint64_t playerId, const glm::vec3& lastPosition);
-    void BroadcastPlayerSpawnJson(uint64_t playerId);
-    void BroadcastPlayerDespawnJson(uint64_t playerId, const glm::vec3& lastPosition);
-    void BroadcastEntitySpawn(uint64_t entityId, EntityType type, const glm::vec3& position,
-                              float yaw, const std::string& name);
+    // void BroadcastToAllPlayersBinary(uint16_t messageType, const std::vector<uint8_t>& data);
+    // void BroadcastToPlayers(const std::vector<uint64_t>& sessionIds, const nlohmann::json& message);
+    // void BroadcastPlayerSpawn(uint64_t playerId);
+    // void BroadcastPlayerDespawn(uint64_t playerId, const glm::vec3& lastPosition);
+    // void BroadcastPlayerSpawnJson(uint64_t playerId);
+    // void BroadcastPlayerDespawnJson(uint64_t playerId, const glm::vec3& lastPosition);
+    // void BroadcastEntitySpawn(uint64_t entityId, EntityType type, const glm::vec3& position,
+    //                           float yaw, const std::string& name);
     void SendPositionCorrection(uint64_t sessionId, const glm::vec3& position, const glm::vec3& velocity);
-    void BroadcastEntityDespawn(uint64_t entityId, const glm::vec3& position);
+    // void BroadcastEntityDespawn(uint64_t entityId, const glm::vec3& position);
     void SendAuthenticationSuccess(uint64_t sessionId, uint64_t playerId, const std::string& message);
     void SendAuthenticationFailure(uint64_t sessionId, const std::string& message);
 
     void SetSendAuthenticationResponseCallback(std::function<void(uint64_t sessionId, bool success, const std::string& message, uint64_t playerId)> cb);
     void SetSendChunkCallback(std::function<void(uint64_t sessionId, const ChunkData&)> cb);
     void SetSendCollisionResponseCallback(std::function<void(uint64_t session_id, const CollisionResult& result)> cb);
-    void SetPlayerStateCallback(std::function<void(const PlayerStateData&)> cb);
+
+    void SetPlayerStateCallback(std::function<void(const PlayerStateData&)> cb); // now it also used for update
     void SetBroadcastPlayerPositionCallback(std::function<void(const PlayerPositionData&, float radius)> cb);
+    void SetSendPlayerUpdateCallback(std::function<void(uint64_t session_id, const PlayerUpdateData& data)> cb);
+    void SetSendPlayersUpdateCallback(std::function<void(uint64_t session_id, const PlayerUpdateData& data)> cb);
+
     void SetSendNPCInteractionResponseCallback(std::function<void(uint64_t session_id, const NpcData& response)> cb);
     void SetSendFamiliarCommandResponseCallback(std::function<void(uint64_t session_id, const FamiliarData& response)> cb);
     void SetSendEntitySpawnResponseCallback(std::function<void(uint64_t session_id, const EntitySpawnData& response)> cb);
@@ -95,6 +99,8 @@ public:
     void OnCollisionCheck(const CollisionData& data);
     void OnPlayerPosition(const PlayerPositionData& data);
     void OnPlayerState(const PlayerStateData& data);
+    void OnPlayerUpdate(const PlayerUpdateData& data);
+    void OnPlayersUpdate(const PlayerUpdateData& data);
     void OnNPCInteraction(const NpcData& data);
     void OnFamiliarCommand(const FamiliarData& data);
     void OnEntitySpawnRequest(const EntitySpawnData& data);
@@ -141,8 +147,12 @@ private:
     std::function<void(uint64_t, bool, const std::string&, uint64_t)> sendAuthResponseCb_;
     std::function<void(uint64_t, const ChunkData&)> sendChunkCb_;
     std::function<void(uint64_t, const CollisionResult&)> sendCollisionResponseCb_;
+
     std::function<void(const PlayerPositionData&, float)> broadcastPlayerPositionCb_;
     std::function<void(const PlayerStateData&)> playerStateCb_;
+    std::function<void(uint64_t, const PlayerUpdateData&)> sendPlayerUpdateCb_;
+    std::function<void(uint64_t, const PlayerUpdateData&)> sendPlayersUpdateCb_;
+
     std::function<void(uint64_t, const NpcData&)> sendNPCInteractionResponseCb_;
     std::function<void(uint64_t, const FamiliarData&)> sendFamiliarCommandResponseCb_;
     std::function<void(uint64_t, const EntitySpawnData&)> sendEntitySpawnResponseCb_;

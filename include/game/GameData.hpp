@@ -113,6 +113,17 @@ struct PlayerPositionData {
     glm::vec3 velocity;
 };
 
+struct PlayerUpdateData {
+    uint64_t timestamp;
+    uint64_t session_id;
+    uint64_t player_id;
+    glm::vec3 position;
+    float yaw;
+    float health;
+    float max_health;
+    std::string name;
+};
+
 struct ChunkData {
     uint64_t timestamp;
     uint64_t session_id;
