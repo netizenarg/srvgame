@@ -669,8 +669,8 @@ size_t ChunkCache::EstimateChunkSize(const WorldChunk& chunk) const {
     // Triangles: 3 uint32_t per triangle
     size += chunk.GetTriangles().size() * 3 * sizeof(uint32_t);
     
-    // Block data: CHUNK_SIZE^3 * sizeof(BlockType)
-    size += WorldChunk::CHUNK_SIZE * WorldChunk::CHUNK_SIZE * WorldChunk::CHUNK_SIZE * sizeof(int);
+    // Block data: CHUNK SIZE^3 * sizeof(BlockType)
+    size += WorldChunk::DEFAULT_SIZE * WorldChunk::DEFAULT_SIZE * WorldChunk::DEFAULT_SIZE * sizeof(int);
     
     return size;
 }

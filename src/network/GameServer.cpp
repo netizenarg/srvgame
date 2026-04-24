@@ -176,6 +176,9 @@ void GameServer::InitSessionFactory(int workerId, ProcessPool* processPool, Game
                         req.x = reader.ReadInt32();
                         req.z = reader.ReadInt32();
                         req.lod = reader.ReadUInt8();
+                        req.player_x = reader.ReadFloat();
+                        req.player_y = reader.ReadFloat();
+                        req.player_z = reader.ReadFloat();
                         req.session_id = session->GetSessionId();
                         game_logic.OnChunkRequest(req);
                         break;
@@ -303,6 +306,9 @@ void GameServer::InitSessionFactory(int workerId, ProcessPool* processPool, Game
                     req.x = msg.value("x", 0);
                     req.z = msg.value("z", 0);
                     req.lod = static_cast<uint8_t>(msg.value("lod", 0));
+                    req.player_x = msg.value("player_x", 0.0f);
+                    req.player_y = msg.value("player_y", 0.0f);
+                    req.player_z = msg.value("player_z", 0.0f);
                     req.session_id = session->GetSessionId();
                     game_logic.OnChunkRequest(req);
                 }

@@ -156,28 +156,39 @@ std::string WebSocketSession::GetRemoteAddress() const {
     }
 }
 
+void WebSocketSession::OnClose(uint16_t code, const std::string& reason) {
+    Logger::Info("WebSocketSession closed: code={}, reason={}", code, reason);
+    if (closeHandler_) {
+        closeHandler_();
+    }
+}
+
+void WebSocketSession::SetBinaryMessageHandler(BinaryMessageHandler handler) {
+    binary_handler_ = std::move(handler);
+}
+
+void WebSocketSession::SetDefaultBinaryMessageHandler(BinaryMessageHandler handler) {
+    default_binary_handler_ = std::move(handler);
+}
+
 void WebSocketSession::OnMessage(const WebSocketProtocol::WebSocketMessage& msg) {
     Logger::Trace("WebSocketSession {} received {} bytes, opcode: {}", sessionId_, msg.data.size(), (int)msg.opcode);
     if (msg.opcode == WebSocketProtocol::OP_TEXT) {
         std::string text = msg.GetText();
         Logger::Trace("WebSocketSession {} received TEXT: {}", sessionId_, text);
-        if (protocolMode_ == ProtocolMode::Binary) {
-            Logger::Warn("Session {} sent TEXT frame but negotiated BINARY – ignoring", sessionId_);
-            return;
-        }
         if (messageHandler_) {
             try {
                 auto json = nlohmann::json::parse(text);
                 Logger::Trace("WebSocketSession {} parsed JSON: {}", sessionId_, json.dump());
                 std::string msgType = json.value("msg", "");
                 if (msgType == "protocol_negotiation") {
-                    protocolMode_ = ProtocolMode::Json;
+                    protocolMode_ = ProtocolMode::Binary;
                     std::string protocol = json.value("protocol", "");
                     int version = json.value("version", 0);
                     Logger::Info("WebSocketSession {} client negotiated protocol: {} v{}", sessionId_, protocol, version);
                     nlohmann::json response = {
                         {"msg", "protocol_negotiation"},
-                        {"protocol", "websocket"},
+                        {"protocol", "binary"},
                         {"version", 1},
                         {"status", "ok"}
                     };
@@ -188,22 +199,14 @@ void WebSocketSession::OnMessage(const WebSocketProtocol::WebSocketMessage& msg)
             } catch (const std::exception& err) {
                 Logger::Error("WebSocketSession {} invalid JSON: {}", sessionId_, err.what());
             }
-        } else {
-            Logger::Error("WebSocketSession {} has no messageHandler_ set!", sessionId_);
         }
     }
     else if (msg.opcode == WebSocketProtocol::OP_BINARY) {
         Logger::Trace("WebSocketSession {} received BINARY ({} bytes)", sessionId_, msg.data.size());
-        if (protocolMode_ == ProtocolMode::Json) {
-            Logger::Warn("Session {} sent BINARY frame but negotiated JSON – ignoring", sessionId_);
-            return;
-        }
         try {
             auto binaryMsg = BinaryProtocol::BinaryMessage::Deserialize(msg.data.data(), msg.data.size());
-            Logger::Trace("WebSocketSession {} binary message type: {}", sessionId_, binaryMsg.header.message_type);
             if (binaryMsg.header.message_type == BinaryProtocol::MESSAGE_TYPE_PROTOCOL_NEGOTIATION) {
                 protocolMode_ = ProtocolMode::Binary;
-                Logger::Info("WebSocketSession {} switched to binary protocol mode", sessionId_);
                 auto caps = BinaryProtocol::ProtocolCapabilities::Deserialize(binaryMsg.data.data(), binaryMsg.data.size());
                 nlohmann::json response = {
                     {"msg", "protocol_negotiation"},
@@ -218,28 +221,9 @@ void WebSocketSession::OnMessage(const WebSocketProtocol::WebSocketMessage& msg)
                 binary_handler_(binaryMsg.header.message_type, binaryMsg.data);
             } else if (default_binary_handler_) {
                 default_binary_handler_(binaryMsg.header.message_type, binaryMsg.data);
-            } else {
-                Logger::Warn("WebSocketSession {}: no binary handler for message type {}",
-                             sessionId_, binaryMsg.header.message_type);
             }
         } catch (const std::exception& e) {
-            Logger::Error("WebSocketSession {}: failed to deserialize binary message: {}",
-                          sessionId_, e.what());
+            Logger::Error("WebSocketSession {}: failed to deserialize binary message: {}", sessionId_, e.what());
         }
     }
-}
-
-void WebSocketSession::OnClose(uint16_t code, const std::string& reason) {
-    Logger::Info("WebSocketSession closed: code={}, reason={}", code, reason);
-    if (closeHandler_) {
-        closeHandler_();
-    }
-}
-
-void WebSocketSession::SetBinaryMessageHandler(BinaryMessageHandler handler) {
-    binary_handler_ = std::move(handler);
-}
-
-void WebSocketSession::SetDefaultBinaryMessageHandler(BinaryMessageHandler handler) {
-    default_binary_handler_ = std::move(handler);
 }

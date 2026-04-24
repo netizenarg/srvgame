@@ -124,6 +124,27 @@ struct PlayerUpdateData {
     std::string name;
 };
 
+struct StoneData {
+    float x, y, z;
+    float trunkHeight;
+    float foliageRadius;
+    float rotationY;
+};
+
+struct TreeData {
+    float x, y, z;
+    float trunkHeight;
+    float foliageRadius;
+    float rotationY;
+};
+
+struct PortalData {
+    float x, y, z;
+    float rotationY;
+    float scale;
+    bool active = false;
+};
+
 struct ChunkData {
     uint64_t timestamp;
     uint64_t session_id;
@@ -132,6 +153,9 @@ struct ChunkData {
     uint8_t lod;
     int size;
     float spacing;
+    float player_x;
+    float player_y;
+    float player_z;
     std::vector<float> vertices;
     std::vector<uint32_t> indices;
 };

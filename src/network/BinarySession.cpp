@@ -310,53 +310,41 @@ void BinarySession::DoBinaryRead() {
 }
 
 void BinarySession::HandleBinaryMessage(const BinaryProtocol::BinaryMessage& message) {
-    // Update heartbeat on any valid message
     last_heartbeat_ = std::chrono::steady_clock::now();
-
-    // Record message for statistics
     RecordMessageReceived(message.data.size());
-
-    // Check rate limiting
     if (!CheckRateLimit()) {
         SendError(BinaryProtocol::MESSAGE_TYPE_ERROR, "Rate limit exceeded", 429);
         return;
     }
-
-    // Handle special message types
     switch (message.header.message_type) {
         case BinaryProtocol::MESSAGE_TYPE_HEARTBEAT:
-            // This is a ping, send pong
             Send(BinaryProtocol::MESSAGE_TYPE_HEARTBEAT, message.data);
             return;
-
         case BinaryProtocol::MESSAGE_TYPE_PROTOCOL_NEGOTIATION:
             HandleProtocolNegotiation(message.data);
             return;
-
         case BinaryProtocol::MESSAGE_TYPE_CHUNK_REQUEST: {
             BinaryProtocol::BinaryReader reader(message.data.data(), message.data.size());
             ChunkData req;
             req.x = reader.ReadInt32();
             req.z = reader.ReadInt32();
             req.lod = reader.ReadUInt8();
+            req.player_x = reader.ReadFloat();
+            req.player_y = reader.ReadFloat();
+            req.player_z = reader.ReadFloat();
             req.session_id = sessionId_;
             GameLogic::GetInstance().OnChunkRequest(req);
             break;
         }
-
         case BinaryProtocol::MESSAGE_TYPE_ERROR:
             Logger::Warn("Session {} received error from client", sessionId_);
             return;
-
         case BinaryProtocol::MESSAGE_TYPE_SUCCESS:
-            // Process success acknowledgment
             return;
     }
 
-    // Look for registered binary handler
     std::lock_guard<std::mutex> lock(binary_handlers_mutex_);
     auto it = binary_handlers_.find(message.header.message_type);
-
     if (it != binary_handlers_.end()) {
         try {
             it->second(message.header.message_type, message.data);
