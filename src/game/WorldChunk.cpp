@@ -200,17 +200,55 @@ bool WorldChunk::IsPositionInside(const glm::vec3& position) const {
            position.z >= chunkPos.z && position.z < chunkPos.z + CHUNK_WIDTH;
 }
 
-nlohmann::json WorldChunk::Serialize() const {
-    nlohmann::json data;
+void WorldChunk::SerializeToWriter(BinaryProtocol::BinaryWriter& writer) const
+{
+    writer.WriteInt32(chunkX_);
+    writer.WriteInt32(chunkZ_);
+    std::vector<float> vertexFloats;
+    vertexFloats.reserve(vertices_.size() * 6);
+    for (const auto& v : vertices_)
+    {
+        vertexFloats.push_back(v.position.x);
+        vertexFloats.push_back(v.position.y);
+        vertexFloats.push_back(v.position.z);
+        vertexFloats.push_back(v.normal.x);
+        vertexFloats.push_back(v.normal.y);
+        vertexFloats.push_back(v.normal.z);
+    }
+    uint32_t vertexDataSize = static_cast<uint32_t>(vertexFloats.size() * sizeof(float));
+    writer.WriteUInt32(vertexDataSize);
+    writer.WriteBytes(reinterpret_cast<const uint8_t*>(vertexFloats.data()), vertexDataSize);
+    std::vector<uint32_t> indexInts;
+    indexInts.reserve(triangles_.size() * 3);
+    for (const auto& tri : triangles_)
+    {
+        indexInts.push_back(tri.v0);
+        indexInts.push_back(tri.v1);
+        indexInts.push_back(tri.v2);
+    }
+    uint32_t indexDataSize = static_cast<uint32_t>(indexInts.size() * sizeof(uint32_t));
+    writer.WriteUInt32(indexDataSize);
+    writer.WriteBytes(reinterpret_cast<const uint8_t*>(indexInts.data()), indexDataSize);
+    writer.WriteUInt32(0);
+}
 
+std::vector<uint8_t> WorldChunk::SerializeBinary() const
+{
+    BinaryProtocol::BinaryWriter writer;
+    SerializeToWriter(writer);
+    return writer.GetBuffer();
+}
+
+nlohmann::json WorldChunk::SerializeJson() const
+{
+    nlohmann::json data;
     data["chunkX"] = chunkX_;
     data["chunkZ"] = chunkZ_;
     data["lod"] = static_cast<int>(lod_);
     data["biome"] = static_cast<int>(biome_);
-
-    // Serialize vertices (position + normal as flat float array)
     nlohmann::json verticesArray = nlohmann::json::array();
-    for (const auto& v : vertices_) {
+    for (const auto& v : vertices_)
+    {
         verticesArray.push_back(v.position.x);
         verticesArray.push_back(v.position.y);
         verticesArray.push_back(v.position.z);
@@ -219,16 +257,16 @@ nlohmann::json WorldChunk::Serialize() const {
         verticesArray.push_back(v.normal.z);
     }
     data["vertices"] = verticesArray;
-
-    // Serialize indices (using v0, v1, v2)
     nlohmann::json indicesArray = nlohmann::json::array();
-    for (const auto& tri : triangles_) {
+    for (const auto& tri : triangles_)
+    {
         indicesArray.push_back(tri.v0);
         indicesArray.push_back(tri.v1);
         indicesArray.push_back(tri.v2);
     }
     data["indices"] = indicesArray;
-
+    std::vector<uint8_t> binaryData = SerializeBinary();
+    data["binary_data"] = binaryData;
     return data;
 }
 

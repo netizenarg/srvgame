@@ -336,8 +336,8 @@ void BinarySession::HandleBinaryMessage(const BinaryProtocol::BinaryMessage& mes
         case BinaryProtocol::MESSAGE_TYPE_CHUNK_REQUEST: {
             BinaryProtocol::BinaryReader reader(message.data.data(), message.data.size());
             ChunkData req;
-            req.chunk_x = reader.ReadInt32();
-            req.chunk_z = reader.ReadInt32();
+            req.x = reader.ReadInt32();
+            req.z = reader.ReadInt32();
             req.lod = reader.ReadUInt8();
             req.session_id = sessionId_;
             GameLogic::GetInstance().OnChunkRequest(req);

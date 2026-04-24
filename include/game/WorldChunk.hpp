@@ -9,6 +9,8 @@
 #include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
 
+#include "network/BinaryProtocol.hpp"
+
 struct LODConfig;
 class LODChunk;
 
@@ -61,9 +63,10 @@ struct Triangle {
 
 class WorldChunk {
 public:
-    static const int CHUNK_SIZE = 16;  // 16x16 blocks
+    static const int CHUNK_SIZE = 32;  // 32x32 blocks
     static const float BLOCK_SIZE;
     static const float CHUNK_WIDTH;
+    static constexpr float DEFAULT_SPACING = 1.0f;
 
     WorldChunk(int x, int z, ChunkLOD lod = ChunkLOD::HIGH);
     virtual ~WorldChunk() = default;
@@ -97,7 +100,9 @@ public:
     bool HasEntities() const { return !entities_.empty(); }
 
     // Serialization
-    virtual nlohmann::json Serialize() const;
+    void SerializeToWriter(BinaryProtocol::BinaryWriter& writer) const;
+    std::vector<uint8_t> SerializeBinary() const;
+    nlohmann::json SerializeJson() const;
     virtual void Deserialize(const nlohmann::json& data);
     virtual nlohmann::json SerializeHeightmap() const;
 

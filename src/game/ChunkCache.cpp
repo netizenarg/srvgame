@@ -959,10 +959,8 @@ std::vector<uint8_t> ChunkCache::DecompressData(const std::vector<uint8_t>& comp
 }
 
 std::vector<uint8_t> ChunkCache::SerializeChunk(const WorldChunk& chunk) const {
-    // Simple serialization to JSON then to binary
-    nlohmann::json json_data = chunk.Serialize();
+    nlohmann::json json_data = chunk.SerializeJson();
     std::string json_str = json_data.dump();
-    
     std::vector<uint8_t> data(json_str.begin(), json_str.end());
     return data;
 }

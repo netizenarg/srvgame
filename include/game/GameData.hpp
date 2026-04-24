@@ -127,10 +127,13 @@ struct PlayerUpdateData {
 struct ChunkData {
     uint64_t timestamp;
     uint64_t session_id;
-    int chunk_x;
-    int chunk_z;
+    int x;
+    int z;
     uint8_t lod;
-    nlohmann::json chunk_json;
+    int size;
+    float spacing;
+    std::vector<float> vertices;
+    std::vector<uint32_t> indices;
 };
 
 struct CollisionData {
@@ -157,7 +160,6 @@ struct FamiliarData {
     uint64_t session_id;
     uint64_t familiar_id;
     uint64_t target_id;
-    bool success;
     std::string command;
 };
 

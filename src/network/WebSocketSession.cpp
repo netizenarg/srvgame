@@ -156,7 +156,6 @@ std::string WebSocketSession::GetRemoteAddress() const {
     }
 }
 
-
 void WebSocketSession::OnMessage(const WebSocketProtocol::WebSocketMessage& msg) {
     Logger::Trace("WebSocketSession {} received {} bytes, opcode: {}", sessionId_, msg.data.size(), (int)msg.opcode);
     if (msg.opcode == WebSocketProtocol::OP_TEXT) {
@@ -166,29 +165,28 @@ void WebSocketSession::OnMessage(const WebSocketProtocol::WebSocketMessage& msg)
             Logger::Warn("Session {} sent TEXT frame but negotiated BINARY – ignoring", sessionId_);
             return;
         }
-        protocolMode_ = ProtocolMode::Json;
         if (messageHandler_) {
             try {
                 auto json = nlohmann::json::parse(text);
                 Logger::Trace("WebSocketSession {} parsed JSON: {}", sessionId_, json.dump());
-                messageHandler_(json);
-                if (json.value("type", "") == "protocol_negotiation" &&
-                    json.value("protocol", "") == "websocket") {
+                std::string msgType = json.value("msg", "");
+                if (msgType == "protocol_negotiation") {
                     protocolMode_ = ProtocolMode::Json;
-                    Logger::Trace("WebSocketSession {} switched to JSON protocol mode", sessionId_);
+                    std::string protocol = json.value("protocol", "");
+                    int version = json.value("version", 0);
+                    Logger::Info("WebSocketSession {} client negotiated protocol: {} v{}", sessionId_, protocol, version);
+                    nlohmann::json response = {
+                        {"msg", "protocol_negotiation"},
+                        {"protocol", "websocket"},
+                        {"version", 1},
+                        {"status", "ok"}
+                    };
+                    wsConn_->SendJson(response);
                     return;
                 }
-                else if (json.value("type", "") == "get_chunk") {
-                    ChunkData req;
-                    nlohmann::json data = msg.ToJson();
-                    req.chunk_x = data.value("x", 0);
-                    req.chunk_z = data.value("z", 0);
-                    req.lod = data.value("lod", 0);
-                    req.session_id = sessionId_;
-                    GameLogic::GetInstance().OnChunkRequest(req);
-                }
+                messageHandler_(json);
             } catch (const std::exception& err) {
-                Logger::Error("WebSocketSession {} invalid: {}", sessionId_, err.what());
+                Logger::Error("WebSocketSession {} invalid JSON: {}", sessionId_, err.what());
             }
         } else {
             Logger::Error("WebSocketSession {} has no messageHandler_ set!", sessionId_);
@@ -200,10 +198,22 @@ void WebSocketSession::OnMessage(const WebSocketProtocol::WebSocketMessage& msg)
             Logger::Warn("Session {} sent BINARY frame but negotiated JSON – ignoring", sessionId_);
             return;
         }
-        protocolMode_ = ProtocolMode::Binary;
         try {
             auto binaryMsg = BinaryProtocol::BinaryMessage::Deserialize(msg.data.data(), msg.data.size());
             Logger::Trace("WebSocketSession {} binary message type: {}", sessionId_, binaryMsg.header.message_type);
+            if (binaryMsg.header.message_type == BinaryProtocol::MESSAGE_TYPE_PROTOCOL_NEGOTIATION) {
+                protocolMode_ = ProtocolMode::Binary;
+                Logger::Info("WebSocketSession {} switched to binary protocol mode", sessionId_);
+                auto caps = BinaryProtocol::ProtocolCapabilities::Deserialize(binaryMsg.data.data(), binaryMsg.data.size());
+                nlohmann::json response = {
+                    {"msg", "protocol_negotiation"},
+                    {"protocol", "binary"},
+                    {"version", caps.version},
+                    {"status", "ok"}
+                };
+                wsConn_->SendJson(response);
+                return;
+            }
             if (binary_handler_) {
                 binary_handler_(binaryMsg.header.message_type, binaryMsg.data);
             } else if (default_binary_handler_) {

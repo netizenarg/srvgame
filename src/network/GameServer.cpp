@@ -173,8 +173,8 @@ void GameServer::InitSessionFactory(int workerId, ProcessPool* processPool, Game
                     case BinaryProtocol::MESSAGE_TYPE_CHUNK_REQUEST: {
                         BinaryProtocol::BinaryReader reader(data.data(), data.size());
                         ChunkData req;
-                        req.chunk_x = reader.ReadInt32();
-                        req.chunk_z = reader.ReadInt32();
+                        req.x = reader.ReadInt32();
+                        req.z = reader.ReadInt32();
                         req.lod = reader.ReadUInt8();
                         req.session_id = session->GetSessionId();
                         game_logic.OnChunkRequest(req);
@@ -288,7 +288,10 @@ void GameServer::InitSessionFactory(int workerId, ProcessPool* processPool, Game
             session->SetMessageHandler([session, workerId, processPool, &game_logic]
             (const nlohmann::json& msg) mutable{
                 std::string msgType = msg.value("msg", "");
-                if (msgType == "authentication") {
+                if (msgType == "protocol_negotiation") {
+                    return;
+                }
+                else if (msgType == "authentication") {
                     AuthenticationData authData;
                     authData.username = msg.value("login", "");
                     authData.password = msg.value("password", "");
@@ -297,8 +300,8 @@ void GameServer::InitSessionFactory(int workerId, ProcessPool* processPool, Game
                 }
                 else if (msgType == "get_chunk") {
                     ChunkData req;
-                    req.chunk_x = msg.value("x", 0);
-                    req.chunk_z = msg.value("z", 0);
+                    req.x = msg.value("x", 0);
+                    req.z = msg.value("z", 0);
                     req.lod = static_cast<uint8_t>(msg.value("lod", 0));
                     req.session_id = session->GetSessionId();
                     game_logic.OnChunkRequest(req);
@@ -482,10 +485,13 @@ std::vector<std::shared_ptr<IConnection>> GameServer::GetSessionsInRadius(const 
 }
 
 void GameServer::RegisterCallbacks(const std::string& protocol, GameLogic& game_logic) {
+    // ATTENTION
+    // In any case, the client checks the response values.
+    // Which means the client himself determines success or failure.
+    // Most answers don't need an overloaded, useless "success" flag.
     if (protocol == "binary") {
-        game_logic.SetSendAuthenticationResponseCallback([&](uint64_t session_id, bool success, const std::string& message, uint64_t player_id) {
+        game_logic.SetSendAuthenticationResponseCallback([&](uint64_t session_id, const std::string& message, uint64_t player_id) {
             BinaryProtocol::BinaryWriter writer;
-            writer.WriteUInt8(success ? 1 : 0);
             writer.WriteUInt64(player_id);
             writer.WriteString(message);
             auto session = ConnectionManager::GetInstance().GetSession(session_id);
@@ -495,11 +501,16 @@ void GameServer::RegisterCallbacks(const std::string& protocol, GameLogic& game_
         });
         game_logic.SetSendChunkCallback([&](uint64_t session_id, const ChunkData& data) {
             BinaryProtocol::BinaryWriter writer;
-            writer.WriteInt32(data.chunk_x);
-            writer.WriteInt32(data.chunk_z);
-            writer.WriteUInt8(data.lod);
-            writer.WriteJson(data.chunk_json);
-            writer.WriteUInt64(data.timestamp);
+            writer.WriteInt32(data.x);
+            writer.WriteInt32(data.z);
+            writer.WriteInt32(data.size);
+            uint32_t vertexDataSize = static_cast<uint32_t>(data.vertices.size() * sizeof(float));
+            writer.WriteUInt32(vertexDataSize);
+            writer.WriteBytes(reinterpret_cast<const uint8_t*>(data.vertices.data()), vertexDataSize);
+            uint32_t indexDataSize = static_cast<uint32_t>(data.indices.size() * sizeof(uint32_t));
+            writer.WriteUInt32(indexDataSize);
+            writer.WriteBytes(reinterpret_cast<const uint8_t*>(data.indices.data()), indexDataSize);
+            writer.WriteUInt32(0);
             auto session = ConnectionManager::GetInstance().GetSession(session_id);
             if (session) {
                 session->Send(BinaryProtocol::MESSAGE_TYPE_CHUNK_DATA, writer.GetBuffer());
@@ -508,7 +519,7 @@ void GameServer::RegisterCallbacks(const std::string& protocol, GameLogic& game_
         game_logic.SetSendCollisionResponseCallback([&](uint64_t session_id, const CollisionResult& result) {
             BinaryProtocol::BinaryWriter writer;
             writer.WriteUInt8(result.collided ? 1 : 0);
-            writer.WriteUInt64(result.collidedWith);
+            writer.WriteUInt64(result.collided_id);
             writer.WriteFloat(result.penetration);
             writer.WriteVector3(result.resolution);
             writer.WriteUInt64(game_logic.GetCurrentTimestamp());
@@ -600,7 +611,6 @@ void GameServer::RegisterCallbacks(const std::string& protocol, GameLogic& game_
             writer.WriteUInt64(response.familiar_id);
             writer.WriteUInt64(response.target_id);
             writer.WriteString(response.command);
-            writer.WriteUInt8(response.success ? 1 : 0);
             auto session = ConnectionManager::GetInstance().GetSession(session_id);
             if (session) session->Send(BinaryProtocol::MESSAGE_TYPE_FAMILIAR_COMMAND, writer.GetBuffer());
         });
@@ -641,12 +651,11 @@ void GameServer::RegisterCallbacks(const std::string& protocol, GameLogic& game_
         });
         //TODO: add all game_logic
     } else { // websocket
-        game_logic.SetSendAuthenticationResponseCallback([&](uint64_t session_id, bool success, const std::string& message, uint64_t player_id) {
+        game_logic.SetSendAuthenticationResponseCallback([&](uint64_t session_id, const std::string& message, uint64_t player_id) {
             nlohmann::json response = {
-                {"msg", "authentication_response"},
-                {"success", success},
-                {"message", message},
-                {"player_id", player_id},
+                {"msg", "authentication"},
+                {"desc", message},
+                {"player_id", player_id},// if value > 0 then success, has no more duplicate success fields
                 {"timestamp", game_logic.GetCurrentTimestamp()}
             };
             auto session = ConnectionManager::GetInstance().GetSession(session_id);
@@ -657,10 +666,13 @@ void GameServer::RegisterCallbacks(const std::string& protocol, GameLogic& game_
         game_logic.SetSendChunkCallback([&](uint64_t session_id, const ChunkData& data) {
             nlohmann::json msg = {
                 {"msg", "get_chunk"},
-                {"x", data.chunk_x},
-                {"z", data.chunk_z},
+                {"x", data.x},
+                {"z", data.z},
                 {"lod", data.lod},
-                {"data", data.chunk_json},
+                {"size", data.size},
+                {"spacing", data.spacing},
+                {"vertices", data.vertices},
+                {"indices", data.indices},
                 {"timestamp", data.timestamp}
             };
             auto session = ConnectionManager::GetInstance().GetSession(session_id);
@@ -672,7 +684,7 @@ void GameServer::RegisterCallbacks(const std::string& protocol, GameLogic& game_
             nlohmann::json response = {
                 {"msg", "collision"},
                 {"collided", result.collided},
-                {"collidedWith", result.collidedWith},
+                {"collided_id", result.collided_id},
                 {"penetration", result.penetration},
                 {"resolution", {result.resolution.x, result.resolution.y, result.resolution.z}},
                 {"timestamp", game_logic.GetCurrentTimestamp()}
@@ -758,7 +770,6 @@ void GameServer::RegisterCallbacks(const std::string& protocol, GameLogic& game_
                 {"familiar_id", response.familiar_id},
                 {"target_id", response.target_id},
                 {"command", response.command},
-                {"success", response.success},
                 {"timestamp", response.timestamp}
             };
             auto session = ConnectionManager::GetInstance().GetSession(session_id);

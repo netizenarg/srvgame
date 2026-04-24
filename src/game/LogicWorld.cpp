@@ -159,7 +159,7 @@ void LogicWorld::SaveChunkData() {
     }
     for (const auto& [key, chunk] : loadedChunks_) {
         try {
-            nlohmann::json chunkData = chunk->Serialize();
+            nlohmann::json chunkData = chunk->SerializeJson();
             backend->SaveChunkData(chunk->GetChunkX(), chunk->GetChunkZ(), chunkData);
         } catch (const std::exception& e) {
             Logger::Error("Failed to save chunk [{}, {}]: {}",
