@@ -16,7 +16,7 @@
 
 #include "logging/Logger.hpp"
 #include "config/ConfigManager.hpp"
-//#include "database/DbManager.hpp"
+#include "utils/Passwords.hpp"
 
 #include "game/GameEntity.hpp"
 #include "game/InventorySystem.hpp"
@@ -152,13 +152,15 @@ struct PlayerSettings {
 
 class Player : public GameEntity {
 public:
-    Player(uint64_t id, const std::string& username);
+    Player(uint64_t id, const std::string& username, const std::string& password="");
     Player(const glm::vec3& position);
     Player(const glm::vec3& position, PlayerClass player_class, PlayerRace race);
     virtual ~Player();
 
-    uint64_t GetId() const { return id_; }
-    const std::string& GetUsername() const { return username_; }
+    uint64_t GetId() const;
+    const std::string& GetUsername() const;
+    void SetPlayerClass(PlayerClass player_class);
+    PlayerClass GetPlayerClass() const;
 
     void UpdatePosition(float x, float y, float z);
     void UpdateHeartbeat();
@@ -166,39 +168,35 @@ public:
     void ApplyDamage(int damage, uint64_t attackerId);
     void ApplyHealing(int amount, uint64_t healerId);
 
-    // Player-specific properties
-    void SetPlayerClass(PlayerClass player_class) { player_class_ = player_class; }
-    PlayerClass GetPlayerClass() const { return player_class_; }
+    void SetPlayerRace(PlayerRace race);
+    PlayerRace GetPlayerRace() const;
 
-    void SetPlayerRace(PlayerRace race) { race_ = race; }
-    PlayerRace GetPlayerRace() const { return race_; }
-
-    void SetStatus(PlayerStatus status) { status_ = status; }
-    PlayerStatus GetStatus() const { return status_; }
+    void SetStatus(PlayerStatus status);
+    PlayerStatus GetStatus() const;
 
     // Player stats management
     void SetHealth(int health);
     void SetMaxHealth(int max_health);
-    int GetHealth() const { return stats_.health; }
-    int GetMaxHealth() const { return stats_.max_health; }
+    int GetHealth() const;
+    int GetMaxHealth() const;
 
     void SetMana(int mana);
     void SetMaxMana(int max_mana);
-    int GetMana() const { return stats_.mana; }
-    int GetMaxMana() const { return stats_.max_mana; }
-    float GetAttackDamage() const { return stats_.attack_damage; }
-    float GetAttackRange() const { return stats_.attack_range; }
+    int GetMana() const;
+    int GetMaxMana() const;
+    float GetAttackDamage() const;
+    float GetAttackRange() const;
 
     void SetLevel(int level);
-    int GetLevel() const { return stats_.level; }
+    int GetLevel() const;
 
     void AddExperience(int64_t amount);
     void LoseExperience(int64_t amount);
-    int64_t GetExperience() const { return stats_.experience; }
-    int64_t GetExperienceToNextLevel() const { return stats_.experience_to_next_level; }
+    int64_t GetExperience() const;
+    int64_t GetExperienceToNextLevel() const;
 
     // Attributes management
-    const PlayerAttributes& GetAttributes() const { return attributes_; }
+    const PlayerAttributes& GetAttributes() const;
     void SetAttribute(const std::string& attribute_name, float value);
     float GetAttribute(const std::string& attribute_name) const;
     void UpdateDerivedStats();
@@ -207,7 +205,7 @@ public:
     bool EquipItem(const std::string& item_id, const std::string& slot);
     bool UnequipItem(const std::string& slot);
     std::string GetEquippedItem(const std::string& slot) const;
-    const PlayerEquipment& GetEquipment() const { return equipment_; }
+    const PlayerEquipment& GetEquipment() const;
 
     // Inventory management
     void AddItem(const std::string& item_id, int count = 1);
@@ -218,11 +216,11 @@ public:
     // Currency management
     void AddGold(int64_t amount);
     void RemoveGold(int64_t amount);
-    int64_t GetGold() const { return stats_.currency_gold; }
+    int64_t GetGold() const;
 
     void AddGems(int64_t amount);
     void RemoveGems(int64_t amount);
-    int64_t GetGems() const { return stats_.currency_gems; }
+    int64_t GetGems() const;
 
     // Skills and abilities
     void LearnSkill(const std::string& skill_id, int level = 1);
@@ -275,32 +273,32 @@ public:
     void UnblockPlayer(uint64_t player_id);
 
     // Player systems access
-    InventorySystem& GetInventorySystem() const { return inventory_system_; }
-    SkillSystem& GetSkillSystem() const { return skill_system_; }
-    QuestManager& GetQuestManager() const { return quest_manager_; }
+    InventorySystem& GetInventorySystem() const;
+    SkillSystem& GetSkillSystem() const;
+    QuestManager& GetQuestManager() const;
 
     // Utility methods
-    bool IsAlive() const { return stats_.health > 0; }
-    bool IsDead() const { return stats_.health <= 0; }
-    bool IsInCombat() const { return status_ == PlayerStatus::COMBAT; }
-    bool IsCasting() const { return status_ == PlayerStatus::CASTING; }
-    bool IsMoving() const { return status_ == PlayerStatus::MOVING; }
+    bool IsAlive() const;
+    bool IsDead() const;
+    bool IsInCombat() const;
+    bool IsCasting() const;
+    bool IsMoving() const;
     std::string GetClassString(PlayerClass player_class) const;
     std::string GetRaceString(PlayerRace race) const;
 
-    float GetAttackPower() const { return attributes_.attack_power; }
-    float GetDefense() const { return attributes_.defense; }
-    float GetCriticalChance() const { return attributes_.critical_chance; }
-    float GetMoveSpeed() const { return attributes_.move_speed; }
+    float GetAttackPower() const;
+    float GetDefense() const;
+    float GetCriticalChance() const;
+    float GetMoveSpeed() const;
 
     // Player achievements
     void AddAchievement(const std::string& achievement_id);
     bool HasAchievement(const std::string& achievement_id) const;
-    int GetAchievementCount() const { return achievements_.size(); }
+    int GetAchievementCount() const;
 
     // Player titles and cosmetics
     void SetTitle(const std::string& title);
-    std::string GetTitle() const { return title_; }
+    const std::string& GetTitle() const;
 
     void SetCosmetic(const std::string& slot, const std::string& cosmetic_id);
     std::string GetCosmetic(const std::string& slot) const;
@@ -310,18 +308,18 @@ public:
     void SetOnline(bool online);
 
     // Player session
-    void SetSessionId(uint64_t session_id) { session_id_ = session_id; }
-    uint64_t GetSessionId() const { return session_id_; }
-    void SetConnectionQuality(float quality) { connection_quality_ = quality; }
-    float GetConnectionQuality() const { return connection_quality_; }
-    bool IsOnline() const { return online_; }
+    void SetSessionId(uint64_t session_id);
+    uint64_t GetSessionId() const;
+    void SetConnectionQuality(float quality);
+    float GetConnectionQuality() const;
+    bool IsOnline() const;
 
-    void SetBanned(bool banned) { banned_ = banned; }
-    bool IsBanned() const { return banned_; }
-    void SetBanReason(const std::string& reason) { ban_reason_ = reason; }
-    const std::string& GetBanReason() const { return ban_reason_; }
-    void SetBanExpires(std::chrono::system_clock::time_point expires) { ban_expires_ = expires; };
-    std::chrono::system_clock::time_point GetBanExpires() const { return ban_expires_; }
+    void SetBanned(bool banned);
+    bool IsBanned() const;
+    void SetBanReason(const std::string& reason);
+    const std::string& GetBanReason() const;
+    void SetBanExpires(std::chrono::system_clock::time_point expires);
+    std::chrono::system_clock::time_point GetBanExpires() const;
 
     // Serialization
     virtual nlohmann::json Serialize() const override;
@@ -330,12 +328,13 @@ public:
     nlohmann::json ToJson() const;
 
     // =============== Movement state getters/setters ===============
-    bool IsOnGround() const { return onGround_; }
-    void SetOnGround(bool g) { onGround_ = g; }
+    bool IsOnGround() const;
+    void SetOnGround(bool g);
 
 private:
     uint64_t id_;
     std::string username_;
+    std::string password_hash_;
 
     bool onGround_{true};
 

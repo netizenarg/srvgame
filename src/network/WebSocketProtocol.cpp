@@ -384,8 +384,6 @@ std::string HandshakeResponse::GetHeader(const std::string& name) const {
     return "";
 }
 
-// =============== WebSocketConnection Implementation ===============
-
 std::atomic<uint64_t> WebSocketConnection::next_connection_id_{1};
 
 WebSocketConnection::WebSocketConnection(asio::ip::tcp::socket socket)
@@ -402,7 +400,6 @@ void WebSocketConnection::Start() {
     if (state_ != State::HANDSHAKE) {
         return;
     }
-
     HandleHandshake();
 }
 
@@ -412,27 +409,20 @@ void WebSocketConnection::HandleHandshake() {
 
 void WebSocketConnection::ReadHandshake() {
     auto self = shared_from_this();
-
     asio::async_read_until(socket_, read_buffer_, "\r\n\r\n",
-        [self](std::error_code ec, size_t bytes_transferred) {
-            Logger::Debug("WebSocketConnection::ReadHandshake asio::async_read_until {}", bytes_transferred);
+        [self](std::error_code ec, size_t /*bytes_transferred*/) {
+            //Logger::Debug("WebSocketConnection::ReadHandshake asio::async_read_until {}", bytes_transferred);
             if (ec) {
                 self->HandleError(ec);
                 return;
             }
-
-            // Extract handshake request
             std::istream stream(&self->read_buffer_);
             std::string request_str;
             std::getline(stream, request_str, '\0');
-
             try {
                 HandshakeRequest request = HandshakeRequest::Parse(request_str);
-
-                // Generate and send response
                 HandshakeResponse response = HandshakeResponse::GenerateResponse(request);
                 self->WriteHandshakeResponse(response);
-
             } catch (const std::exception& e) {
                 Logger::Error("WebSocket handshake error: {}", e.what());
                 self->Close(1002, "Protocol error");
@@ -443,20 +433,15 @@ void WebSocketConnection::ReadHandshake() {
 void WebSocketConnection::WriteHandshakeResponse(const HandshakeResponse& response) {
     auto self = shared_from_this();
     std::string response_str = response.Serialize();
-
     asio::async_write(socket_, asio::buffer(response_str),
-        [self](std::error_code ec, size_t bytes_transferred) {
-            Logger::Debug("WebSocketConnection::WriteHandshakeResponse asio::async_write {}", bytes_transferred);
+        [self](std::error_code ec, size_t /*bytes_transferred*/) {
+            //Logger::Debug("WebSocketConnection::WriteHandshakeResponse asio::async_write {}", bytes_transferred);
             if (ec) {
                 self->HandleError(ec);
                 return;
             }
-
-            // Handshake complete, switch to OPEN state
             self->state_ = State::OPEN;
             Logger::Info("WebSocketConnection {} handshake complete", self->connection_id_);
-
-            // Start reading frames
             self->ReadFrame();
         });
 }
@@ -465,89 +450,97 @@ void WebSocketConnection::ReadFrame() {
     if (state_ != State::OPEN && state_ != State::CLOSING) {
         return;
     }
-
     auto self = shared_from_this();
-
-    // Read frame header (minimum 2 bytes)
+    Logger::Trace("WebSocketConnection {} ReadFrame: starting async_read (2 bytes)", connection_id_);
     asio::async_read(socket_, read_buffer_, asio::transfer_exactly(2),
-        [self](std::error_code ec, size_t bytes_transferred) {
-            Logger::Debug("WebSocketConnection::ReadFrame asio::async_read {}", bytes_transferred);
-            if (ec) {
-                self->HandleError(ec);
+    [self](std::error_code ec, size_t bytes) {
+        Logger::Trace("WebSocketConnection {} ReadFrame completion: ec={}, bytes={}", self->connection_id_, ec.message(), bytes);
+        if (ec) {
+            if (ec == asio::error::operation_aborted) {
+                Logger::Trace("WebSocketConnection {} read aborted", self->connection_id_);
                 return;
             }
-
-            // Parse basic header
-            auto buffers = self->read_buffer_.data();
-            auto it = asio::buffers_begin(buffers);
-
-            // Check we have at least 2 bytes
-            if (std::distance(it, asio::buffers_end(buffers)) < 2) {
-                Logger::Error("Insufficient data for frame header");
-                throw std::runtime_error("Insufficient data for frame header");
-            }
-
-            uint8_t first_byte = *it;
-            uint8_t second_byte = *(++it);
-
-            bool fin = (first_byte & 0x80) != 0;
-            uint8_t opcode = first_byte & 0x0F;
-            bool masked = (second_byte & 0x80) != 0;
-            uint64_t payload_length = second_byte & 0x7F;
-
-            size_t header_size = 2;
-
-            // Determine extended payload length
-            if (payload_length == 126) {
-                header_size += 2;
-            } else if (payload_length == 127) {
-                header_size += 8;
-            }
-
-            // Add masking key size if present
-            if (masked) {
-                header_size += 4;
-            }
-
-            // Read remaining header bytes
-            if (header_size > 2) {
-                self->read_buffer_.consume(2); // Remove the 2 bytes we already read
-
-                asio::async_read(self->socket_, self->read_buffer_,
-                    asio::transfer_exactly(header_size - 2),
-                    [self, fin, opcode, masked, payload_length, header_size]
-                    (std::error_code ec, size_t bytes_transferred) {
-                        Logger::Debug("WebSocketConnection::ReadFrame asio::async_read {}", bytes_transferred);
-                        if (ec) {
-                            self->HandleError(ec);
+            self->HandleError(ec);
+            return;
+        }
+        if (self->state_ == State::CLOSED || self->state_ == State::CLOSING) {
+            return;
+        }
+        auto buffers = self->read_buffer_.data();
+        auto it = asio::buffers_begin(buffers);
+        if (std::distance(it, asio::buffers_end(buffers)) < 2) {
+            Logger::Error("Insufficient data for frame header");
+            self->Close(1002, "Protocol error");
+            return;
+        }
+        uint8_t first_byte = *it;
+        uint8_t second_byte = *(++it);
+        bool fin = (first_byte & 0x80) != 0;
+        uint8_t opcode = first_byte & 0x0F;
+        bool masked = (second_byte & 0x80) != 0;
+        uint64_t payload_length = second_byte & 0x7F;
+        size_t header_size = 2;
+        if (payload_length == 126) {
+            header_size += 2;
+        } else if (payload_length == 127) {
+            header_size += 8;
+        }
+        if (masked) {
+            header_size += 4;
+        }
+        if (header_size > 2) {
+            self->read_buffer_.consume(2);
+            asio::async_read(self->socket_, self->read_buffer_,
+                asio::transfer_exactly(header_size - 2),
+                [self, fin, opcode, masked, payload_length, header_size]
+                (std::error_code ec, size_t bytes) {
+                    Logger::Trace("WebSocketConnection {} ReadFrame completion: ec={}, bytes={}", self->connection_id_, ec.message(), bytes);
+                    if (ec) {
+                        if (ec == asio::error::operation_aborted) {
                             return;
                         }
-                        self->ReadFramePayload(fin, opcode, masked, payload_length, header_size);
-                    });
-            } else {
-                self->ReadFramePayload(fin, opcode, masked, payload_length, header_size);
+                        self->HandleError(ec);
+                        return;
+                    }
+                    if (self->state_ == State::CLOSED || self->state_ == State::CLOSING) {
+                        return;
+                    }
+                    self->ReadFramePayload(fin, opcode, masked, payload_length, header_size);
+                });
+        } else {
+            if (self->state_ == State::CLOSED || self->state_ == State::CLOSING) {
+                return;
             }
-        });
+            self->ReadFramePayload(fin, opcode, masked, payload_length, header_size);
+        }
+    });
 }
 
 void WebSocketConnection::ReadFramePayload(bool fin, uint8_t opcode, bool masked,
                                           uint64_t payload_length, size_t header_size) {
     auto self = shared_from_this();
-
-    // Read payload if present
+    Logger::Trace("WebSocketConnection {} ReadFramePayload: starting async_read", connection_id_);
     if (payload_length > 0) {
         asio::async_read(socket_, read_buffer_, asio::transfer_exactly(payload_length),
             [self, fin, opcode, masked, payload_length, header_size]
-            (std::error_code ec, size_t bytes_transferred) {
-                Logger::Debug("WebSocketConnection::ReadFramePayload asio::async_read {}", bytes_transferred);
+            (std::error_code ec, size_t bytes) {
+                Logger::Trace("WebSocketConnection {} ReadFramePayload completion: ec={}, bytes={}", self->connection_id_, ec.message(), bytes);
                 if (ec) {
+                    if (ec == asio::error::operation_aborted) {
+                        return;
+                    }
                     self->HandleError(ec);
                     return;
                 }
-
+                if (self->state_ == State::CLOSED || self->state_ == State::CLOSING) {
+                    return;
+                }
                 self->ProcessFrameData(fin, opcode, masked, payload_length, header_size);
             });
     } else {
+        if (state_ == State::CLOSED || state_ == State::CLOSING) {
+            return;
+        }
         ProcessFrameData(fin, opcode, masked, payload_length, header_size);
     }
 }
@@ -557,31 +550,25 @@ void WebSocketConnection::ProcessFrameData(bool fin, uint8_t opcode, bool masked
     (void)fin;
     (void)opcode;
     (void)masked;
-    // Allocate destination buffer
     size_t total_frame_size = header_size + payload_length;
-    // Validate size before allocation
-    constexpr size_t MAX_FRAME_SIZE = 16 * 1024 * 1024; // 16MB limit
+    constexpr size_t MAX_FRAME_SIZE = 16 * 1024 * 1024;
     if (total_frame_size > MAX_FRAME_SIZE) {
-        throw std::runtime_error("Frame too large");
+        Close(1009, "Frame too large");
+        return;
     }
-
     std::vector<uint8_t> frame_data(total_frame_size);
     auto buffers = read_buffer_.data();
-
-    // Use Asio's safe buffer_copy
+    Logger::Trace("WebSocketConnection {} ProcessFrameData: starting buffer_copy", connection_id_);
     size_t bytes_copied = asio::buffer_copy(
-        asio::buffer(frame_data),  // destination
-        buffers,                   // source buffer sequence
-        total_frame_size           // maximum bytes to copy
+        asio::buffer(frame_data),
+        buffers,
+        total_frame_size
     );
-
     if (bytes_copied != total_frame_size) {
-        throw std::runtime_error("Incomplete frame data in buffer");
+        Close(1002, "Protocol error");
+        return;
     }
-
-    // Consume the data from the read buffer
     read_buffer_.consume(bytes_copied);
-
     try {
         WebSocketFrame frame = WebSocketFrame::Deserialize(frame_data);
         HandleFrame(frame);
@@ -590,28 +577,23 @@ void WebSocketConnection::ProcessFrameData(bool fin, uint8_t opcode, bool masked
         Close(1002, "Protocol error");
         return;
     }
-
-    // Continue reading next frame
     if (state_ == State::OPEN || state_ == State::CLOSING) {
         ReadFrame();
     }
+    Logger::Trace("WebSocketConnection {} ProcessFrameData: complete", connection_id_);
 }
 
 void WebSocketConnection::HandleFrame(const WebSocketFrame& frame) {
-    // Update statistics
     {
         std::lock_guard<std::mutex> lock(stats_mutex_);
         stats_.messages_received++;
         stats_.bytes_received += frame.payload_data.size();
     }
-
-    // Handle control frames
     if (frame.IsControlFrame()) {
         switch (frame.opcode) {
             case OP_CLOSE: {
                 uint16_t close_code = 1000;
                 std::string close_reason;
-
                 if (frame.payload_length >= 2) {
                     close_code = (frame.payload_data[0] << 8) | frame.payload_data[1];
                     if (frame.payload_length > 2) {
@@ -621,13 +603,10 @@ void WebSocketConnection::HandleFrame(const WebSocketFrame& frame) {
                         );
                     }
                 }
-
                 HandleClose(close_code, close_reason);
                 break;
             }
-
             case OP_PING: {
-                // Send pong response
                 SendPong(frame.payload_data);
                 {
                     std::lock_guard<std::mutex> lock(stats_mutex_);
@@ -635,43 +614,32 @@ void WebSocketConnection::HandleFrame(const WebSocketFrame& frame) {
                 }
                 break;
             }
-
             case OP_PONG: {
-                // Update last pong time
                 {
                     std::lock_guard<std::mutex> lock(stats_mutex_);
                     stats_.pong_count++;
                 }
                 break;
             }
-
             default:
-                // Should not happen for control frames
                 Close(1002, "Protocol error");
                 break;
         }
         return;
     }
-
-    // Handle data frames
     ProcessMessageData(frame);
 }
 
 void WebSocketConnection::ProcessMessageData(const WebSocketFrame& frame) {
     if (frame.opcode == OP_TEXT || frame.opcode == OP_BINARY) {
-        // Start of a new message
         current_message_ = WebSocketMessage();
         current_message_.opcode = frame.opcode;
     }
-
-    // Append data
     current_message_.data.insert(
         current_message_.data.end(),
         frame.payload_data.begin(),
         frame.payload_data.end()
     );
-
-    // Check if message is complete
     if (frame.fin) {
         current_message_.complete = true;
         CompleteCurrentMessage();
@@ -679,44 +647,34 @@ void WebSocketConnection::ProcessMessageData(const WebSocketFrame& frame) {
 }
 
 void WebSocketConnection::CompleteCurrentMessage() {
-    // Call appropriate handlers
     if (message_handler_) {
         message_handler_(current_message_);
     }
-
     if (current_message_.opcode == OP_TEXT && text_handler_) {
         text_handler_(current_message_.GetText());
     } else if (current_message_.opcode == OP_BINARY && binary_handler_) {
         binary_handler_(current_message_.data);
     }
-
-    // Reset for next message
     current_message_ = WebSocketMessage();
 }
 
 void WebSocketConnection::SendFrame(const WebSocketFrame& frame) {
     std::vector<uint8_t> frame_data = frame.Serialize();
-
     {
-        std::lock_guard<std::mutex> lock(write_mutex_);
+        std::lock_guard<std::recursive_mutex> lock(write_mutex_);
         write_buffer_.insert(write_buffer_.end(), frame_data.begin(), frame_data.end());
-
-        // Update statistics
         stats_.messages_sent++;
         stats_.bytes_sent += frame.payload_data.size();
     }
-
-    // Start writing if not already writing
     DoWrite();
 }
 
 void WebSocketConnection::SendFrameAsync(const WebSocketFrame& frame) {
     auto self = shared_from_this();
     std::vector<uint8_t> frame_data = frame.Serialize();
-
     asio::async_write(socket_, asio::buffer(frame_data),
-        [self, frame_data](std::error_code ec, size_t bytes_transferred) {
-            Logger::Debug("WebSocketConnection::SendFrameAsync asio::async_write {}", bytes_transferred);
+        [self, frame_data](std::error_code ec, size_t /*bytes_transferred*/) {
+            //Logger::Debug("WebSocketConnection::SendFrameAsync asio::async_write {}", bytes_transferred);
             if (ec) {
                 self->HandleError(ec);
             } else {
@@ -728,30 +686,29 @@ void WebSocketConnection::SendFrameAsync(const WebSocketFrame& frame) {
 }
 
 void WebSocketConnection::DoWrite() {
-    auto self = shared_from_this();
-
-    std::lock_guard<std::mutex> lock(write_mutex_);
-    if (write_buffer_.empty()) {
+    std::lock_guard<std::recursive_mutex> lock(write_mutex_);
+    if (write_buffer_.empty() || state_ != State::OPEN)
         return;
-    }
-
+    auto self = shared_from_this();
+    Logger::Trace("WebSocketConnection {} DoWrite: starting async_write", connection_id_);
     asio::async_write(socket_, asio::buffer(write_buffer_),
-        [self](std::error_code ec, size_t bytes_transferred) {
-            Logger::Debug("WebSocketConnection::DoWrite asio::async_write {}", bytes_transferred);
-            if (ec) {
-                self->HandleError(ec);
-                return;
-            }
-
-            std::lock_guard<std::mutex> lock(self->write_mutex_);
-            self->write_buffer_.erase(self->write_buffer_.begin(),
-                                     self->write_buffer_.begin() + bytes_transferred);
-
-            // Continue writing if more data
-            if (!self->write_buffer_.empty()) {
+    [self](std::error_code ec, size_t bytes) {
+        Logger::Trace("WebSocketConnection::DoWrite asio::async_write {}", bytes);
+        if (ec) {
+            self->HandleError(ec);
+            return;
+        }
+        {
+            std::lock_guard<std::recursive_mutex> lock(self->write_mutex_);
+            self->write_buffer_.erase(self->write_buffer_.begin(), self->write_buffer_.begin() + bytes);
+            self->stats_.bytes_sent += bytes;
+        }
+        if (!self->write_buffer_.empty()) {
+            asio::post(self->socket_.get_executor(), [self]() {
                 self->DoWrite();
-            }
-        });
+            });
+        }
+    });
 }
 
 void WebSocketConnection::SendText(const std::string& text) {
@@ -779,50 +736,60 @@ void WebSocketConnection::SendPong(const std::vector<uint8_t>& data) {
 }
 
 void WebSocketConnection::Close(uint16_t code, const std::string& reason) {
-    if (state_ == State::CLOSED || state_ == State::CLOSING) {
+    if (state_ == State::CLOSED) {
+        Logger::Trace("WebSocketConnection {} already closed", connection_id_);
         return;
     }
-
+    if (state_ == State::CLOSING) {
+        Logger::Trace("WebSocketConnection {} already closing", connection_id_);
+        return;
+    }
+    Logger::Trace("WebSocketConnection {} Close code {}, reason {}, state={}", connection_id_, code, reason, (int)state_);
     state_ = State::CLOSING;
-
-    // Send close frame
-    WebSocketFrame close_frame = WebSocketFrame::CreateCloseFrame(code, reason);
-    SendFrameAsync(close_frame);
-
-    // Close socket after sending
-    auto self = shared_from_this();
-    asio::post(socket_.get_executor(), [self]() {
-        std::error_code ec;
-        self->socket_.shutdown(asio::ip::tcp::socket::shutdown_both, ec);
-        self->socket_.close(ec);
-        self->state_ = State::CLOSED;
-
-        if (self->close_handler_) {
-            self->close_handler_(1000, "Normal closure");
+    std::error_code ec;
+    if (socket_.is_open()) {
+        socket_.cancel(ec);
+        if (ec) {
+            Logger::Debug("WebSocketConnection {} cancel error: {}", connection_id_, ec.message());
         }
-    });
+        socket_.shutdown(asio::ip::tcp::socket::shutdown_both, ec);
+        if (ec && ec != asio::error::not_connected) {
+            Logger::Debug("WebSocketConnection {} shutdown error: {}", connection_id_, ec.message());
+        }
+        socket_.close(ec);
+        if (ec && ec != asio::error::not_connected) {
+            Logger::Debug("WebSocketConnection {} close error: {}", connection_id_, ec.message());
+        }
+    }
+    state_ = State::CLOSED;
+    if (close_handler_) {
+        close_handler_(code, reason.empty() ? "Connection closed" : reason);
+    }
+    Logger::Trace("WebSocketConnection {} closed synchronously", connection_id_);
 }
 
 void WebSocketConnection::HandleError(const std::error_code& ec) {
-    if (ec == asio::error::eof || ec == asio::error::connection_reset) {
-        Logger::Debug("WebSocketConnection {} disconnected", connection_id_);
+    if (state_ == State::CLOSED || state_ == State::CLOSING) {
+        return;
+    }
+    if (ec == asio::error::eof || ec == asio::error::connection_reset || ec == asio::error::broken_pipe) {
+        Logger::Trace("WebSocketConnection {} disconnected by client", connection_id_);
+    } else if (ec == asio::error::operation_aborted) {
+        Logger::Debug("WebSocketConnection {} operation aborted", connection_id_);
+    } else if (ec == asio::error::bad_descriptor) {
+        Logger::Debug("WebSocketConnection {} bad descriptor - already closed", connection_id_);
     } else {
         Logger::Error("WebSocketConnection {} error: {}", connection_id_, ec.message());
     }
-
-    if (error_handler_) {
-        error_handler_(ec);
+    if (state_ == State::OPEN) {
+        Close(1006, "Connection error");
     }
-
-    Close(1006, "Connection error");
 }
 
 void WebSocketConnection::HandleClose(uint16_t code, const std::string& reason) {
-    // Echo close frame back to client
     if (state_ == State::OPEN) {
         SendFrameAsync(WebSocketFrame::CreateCloseFrame(code, reason));
     }
-
     Close(code, reason);
 }
 
@@ -842,13 +809,10 @@ WebSocketConnection::Statistics WebSocketConnection::GetStatistics() const {
     return stats_;
 }
 
-// =============== WebSocketServer Implementation ===============
-
 WebSocketServer::WebSocketServer(asio::io_context& io_context, uint16_t port)
     : io_context_(io_context)
     , acceptor_(io_context_, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), port))
     , port_(port) {
-
     Logger::Info("WebSocketServer created on port {}", port);
 }
 
@@ -860,10 +824,8 @@ void WebSocketServer::Start() {
     if (running_) {
         return;
     }
-
     running_ = true;
     DoAccept();
-
     Logger::Info("WebSocketServer started on port {}", port_);
 }
 
@@ -871,19 +833,14 @@ void WebSocketServer::Stop() {
     if (!running_) {
         return;
     }
-
     running_ = false;
-
     std::error_code ec;
     acceptor_.close(ec);
-
-    // Close all connections
     std::lock_guard<std::mutex> lock(connections_mutex_);
     for (auto& connection : connections_) {
         connection->Close(1001, "Server going away");
     }
     connections_.clear();
-
     Logger::Info("WebSocketServer stopped");
 }
 
@@ -891,27 +848,18 @@ void WebSocketServer::DoAccept() {
     if (!running_) {
         return;
     }
-
     acceptor_.async_accept([this](std::error_code ec, asio::ip::tcp::socket socket) {
         if (!ec) {
-            // Create connection
             WebSocketConnection::Pointer connection;
             if (connection_factory_) {
                 connection = connection_factory_(std::move(socket));
             } else {
                 connection = std::make_shared<WebSocketConnection>(std::move(socket));
             }
-
-            // Add to connections list
             AddConnection(connection);
-
-            // Start the connection
             connection->Start();
-
             Logger::Debug("WebSocket connection accepted");
         }
-
-        // Continue accepting
         if (running_) {
             DoAccept();
         }
@@ -921,8 +869,6 @@ void WebSocketServer::DoAccept() {
 void WebSocketServer::AddConnection(WebSocketConnection::Pointer connection) {
     std::lock_guard<std::mutex> lock(connections_mutex_);
     connections_.push_back(connection);
-
-    // Set up removal handler
     auto weak_connection = std::weak_ptr<WebSocketConnection>(connection);
     connection->SetCloseHandler([this, weak_connection](uint16_t code, const std::string& reason) {
         Logger::Debug("WebSocketConnection::AddConnection WebSocketConnection::SetCloseHandler({}, {})", code, reason);
@@ -974,8 +920,6 @@ size_t WebSocketServer::GetConnectionCount() const {
     return connections_.size();
 }
 
-// =============== WebSocketClient Implementation ===============
-
 WebSocketClient::WebSocketClient(asio::io_context& io_context)
     : WebSocketConnection(asio::ip::tcp::socket(io_context))
     , io_context_(io_context) {
@@ -985,7 +929,6 @@ void WebSocketClient::Connect(const std::string& host, uint16_t port, const std:
     host_ = host;
     port_ = port;
     path_ = path;
-
     ResolveAndConnect();
 }
 
@@ -994,11 +937,9 @@ void WebSocketClient::Connect(const std::string& url) {
     host_ = parsed_url.host;
     port_ = parsed_url.port;
     path_ = parsed_url.path;
-
     if (parsed_url.protocol == "wss") {
         UseSSL(true);
     }
-
     ResolveAndConnect();
 }
 
@@ -1014,7 +955,6 @@ void WebSocketClient::UseSSL(bool enable) {
 
 void WebSocketClient::ResolveAndConnect() {
     auto resolver = std::make_shared<asio::ip::tcp::resolver>(io_context_);
-
     resolver->async_resolve(host_, std::to_string(port_),
         [this, resolver](const std::error_code& ec,
                         asio::ip::tcp::resolver::results_type endpoints) {
@@ -1028,12 +968,9 @@ void WebSocketClient::HandleResolve(const std::error_code& ec,
         HandleError(ec);
         return;
     }
-
-    // Connect to the first endpoint
     if (ssl_context_) {
         ssl_stream_ = std::make_unique<asio::ssl::stream<asio::ip::tcp::socket>>(
             io_context_, *ssl_context_);
-
         asio::async_connect(ssl_stream_->lowest_layer(), endpoints,
             [this](const std::error_code& ec, const asio::ip::tcp::endpoint& endpoint) {
                 HandleConnect(ec, endpoint);
@@ -1051,11 +988,8 @@ void WebSocketClient::HandleConnect(const std::error_code& ec, const asio::ip::t
         HandleError(ec);
         return;
     }
-
     Logger::Debug("WebSocketClient connected to {}:{}", endpoint.address().to_string(), endpoint.port());
-
     if (ssl_stream_) {
-        // Perform SSL handshake
         ssl_stream_->async_handshake(asio::ssl::stream_base::client,
             [this](const std::error_code& ec) {
                 if (ec) {
@@ -1081,20 +1015,14 @@ void WebSocketClient::SendHandshakeRequest() {
     request.SetHeader("Connection", "Upgrade");
     request.SetHeader("Sec-WebSocket-Key", GenerateWebSocketKey());
     request.SetHeader("Sec-WebSocket-Version", "13");
-
     std::string request_str = request.Serialize();
-
     auto self = std::static_pointer_cast<WebSocketClient>(shared_from_this());
-
-    // Send handshake request
     auto write_handler = [self, request](std::error_code ec, size_t bytes_transferred) {
         Logger::Debug("WebSocketConnection::SendHandshakeRequest write_handler {}", bytes_transferred);
         if (ec) {
             self->HandleError(ec);
             return;
         }
-
-        // Read handshake response
         asio::async_read_until(self->socket_, self->read_buffer_, "\r\n\r\n",
             [self, request](std::error_code ec, size_t bytes_transferred) {
                 Logger::Debug("WebSocketConnection::SendHandshakeRequest asio::async_read_until {}", bytes_transferred);
@@ -1102,33 +1030,23 @@ void WebSocketClient::SendHandshakeRequest() {
                     self->HandleError(ec);
                     return;
                 }
-
-                // Parse response
                 std::istream stream(&self->read_buffer_);
                 std::string response_str;
                 std::getline(stream, response_str, '\0');
-
                 try {
                     HandshakeResponse response = HandshakeResponse::Parse(response_str);
-
                     if (!response.Validate(request)) {
                         throw std::runtime_error("Invalid handshake response");
                     }
-
-                    // Handshake complete
                     self->state_ = State::OPEN;
                     Logger::Info("WebSocketClient handshake complete");
-
-                    // Start reading frames
                     self->ReadFrame();
-
                 } catch (const std::exception& e) {
                     Logger::Error("WebSocket handshake error: {}", e.what());
                     self->Close(1002, "Protocol error");
                 }
             });
     };
-
     if (ssl_stream_) {
         asio::async_write(*ssl_stream_, asio::buffer(request_str), write_handler);
     } else {
@@ -1136,72 +1054,62 @@ void WebSocketClient::SendHandshakeRequest() {
     }
 }
 
-// =============== Utility Functions ===============
-
 std::string GenerateWebSocketKey() {
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_int_distribution<> dis(0, 255);
-
     std::array<uint8_t, 16> random_bytes;
     for (int i = 0; i < 16; ++i) {
         random_bytes[i] = static_cast<uint8_t>(dis(gen));
     }
-
-    // Base64 encode
     const std::string base64_chars =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
     std::string result;
     int i = 0;
     while (i < 16) {
         uint32_t octet_a = i < 16 ? random_bytes[i++] : 0;
         uint32_t octet_b = i < 16 ? random_bytes[i++] : 0;
         uint32_t octet_c = i < 16 ? random_bytes[i++] : 0;
-
         uint32_t triple = (octet_a << 16) + (octet_b << 8) + octet_c;
-
         result += base64_chars[(triple >> 18) & 0x3F];
         result += base64_chars[(triple >> 12) & 0x3F];
         result += base64_chars[(triple >> 6) & 0x3F];
         result += base64_chars[triple & 0x3F];
     }
-
-    // Remove padding
     result = result.substr(0, 24);
-
     return result;
 }
 
 std::string GenerateAcceptKey(const std::string& key) {
     const std::string magic_guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
     std::string combined = key + magic_guid;
-
-    unsigned char hash[SHA_DIGEST_LENGTH];
+    unsigned char hash[SHA_DIGEST_LENGTH]; // 20 bytes
     SHA1(reinterpret_cast<const unsigned char*>(combined.c_str()), combined.size(), hash);
-
-    // Base64 encode
     const std::string base64_chars =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     std::string result;
     int i = 0;
-    while (i < SHA_DIGEST_LENGTH) {
-        uint32_t octet_a = i < SHA_DIGEST_LENGTH ? hash[i++] : 0;
-        uint32_t octet_b = i < SHA_DIGEST_LENGTH ? hash[i++] : 0;
-        uint32_t octet_c = i < SHA_DIGEST_LENGTH ? hash[i++] : 0;
-
-        uint32_t triple = (octet_a << 16) + (octet_b << 8) + octet_c;
-
+    while (i < SHA_DIGEST_LENGTH - 2) {
+        uint32_t triple = (hash[i] << 16) | (hash[i+1] << 8) | hash[i+2];
         result += base64_chars[(triple >> 18) & 0x3F];
         result += base64_chars[(triple >> 12) & 0x3F];
         result += base64_chars[(triple >> 6) & 0x3F];
         result += base64_chars[triple & 0x3F];
+        i += 3;
     }
-
-    // Remove padding
-    result = result.substr(0, 28);
-
+    int remaining = SHA_DIGEST_LENGTH - i;
+    if (remaining == 1) {
+        uint32_t triple = (hash[i] << 16);
+        result += base64_chars[(triple >> 18) & 0x3F];
+        result += base64_chars[(triple >> 12) & 0x3F];
+        result += "==";
+    } else if (remaining == 2) {
+        uint32_t triple = (hash[i] << 16) | (hash[i+1] << 8);
+        result += base64_chars[(triple >> 18) & 0x3F];
+        result += base64_chars[(triple >> 12) & 0x3F];
+        result += base64_chars[(triple >> 6) & 0x3F];
+        result += "=";
+    }
     return result;
 }
 
@@ -1215,20 +1123,16 @@ bool IsControlOpcode(uint8_t opcode) {
 }
 
 size_t GetFrameHeaderSize(const WebSocketFrame& frame) {
-    size_t size = 2; // Basic header
-
+    size_t size = 2;
     if (frame.payload_length <= 125) {
-        // Already accounted for
     } else if (frame.payload_length <= 65535) {
         size += 2;
     } else {
         size += 8;
     }
-
     if (frame.masked) {
         size += 4;
     }
-
     return size;
 }
 
@@ -1271,22 +1175,16 @@ std::string GetCloseReason(uint16_t code) {
     }
 }
 
-// =============== WebSocketURL Implementation ===============
-
 WebSocketURL WebSocketURL::Parse(const std::string& url) {
     WebSocketURL result;
-
-    // Parse protocol
     size_t protocol_end = url.find("://");
     if (protocol_end != std::string::npos) {
         result.protocol = url.substr(0, protocol_end);
-        protocol_end += 3; // Skip "://"
+        protocol_end += 3;
     } else {
         protocol_end = 0;
-        result.protocol = "ws"; // Default
+        result.protocol = "ws";
     }
-
-    // Parse host and port
     size_t path_start = url.find('/', protocol_end);
     if (path_start == std::string::npos) {
         path_start = url.length();
@@ -1294,10 +1192,8 @@ WebSocketURL WebSocketURL::Parse(const std::string& url) {
     } else {
         result.path = url.substr(path_start);
     }
-
     std::string host_port = url.substr(protocol_end, path_start - protocol_end);
     size_t colon_pos = host_port.find(':');
-
     if (colon_pos != std::string::npos) {
         result.host = host_port.substr(0, colon_pos);
         std::string port_str = host_port.substr(colon_pos + 1);
@@ -1306,35 +1202,26 @@ WebSocketURL WebSocketURL::Parse(const std::string& url) {
         result.host = host_port;
         result.port = (result.protocol == "wss") ? 443 : 80;
     }
-
-    // Parse query string
     size_t query_start = result.path.find('?');
     if (query_start != std::string::npos) {
         result.query = result.path.substr(query_start + 1);
         result.path = result.path.substr(0, query_start);
     }
-
     return result;
 }
 
 std::string WebSocketURL::ToString() const {
     std::stringstream ss;
     ss << protocol << "://" << host;
-
     if ((protocol == "ws" && port != 80) || (protocol == "wss" && port != 443)) {
         ss << ":" << port;
     }
-
     ss << path;
-
     if (!query.empty()) {
         ss << "?" << query;
     }
-
     return ss.str();
 }
-
-// =============== CompressionContext Implementation ===============
 
 CompressionContext::CompressionContext() = default;
 
@@ -1346,28 +1233,21 @@ bool CompressionContext::Initialize(bool server, int compression_level) {
     if (initialized_) {
         Cleanup();
     }
-
     server_ = server;
-
-    // Initialize deflate context for compression
     deflate_context_ = malloc(sizeof(z_stream));
     if (!deflate_context_) {
         return false;
     }
-
     z_stream* deflate_stream = static_cast<z_stream*>(deflate_context_);
     deflate_stream->zalloc = Z_NULL;
     deflate_stream->zfree = Z_NULL;
     deflate_stream->opaque = Z_NULL;
-
     if (deflateInit2(deflate_stream, compression_level, Z_DEFLATED,
                      -MAX_WBITS, 8, Z_DEFAULT_STRATEGY) != Z_OK) {
         free(deflate_context_);
         deflate_context_ = nullptr;
         return false;
     }
-
-    // Initialize inflate context for decompression
     inflate_context_ = malloc(sizeof(z_stream));
     if (!inflate_context_) {
         deflateEnd(deflate_stream);
@@ -1375,12 +1255,10 @@ bool CompressionContext::Initialize(bool server, int compression_level) {
         deflate_context_ = nullptr;
         return false;
     }
-
     z_stream* inflate_stream = static_cast<z_stream*>(inflate_context_);
     inflate_stream->zalloc = Z_NULL;
     inflate_stream->zfree = Z_NULL;
     inflate_stream->opaque = Z_NULL;
-
     if (inflateInit2(inflate_stream, -MAX_WBITS) != Z_OK) {
         free(inflate_context_);
         inflate_context_ = nullptr;
@@ -1389,7 +1267,6 @@ bool CompressionContext::Initialize(bool server, int compression_level) {
         deflate_context_ = nullptr;
         return false;
     }
-
     initialized_ = true;
     return true;
 }
@@ -1398,19 +1275,15 @@ std::vector<uint8_t> CompressionContext::Compress(const std::vector<uint8_t>& da
     if (!initialized_ || !deflate_context_) {
         return data;
     }
-
     z_stream* stream = static_cast<z_stream*>(deflate_context_);
     stream->next_in = const_cast<Bytef*>(data.data());
     stream->avail_in = static_cast<uInt>(data.size());
-
     std::vector<uint8_t> compressed(data.size()); // Start with same size
     stream->next_out = compressed.data();
     stream->avail_out = static_cast<uInt>(compressed.size());
-
     if (deflate(stream, Z_SYNC_FLUSH) != Z_OK) {
         return data;
     }
-
     compressed.resize(compressed.size() - stream->avail_out);
     return compressed;
 }
@@ -1419,19 +1292,15 @@ std::vector<uint8_t> CompressionContext::Decompress(const std::vector<uint8_t>& 
     if (!initialized_ || !inflate_context_) {
         return compressed_data;
     }
-
     z_stream* stream = static_cast<z_stream*>(inflate_context_);
     stream->next_in = const_cast<Bytef*>(compressed_data.data());
     stream->avail_in = static_cast<uInt>(compressed_data.size());
-
-    std::vector<uint8_t> decompressed(compressed_data.size() * 2); // Start with double size
+    std::vector<uint8_t> decompressed(compressed_data.size() * 2);
     stream->next_out = decompressed.data();
     stream->avail_out = static_cast<uInt>(decompressed.size());
-
     if (inflate(stream, Z_SYNC_FLUSH) != Z_OK) {
         return compressed_data;
     }
-
     decompressed.resize(decompressed.size() - stream->avail_out);
     return decompressed;
 }
@@ -1443,25 +1312,20 @@ void CompressionContext::Cleanup() {
         free(deflate_context_);
         deflate_context_ = nullptr;
     }
-
     if (inflate_context_) {
         z_stream* stream = static_cast<z_stream*>(inflate_context_);
         inflateEnd(stream);
         free(inflate_context_);
         inflate_context_ = nullptr;
     }
-
     initialized_ = false;
 }
-
-// =============== MessageFragmenter Implementation ===============
 
 MessageFragmenter::MessageFragmenter(size_t max_frame_size)
     : max_frame_size_(max_frame_size) {}
 
 std::vector<WebSocketFrame> MessageFragmenter::FragmentMessage(const WebSocketMessage& message) {
     if (message.data.size() <= max_frame_size_) {
-        // Single frame
         WebSocketFrame frame;
         frame.opcode = message.opcode;
         frame.fin = true;
@@ -1469,33 +1333,25 @@ std::vector<WebSocketFrame> MessageFragmenter::FragmentMessage(const WebSocketMe
         frame.payload_data = message.data;
         return {frame};
     }
-
-    // Multiple frames
     std::vector<WebSocketFrame> frames;
     size_t offset = 0;
     bool first_frame = true;
-
     while (offset < message.data.size()) {
         WebSocketFrame frame;
-
         if (first_frame) {
             frame.opcode = message.opcode;
             first_frame = false;
         } else {
             frame.opcode = OP_CONTINUATION;
         }
-
         size_t chunk_size = std::min(max_frame_size_, message.data.size() - offset);
         frame.payload_length = chunk_size;
         frame.payload_data.assign(message.data.begin() + offset,
                                  message.data.begin() + offset + chunk_size);
-
         offset += chunk_size;
         frame.fin = (offset >= message.data.size());
-
         frames.push_back(frame);
     }
-
     return frames;
 }
 
@@ -1512,8 +1368,6 @@ std::vector<WebSocketFrame> MessageFragmenter::FragmentBinary(const std::vector<
     return FragmentMessage(msg);
 }
 
-// =============== WebSocketRateLimiter Implementation ===============
-
 WebSocketRateLimiter::WebSocketRateLimiter(size_t messages_per_second, size_t burst_size)
     : messages_per_second_(messages_per_second)
     , burst_size_(burst_size)
@@ -1522,34 +1376,26 @@ WebSocketRateLimiter::WebSocketRateLimiter(size_t messages_per_second, size_t bu
 
 bool WebSocketRateLimiter::CheckLimit() {
     std::lock_guard<std::mutex> lock(mutex_);
-
-    // Refill tokens based on elapsed time
     auto now = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         now - last_refill_);
-
     size_t refill = (elapsed.count() * messages_per_second_) / 1000;
     if (refill > 0) {
         tokens_ = std::min(burst_size_, tokens_ + refill);
         last_refill_ = now;
     }
-
-    // Check if we have tokens
     if (tokens_ > 0) {
         tokens_--;
         return true;
     }
-
     return false;
 }
 
 void WebSocketRateLimiter::Update() {
     std::lock_guard<std::mutex> lock(mutex_);
-
     auto now = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         now - last_refill_);
-
     size_t refill = (elapsed.count() * messages_per_second_) / 1000;
     if (refill > 0) {
         tokens_ = std::min(burst_size_, tokens_ + refill);

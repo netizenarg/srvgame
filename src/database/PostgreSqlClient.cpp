@@ -1055,3 +1055,7 @@ bool PostgreSqlClient::ConnectToDatabase(const std::string& dbname) {
     Logger::Debug("Switched database connection to '{}'", dbname);
     return true;
 }
+
+bool PostgreSqlClient::ExecuteDatabase(const std::string& sql) { return Execute(sql); }
+
+nlohmann::json PostgreSqlClient::QueryDatabase(const std::string& sql) { return Query(sql); }

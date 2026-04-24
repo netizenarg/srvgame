@@ -1,5 +1,7 @@
 #!/bin/bash
-# build.sh
+
+# save original home directory path
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Clone dependencies
 mkdir -p thirdparty
@@ -35,9 +37,11 @@ sudo apt-get install -y \
     libspdlog-dev \
     nlohmann-json3-dev
 
-# Parse command line arguments for optional database backends
+# Parse command line arguments
 USE_CITUS=OFF
 USE_SQLITE=OFF
+ENABLE_ASAN=OFF
+CLEAR_PREVIOUS=OFF
 
 for arg in "$@"; do
     case $arg in
@@ -51,14 +55,21 @@ for arg in "$@"; do
             sudo apt-get install -y libsqlite3-dev
             USE_SQLITE=ON
             ;;
+        --with-asan)
+            echo "Enabling AddressSanitizer and UndefinedBehaviorSanitizer"
+            ENABLE_ASAN=ON
+            ;;
+        --clear)
+            echo "Enabling clear previous compilations"
+            CLEAR_PREVIOUS=ON
+            ;;
         *)
-            # ignore unknown
             ;;
     esac
 done
 
 # Build configuration
-echo "Building with Citus: $USE_CITUS, SQLite: $USE_SQLITE"
+echo "Building with Citus: $USE_CITUS, SQLite: $USE_SQLITE, ASan: $ENABLE_ASAN"
 
 # Clean previous build artifacts
 rm -f CMakeCache.txt Makefile cmake_install.cmake
@@ -66,25 +77,25 @@ rm -rf CMakeFiles
 
 # Create build directory and copy related folders
 mkdir -p build
-rsync -a --delete config/ build/config/
-rsync -a --delete dbschema/ build/dbschema/
 cd build
+if $CLEAR_PREVIOUS; then
+    echo "Clearing previous compilations..."
+    find . -mindepth 1 -maxdepth 1 ! -name "certs" -exec rm -rf {} +
+fi
 
 # Run CMake
 cmake .. -B . \
     -DUSE_CITUS=${USE_CITUS} \
     -DUSE_SQLITE=${USE_SQLITE} \
+    -DENABLE_ASAN=${ENABLE_ASAN} \
     -DCMAKE_BUILD_TYPE=Debug
 
 # Build
 make -j$(nproc)
 
 # ========== SSL Certificate Generation ==========
-# Generate self-signed SSL certificates if missing
 if command -v openssl &> /dev/null; then
-    # Create certs directory if needed
     mkdir -p certs
-    # Generate server certificate and key if not present
     if [ ! -f "certs/server.crt" ] || [ ! -f "certs/server.key" ]; then
         echo "Generating self-signed SSL certificate..."
         openssl req -x509 -newkey rsa:4096 \
@@ -94,7 +105,6 @@ if command -v openssl &> /dev/null; then
             -subj "/CN=localhost"
         echo "SSL certificate and key created in certs/"
     fi
-    # Generate DH parameters if not present (optional but may be used)
     if [ ! -f "certs/dhparam.pem" ]; then
         echo "Generating DH parameters (this may take a moment)..."
         openssl dhparam -out certs/dhparam.pem 2048
@@ -115,3 +125,10 @@ fi
 # create default database user (commented out by default)
 #sudo -u postgres psql -c "DROP USER IF EXISTS gameuser;"
 #sudo -u postgres psql -c "CREATE USER gameuser WITH PASSWORD 'password' SUPERUSER;"
+
+echo "Go to $SCRIPT_DIR"
+cd "$SCRIPT_DIR" || exit
+echo "Copy config to build folder ..."
+rsync -a --delete config/ build/config/
+echo "Copy dbschema to build folder ..."
+rsync -a --delete dbschema/ build/dbschema/

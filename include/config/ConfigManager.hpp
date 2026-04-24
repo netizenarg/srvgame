@@ -81,7 +81,7 @@ public:
     std::string GetDatabaseBackend() const;
     int GetDatabasePoolSize() const;
     std::vector<std::string> GetCitusWorkerNodes() const;
-    int GetShardCount() const;
+    int GetShardCount(int default_value=32) const;
 
     // Game configuration
     int GetMaxPlayersPerSession() const;

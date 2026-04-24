@@ -214,10 +214,10 @@ bool CollisionSystem::IsEntityRegistered(uint64_t entityId) const {
 void CollisionSystem::RegisterChunk(const WorldChunk& chunk) {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    uint64_t chunkId = CalculateChunkId(chunk.GetChunkX(), chunk.GetChunkZ());
+    uint64_t chunk_id = CalculateChunkId(chunk.GetChunkX(), chunk.GetChunkZ());
 
     // Check if chunk already exists
-    if (chunks_.find(chunkId) != chunks_.end()) {
+    if (chunks_.find(chunk_id) != chunks_.end()) {
         return;
     }
 
@@ -225,7 +225,7 @@ void CollisionSystem::RegisterChunk(const WorldChunk& chunk) {
     CollisionChunk collisionChunk;
     collisionChunk.chunkX = chunk.GetChunkX();
     collisionChunk.chunkZ = chunk.GetChunkZ();
-    collisionChunk.chunkId = chunkId;
+    collisionChunk.chunk_id = chunk_id;
 
     // Calculate bounding box for the chunk
     glm::vec3 worldPos = chunk.GetWorldPosition();
@@ -240,14 +240,14 @@ void CollisionSystem::RegisterChunk(const WorldChunk& chunk) {
     BuildChunkCollisionData(collisionChunk, chunk);
 
     // Store the chunk
-    chunks_[chunkId] = std::move(collisionChunk);
+    chunks_[chunk_id] = std::move(collisionChunk);
 }
 
 void CollisionSystem::UnregisterChunk(int chunkX, int chunkZ) {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    uint64_t chunkId = CalculateChunkId(chunkX, chunkZ);
-    chunks_.erase(chunkId);
+    uint64_t chunk_id = CalculateChunkId(chunkX, chunkZ);
+    chunks_.erase(chunk_id);
 }
 
 void CollisionSystem::ClearAllChunks() {
@@ -275,14 +275,14 @@ CollisionResult CollisionSystem::CheckCollision(const glm::vec3& position, float
 
         if (TestSphereSphere(testSphere, entity.bounds, result)) {
             result.collided = true;
-            result.collidedWith = entityId;
+            result.collided_id = entityId;
             result.type = entity.type;
             return result;
         }
     }
 
     // Check against world chunks
-    for (const auto& [chunkId, chunk] : chunks_) {
+    for (const auto& [chunk_id, chunk] : chunks_) {
         // Early out with bounding box test
         if (!chunk.bounds.IntersectsSphere(position, radius)) {
             continue;
@@ -291,9 +291,9 @@ CollisionResult CollisionSystem::CheckCollision(const glm::vec3& position, float
         // Test against chunk bounding box first
         if (TestSphereBox(testSphere, chunk.bounds, result)) {
             result.collided = true;
-            result.collidedWith = 0; // World collision
+            result.collided_id = 0; // World collision
             result.type = CollisionType::WORLD;
-            result.chunkId = chunkId;
+            result.chunk_id = chunk_id;
 
             // If chunk has detailed collision data, test against triangles
             if (chunk.hasCollisionData) {
@@ -314,9 +314,9 @@ CollisionResult CollisionSystem::CheckCollision(const glm::vec3& position, float
                             if (!detailedCollision || detailedResult.penetration < result.penetration) {
                                 detailedCollision = true;
                                 result = detailedResult;
-                                result.collidedWith = 0;
+                                result.collided_id = 0;
                                 result.type = CollisionType::WORLD;
-                                result.chunkId = chunkId;
+                                result.chunk_id = chunk_id;
                             }
                         }
                     }
@@ -354,14 +354,14 @@ bool CollisionSystem::Raycast(const glm::vec3& origin, const glm::vec3& directio
             hit.point = origin + normalizedDir * distance;
             hit.normal = glm::normalize(hit.point - entity.bounds.center);
             hit.distance = distance;
-            hit.entityId = entityId;
+            hit.entity_id = entityId;
             closestDistance = distance;
             foundHit = true;
         }
     }
 
     // Check against world chunks
-    for (const auto& [chunkId, chunk] : chunks_) {
+    for (const auto& [chunk_id, chunk] : chunks_) {
         float tMin, tMax;
         if (!TestRayAABB(origin, normalizedDir, chunk.bounds, tMin, tMax)) {
             continue;
@@ -405,7 +405,7 @@ bool CollisionSystem::Raycast(const glm::vec3& origin, const glm::vec3& directio
                 hit.point = origin + normalizedDir * chunkDistance;
                 hit.normal = chunkNormal;
                 hit.distance = chunkDistance;
-                hit.chunkId = chunkId;
+                hit.chunk_id = chunk_id;
                 closestDistance = chunkDistance;
                 foundHit = true;
             }
@@ -414,7 +414,7 @@ bool CollisionSystem::Raycast(const glm::vec3& origin, const glm::vec3& directio
             hit.hit = true;
             hit.point = origin + normalizedDir * tMin;
             hit.distance = tMin;
-            hit.chunkId = chunkId;
+            hit.chunk_id = chunk_id;
 
             // Calculate normal from bounding box
             glm::vec3 center = chunk.bounds.GetCenter();

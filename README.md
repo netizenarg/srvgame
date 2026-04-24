@@ -38,44 +38,6 @@ GameServer is a sophisticated, game server designed for massively multiplayer on
 - **Process Monitoring**: Health checks and automatic worker restart
 - **Python Scripting**: Extensible game logic through Python integration
 
-## Architecture
-
-### Core Components
-┌─────────────────────────────────────────────────┐
-│                Master Process                   │
-│┌─────────────┐  ┌─────────────┐  ┌─────────────┐│
-││  Worker #1  │  │  Worker #2  │  │  Worker #N  ││
-││ ┌─────────┐ │  │ ┌─────────┐ │  │ ┌─────────┐ ││
-││ │GameLogic│ │  │ │GameLogic│ │  │ │GameLogic│ ││
-││ │ World   │ │  │ │ World   │ │  │ │ World   │ ││
-││ │ Entities│ │  │ │ Entities│ │  │ │ Entities│ ││
-││ │ Network │ │  │ │ Network │ │  │ │ Network │ ││
-││ └─────────┘ │  │ └─────────┘ │  │ └─────────┘ ││
-│└─────────────┘  └─────────────┘  └─────────────┘│
-└─────────────────────────────────────────────────┘
-        │                │                │
-        ▼                ▼                ▼
-┌─────────────────────────────────────────────────┐
-│         Distributed Database (Citus)            │
-└─────────────────────────────────────────────────┘
-
-
-### Network Protocol Stack
-┌─────────────────────────────────────────────────┐
-│                               Application Layer │
-│ •Game Logic Messages •Chat •Inventory •Combat   │
-├─────────────────────────────────────────────────┤
-│                           Binary Protocol Layer │
-│ •Message Serialization •Compression •Encryption │
-├─────────────────────────────────────────────────┤
-│                       Transport Layer (TCP/SSL) │
-│ • Reliable Delivery • Flow Control • Congestion │
-├─────────────────────────────────────────────────┤
-│                        Session Management Layer │
-│ •Connection Pooling •Authentication •Rate Limit │
-└─────────────────────────────────────────────────┘
-
-
 ## Technology Stack
 
 ### Core Technologies
@@ -87,14 +49,13 @@ GameServer is a sophisticated, game server designed for massively multiplayer on
 - **nlohmann/json**: JSON serialization/deserialization
 
 ### Database
+- **SQLite**: mainly for fast-testing
 - **PostgreSQL with Citus**: Distributed database backend
 - **Connection Pooling**: Efficient database resource management
 - **Sharding Support**: Horizontal scaling of game data
 
 ### Build System
 - **CMake 3.16+**: Cross-platform build configuration
-- **vcpkg**: C++ dependency management
-- **Cross-platform**: Linux and macOS support
 
 ## Quick Start
 
@@ -110,82 +71,31 @@ GameServer is a sophisticated, game server designed for massively multiplayer on
 git clone https://github.com/usermicrodevices/gameserver.git
 cd gameserver
 
-# Install dependencies (Linux)
-chmod +x install_dependencies_linux.sh
-./install_dependencies_linux.sh
-
 # Build the server
-mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
-make -j$(nproc)
-
-# Configure the server
-cp ../config/server_config.example.json config/server_config.json
-# Edit server_config.json with your database and world settings
+./build.sh --with-sqlite --with-asan
 
 # Run the server
 ./gameserver
 ```
 
-### Configuration
-
-Create ```config/server_config.json```:
-```
-{
-  "server": {
-    "host": "0.0.0.0",
-    "port": 8080,
-    "process_count": 4,
-    "io_threads": 2,
-    "reuse_port": true
-  },
-  "database": {
-    "backend": "postgresql",
-    "host": "localhost",
-    "port": 5432,
-    "name": "gameserver",
-    "user": "gameserver",
-    "password": "secure_password",
-    "worker_nodes": ["node1:5432", "node2:5432"]
-  },
-  "world": {
-    "seed": 12345,
-    "view_distance": 8,
-    "chunk_size": 32,
-    "max_active_chunks": 1000,
-    "terrain_scale": 1.0,
-    "max_terrain_height": 256.0,
-    "water_level": 64.0,
-    "preload_world": true,
-    "world_preload_radius": 500.0
-  },
-  "logging": {
-    "level": "info",
-    "file": "logs/gameserver.log",
-    "max_size": 104857600,
-    "max_files": 10,
-    "compress": true
-  }
-}
-```
-
 ## Network Protocol
 
 ### Dual Protocol Architecture
-The GameServer supports two communication protocols running in parallel:
-Client ↔ Server Communication
-├── JSON Protocol (Development)
-│ ├── Human-readable format
-│ ├── Easy debugging and testing
-│ ├── Slower, higher bandwidth
-│ └── Used for configuration,
-│     chat, admin commands
-│
-├── Binary Protocol (Production)
-├── High-performance binary format
-├── Minimal bandwidth usage
-├── Fast serialization/deserialization
-└── Used for real-time gameplay,
+The GameServer supports two communication
+protocols running in parallel:\
+Client ↔ Server Communication\
+├── JSON Protocol (Development)\
+│ ├── Human-readable format\
+│ ├── Easy debugging and testing\
+│ ├── Slower, higher bandwidth\
+│ └── Used for configuration,\
+│     chat, admin commands\
+│\
+├── Binary Protocol (Production)\
+├── High-performance binary format\
+├── Minimal bandwidth usage\
+├── Fast serialization/deserialization\
+└── Used for real-time gameplay,\
     entity updates, world data
 
 

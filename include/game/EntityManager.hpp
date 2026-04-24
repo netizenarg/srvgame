@@ -17,6 +17,7 @@
 
 #include "logging/Logger.hpp"
 #include "game/GameEntity.hpp"
+#include "game/WorldChunk.hpp"
 
 class EntityManager {
 public:

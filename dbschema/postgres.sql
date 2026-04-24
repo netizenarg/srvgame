@@ -2,6 +2,7 @@
 CREATE TABLE IF NOT EXISTS players (
     id BIGINT PRIMARY KEY,
     data JSONB NOT NULL,
+    password_hash TEXT NOT NULL,
     position_x REAL DEFAULT 0,
     position_y REAL DEFAULT 0,
     position_z REAL DEFAULT 0,
@@ -79,8 +80,8 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 );
 
 -- [save_player_data]
-INSERT INTO players (id, data, updated_at) VALUES ($1, $2, NOW())
-ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW();
+INSERT INTO players (id, data, password_hash, updated_at) VALUES ($1, $2, $3, NOW())
+ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, password_hash = EXCLUDED.password_hash, updated_at = NOW();
 
 -- [load_player_data]
 SELECT data FROM players WHERE id = $1;
@@ -96,6 +97,9 @@ SELECT level, experience, health, max_health, mana, max_mana, currency_gold, cur
 
 -- [get_player]
 SELECT * FROM players WHERE id = $1;
+
+-- [get_player_by_username]
+SELECT id, password_hash FROM players WHERE data->>'username' = $1;
 
 -- [save_game_state]
 INSERT INTO game_state (key, value, updated_at) VALUES ($1, $2, NOW())

@@ -9,8 +9,11 @@
 struct ClientInput {
     uint32_t input_id;
     uint64_t timestamp;
-    glm::vec3 movement;
+    glm::vec3 position;
+    glm::vec3 velocity;
     glm::vec3 rotation;
+    glm::vec3 movement;
+    bool on_ground{true};
     bool jumping{false};
     bool crouching{false};
     bool sprinting{false};
@@ -39,52 +42,44 @@ struct ServerState {
     static ServerState Interpolate(const ServerState& a, const ServerState& b, float t);
 };
 
+struct PredictionStats {
+    uint32_t total_predictions{0};
+    uint32_t corrections_sent{0};
+    uint32_t corrections_received{0};
+    float average_correction_distance{0.0f};
+    uint64_t last_correction_time{0};
+    void Reset();
+    std::string ToString() const;
+};
+
 class PredictionSystem {
 public:
-    PredictionSystem();
-
-    // Client-side methods
-    void StoreClientInput(const ClientInput& input);
-    ServerState PredictPosition(uint64_t current_time) const;
-
-    // Server-side methods
-    void StoreServerState(const ServerState& state);
-    std::vector<ClientInput> GetUnprocessedInputs(uint32_t last_processed) const;
-
-    // Reconciliation
     struct ReconciliationResult {
         bool needs_correction{false};
         ServerState corrected_state;
         std::vector<uint32_t> processed_inputs;
     };
 
+    PredictionSystem();
+
+    void StoreClientInput(const ClientInput& input);
+    ServerState PredictPosition(uint64_t current_time) const;
+
+    void StoreServerState(const ServerState& state);
+    std::vector<ClientInput> GetUnprocessedInputs(uint32_t last_processed) const;
+
     ReconciliationResult ReconcileWithServer(const ServerState& server_state);
 
-    // State management
-    ServerState GetLastConfirmedState() const { return last_confirmed_state_; }
-    ServerState GetLatestPredictedState() const { return latest_predicted_state_; }
+    ServerState GetLastConfirmedState() const;
 
-    // Input history
-    const std::deque<ClientInput>& GetInputHistory() const { return input_history_; }
+    ServerState GetLatestPredictedState() const;
 
-    // Clear history
+    const std::deque<ClientInput>& GetInputHistory() const;
+
+    const PredictionStats& GetStats() const;
+
     void Clear();
 
-    // Statistics
-    struct PredictionStats {
-        uint32_t total_predictions{0};
-        uint32_t corrections_sent{0};
-        uint32_t corrections_received{0};
-        float average_correction_distance{0.0f};
-        uint64_t last_correction_time{0};
-
-        void Reset();
-        std::string ToString() const;
-    };
-
-    const PredictionStats& GetStats() const { return stats_; }
-
-    // Helper methods
     ServerState SimulateMovement(const ServerState& start_state,
                                 const std::vector<ClientInput>& inputs,
                                 float delta_time) const;
@@ -94,22 +89,17 @@ public:
 private:
     mutable std::mutex mutex_;
 
-    // Input history (client-side)
     std::deque<ClientInput> input_history_;
     static constexpr size_t MAX_INPUT_HISTORY = 1000;
 
-    // Server state history
     std::deque<ServerState> server_state_history_;
     static constexpr size_t MAX_STATE_HISTORY = 100;
 
-    // Current states
     ServerState last_confirmed_state_;
     mutable ServerState latest_predicted_state_;
 
-    // Statistics
     PredictionStats stats_;
 
-    // Physics constants
     static constexpr float GRAVITY = -9.81f;
     static constexpr float MAX_SPEED = 10.0f;
     static constexpr float ACCELERATION = 20.0f;
@@ -117,17 +107,15 @@ private:
     static constexpr float JUMP_FORCE = 5.0f;
 };
 
-// Input buffer for handling out-of-order inputs
 class InputBuffer {
 public:
     InputBuffer(size_t max_size = 1000);
-
     void AddInput(const ClientInput& input);
     std::vector<ClientInput> GetOrderedInputs() const;
     ClientInput GetNextInput() const;
-    bool HasInputs() const { return !inputs_.empty(); }
     void Clear();
-    size_t Size() const { return inputs_.size(); }
+    bool HasInputs() const;
+    size_t Size() const;
 
 private:
     mutable std::mutex mutex_;

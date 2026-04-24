@@ -17,6 +17,7 @@
 #include <chrono>
 #include <array>
 #include <arpa/inet.h>
+#include <sys/ioctl.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/prctl.h>
@@ -33,7 +34,6 @@ public:
         WORKER
     };
 
-    // New constructor: takes a list of worker groups
     ProcessPool(const std::vector<WorkerGroupConfig>& groups);
     ~ProcessPool();
 
@@ -51,19 +51,15 @@ public:
     pid_t GetMasterPid() const { return masterPid_; }
     int GetTotalWorkerCount() const { return totalWorkers_; }
 
-    // Callback for worker process – now receives both global ID and group config
     using WorkerMainFunc = std::function<void(int workerId, const WorkerGroupConfig& config)>;
     void SetWorkerMain(WorkerMainFunc workerMainFunc);
 
-    // Inter-process communication with message length prefix
     bool SendToWorker(int workerId, const std::string& message);
     std::string ReceiveFromMaster();
 
-    // Process health monitoring
     bool IsWorkerAlive(int workerId) const;
     void RestartWorker(int workerId);
 
-    // Configuration methods
     void SetMaxMessageSize(uint32_t maxSize) { maxMessageSize_ = maxSize; }
     uint32_t GetMaxMessageSize() const { return maxMessageSize_; }
     void SetReceiveTimeout(uint32_t timeoutMs) { receiveTimeoutMs_ = timeoutMs; }
@@ -75,8 +71,8 @@ public:
 private:
     struct WorkerInfo {
         pid_t pid;
-        int groupIdx;           // index in groups_ vector
-        int localWorkerId;      // index within the group (0..group.count-1)
+        int groupIdx;
+        int localWorkerId;
         WorkerGroupConfig config;
     };
 
@@ -87,34 +83,30 @@ private:
     void CloseAllPipes();
     void CreateWorkerPipe(int globalWorkerId);
 
-    // Helper functions for message protocol
     bool WriteAll(int fd, const void* buffer, size_t count);
     bool ReadAll(int fd, void* buffer, size_t count, bool nonBlocking = false);
     bool DrainPipe(int fd, size_t bytesToDrain);
 
-    // Group configuration
     std::vector<WorkerGroupConfig> groups_;
     int totalWorkers_;
 
     ProcessRole role_{ProcessRole::MASTER};
-    int workerId_{-1};                     // global ID (for worker)
-    WorkerGroupConfig groupConfig_;        // config for this worker (filled after fork)
+    int workerId_{-1};
+    WorkerGroupConfig groupConfig_;
     pid_t masterPid_{-1};
 
     std::thread masterThread_;
     std::atomic<bool> running_{false};
     std::atomic<bool> shutdownRequested_{false};
 
-    std::vector<WorkerInfo> workers_;      // indexed by global worker ID
-    std::vector<int> workerPipes_;         // [read_fd, write_fd] for each global worker
+    std::vector<WorkerInfo> workers_;
+    std::vector<int> workerPipes_;
 
     WorkerMainFunc workerMainFunc_;
 
-    // Health monitoring (keyed by global worker ID)
     mutable std::mutex healthMutex_;
     std::unordered_map<int, std::pair<pid_t, time_t>> workerHealth_;
 
-    // Message protocol configuration
-    uint32_t maxMessageSize_{1024 * 1024};  // 1MB default
-    uint32_t receiveTimeoutMs_{1000};       // 1 second default
+    uint32_t maxMessageSize_{1024 * 1024};
+    uint32_t receiveTimeoutMs_{1000};
 };

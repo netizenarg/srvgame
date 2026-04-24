@@ -21,10 +21,14 @@
 
 #include "logging/Logger.hpp"
 #include "config/ConfigManager.hpp"
+
 #include "network/BinaryProtocol.hpp"
 #include "network/NetworkQualityMonitor.hpp"
 #include "network/PredictionSystem.hpp"
 #include "network/IConnection.hpp"
+
+#include "game/GameData.hpp"
+#include "game/GameLogic.hpp"
 
 struct SessionStats {
     // Message statistics
@@ -153,14 +157,16 @@ struct RateLimitConfig {
     bool exempt_authenticated_users{false};    // Whether authenticated users are exempt
 };
 
-class GameSession : public IConnection, public std::enable_shared_from_this<GameSession> {
+class BinarySession : public IConnection, public std::enable_shared_from_this<BinarySession> {
 public:
-    using Pointer = std::shared_ptr<GameSession>;
+    using Pointer = std::shared_ptr<BinarySession>;
 
     // Constructor with SSL context option
-    explicit GameSession(asio::ip::tcp::socket socket,
+    explicit BinarySession(asio::ip::tcp::socket socket,
                          std::shared_ptr<asio::ssl::context> ssl_context = nullptr);
-    ~GameSession();
+    ~BinarySession();
+
+    ProtocolMode GetProtocolMode() const override { return ProtocolMode::Binary; }
 
     // Core session management
     void Start() override;
@@ -183,29 +189,13 @@ public:
     // Binary protocol methods
     void SendPing();
     void SendPong();
-    void SendBinary(uint16_t message_type, const std::vector<uint8_t>& data) override;
-    void SendBinary(uint16_t message_type, const void* data, size_t length);
+    void Send(uint16_t message_type, const std::vector<uint8_t>& data) override;
+    void Send(uint16_t message_type, const void* data, size_t length);
+    void SendRaw(const std::string& data) override;
+    void SendJson(const nlohmann::json& message) override;
+    void SendWithAck(uint16_t message_type, const std::vector<uint8_t>& data);
     void SendBinaryWithAck(uint16_t message_type, const std::vector<uint8_t>& data);
-    void SendBinaryError(uint16_t message_type, const std::string& error_message, int code);
-
-    // JSON compatibility (for backward compatibility)
-    void Send(const nlohmann::json& message) override;
-    void SendRaw(const std::string& data);
-    void SendError(const std::string& message, int code);
-    void SendSuccess(const std::string& message, const nlohmann::json& data = {});
-    void SendWorldChunk(int chunkX, int chunkZ, const nlohmann::json& chunkData);
-    void SendEntityUpdate(uint64_t entityId, const nlohmann::json& entityData);
-    void SendEntitySpawn(uint64_t entityId, const nlohmann::json& spawnData);
-    void SendEntityDespawn(uint64_t entityId);
-    void SendCollisionEvent(uint64_t entityId1, uint64_t entityId2, const glm::vec3& point);
-    void SyncPlayerState(const glm::vec3& position, const glm::vec3& rotation, const glm::vec3& velocity);
-    void SendNearbyEntities(const std::vector<nlohmann::json>& entities);
-    void SendNPCInteraction(uint64_t npcId, const std::string& interactionType, const nlohmann::json& data);
-    void SendCompressedWorldData(const std::vector<uint8_t>& compressedData);
-    void HandleWorldRequest(const nlohmann::json& data);
-    void HandleEntityInteraction(const nlohmann::json& data);
-    void HandleMovementUpdate(const nlohmann::json& data);
-    void HandleFamiliarCommand(const nlohmann::json& data);
+    void SendError(uint16_t message_type, const std::string& error_message, int code) override;
 
     // Protocol negotiation
     void StartProtocolNegotiation();
@@ -299,10 +289,6 @@ public:
     // Utility methods
     std::string ToString() const;
     uint64_t GetUptimeSeconds() const;
-
-    // Graceful shutdown
-    void BeginGracefulShutdown();
-    void CancelGracefulShutdown();
 
     // World and entity methods (binary versions)
     void SendWorldChunkBinary(int chunkX, int chunkZ, const std::vector<uint8_t>& chunkData);

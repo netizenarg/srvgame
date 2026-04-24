@@ -1,6 +1,6 @@
 #include "game/LootItem.hpp"
 
-nlohmann::json ItemStat::Serialize() const {
+nlohmann::json LootStat::Serialize() const {
     return {
         {"statName", statName},
         {"baseValue", baseValue},
@@ -9,15 +9,15 @@ nlohmann::json ItemStat::Serialize() const {
     };
 }
 
-void ItemStat::Deserialize(const nlohmann::json& data) {
+void LootStat::Deserialize(const nlohmann::json& data) {
     statName = data["statName"];
     baseValue = data["baseValue"];
     currentValue = data["currentValue"];
     maxValue = data["maxValue"];
 }
 
-LootItem::LootItem() : id_(0), name_(""), type_(ItemType::MATERIAL), rarity_(LootRarity::COMMON) {}
-LootItem::LootItem(uint64_t id, const std::string& name, ItemType type, LootRarity rarity)
+LootItem::LootItem() : id_(0), name_(""), type_(LootType::MATERIAL), rarity_(LootRarity::COMMON) {}
+LootItem::LootItem(uint64_t id, const std::string& name, LootType type, LootRarity rarity)
     : id_(id), name_(name), type_(type), rarity_(rarity) {
     switch (rarity) {
         case LootRarity::COMMON: iconColor_ = glm::vec3(0.8f, 0.8f, 0.8f); break;
@@ -42,7 +42,7 @@ void LootItem::SetIconColor(const glm::vec3& color) {
 }
 
 void LootItem::AddStat(const std::string& name, float baseValue, float maxValue) {
-    ItemStat stat;
+    LootStat stat;
     stat.statName = name;
     stat.baseValue = baseValue;
     stat.currentValue = baseValue;
@@ -50,7 +50,7 @@ void LootItem::AddStat(const std::string& name, float baseValue, float maxValue)
     stats_.push_back(stat);
 }
 
-ItemStat* LootItem::GetStat(const std::string& name) {
+LootStat* LootItem::GetStat(const std::string& name) {
     for (auto& stat : stats_) {
         if (stat.statName == name) {
             return &stat;
@@ -59,12 +59,12 @@ ItemStat* LootItem::GetStat(const std::string& name) {
     return nullptr;
 }
 
-void LootItem::AddModifier(const ItemModifier& modifier) {
+void LootItem::AddModifier(const LootModifier& modifier) {
     modifiers_.push_back(modifier);
 }
 
-std::vector<ItemModifier> LootItem::GetModifiersForStat(const std::string& statName) const {
-    std::vector<ItemModifier> result;
+std::vector<LootModifier> LootItem::GetModifiersForStat(const std::string& statName) const {
+    std::vector<LootModifier> result;
     for (const auto& modifier : modifiers_) {
         if (modifier.targetStat == statName) {
             result.push_back(modifier);
@@ -118,7 +118,7 @@ void LootItem::Deserialize(const nlohmann::json& data) {
     id_ = data["id"];
     name_ = data["name"];
     description_ = data["description"];
-    type_ = static_cast<ItemType>(data["type"]);
+    type_ = static_cast<LootType>(data["type"]);
     rarity_ = static_cast<LootRarity>(data["rarity"]);
     stackSize_ = data["stackSize"];
     maxStackSize_ = data["maxStackSize"];
@@ -131,14 +131,14 @@ void LootItem::Deserialize(const nlohmann::json& data) {
     
     stats_.clear();
     for (const auto& statData : data["stats"]) {
-        ItemStat stat;
+        LootStat stat;
         stat.Deserialize(statData);
         stats_.push_back(stat);
     }
     
     modifiers_.clear();
     for (const auto& modData : data["modifiers"]) {
-        ItemModifier modifier;
+        LootModifier modifier;
         modifier.modifierType = modData["modifierType"];
         modifier.targetStat = modData["targetStat"];
         modifier.value = modData["value"];
@@ -192,11 +192,11 @@ bool LootItem::CanStackWith(const LootItem& other) const {
 }
 
 bool LootItem::IsEquippable() const {
-    return type_ == ItemType::WEAPON || 
-           type_ == ItemType::ARMOR || 
-           type_ == ItemType::JEWELRY;
+    return type_ == LootType::WEAPON ||
+           type_ == LootType::ARMOR ||
+           type_ == LootType::JEWELRY;
 }
 
 bool LootItem::IsConsumable() const {
-    return type_ == ItemType::CONSUMABLE;
+    return type_ == LootType::CONSUMABLE;
 }

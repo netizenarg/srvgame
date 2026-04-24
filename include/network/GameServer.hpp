@@ -12,10 +12,15 @@
 
 #include "logging/Logger.hpp"
 #include "config/ConfigManager.hpp"
+#include "process/ProcessPool.hpp"
+
+#include "network/IConnection.hpp"
 #include "network/ConnectionManager.hpp"
-#include "network/GameSession.hpp"
+#include "network/BinarySession.hpp"
 #include "network/WebSocketProtocol.hpp"
 #include "network/WebSocketSession.hpp"
+
+#include "game/GameData.hpp"
 
 #include "game/GameLogic.hpp"
 
@@ -28,22 +33,15 @@ public:
     void Run();
     void Shutdown();
 
-    // For binary protocol
-    using SessionFactory = std::function<std::shared_ptr<GameSession>(asio::ip::tcp::socket, std::shared_ptr<asio::ssl::context>)>;
-    void SetSessionFactory(SessionFactory factory);
+    asio::io_context& GetIoContext();
+    void HandleIPCMessage(const nlohmann::json& data, GameLogic& game_logic);
 
-    // For WebSocket protocol
-    using WebSocketFactory = std::function<WebSocketProtocol::WebSocketConnection::Pointer(asio::ip::tcp::socket, std::shared_ptr<asio::ssl::context>)>;
-    void SetWebSocketConnectionFactory(WebSocketFactory factory);
+    void InitSessionFactory(int workerId, ProcessPool* processPool, GameLogic& game_logic);
+    void RegisterCallbacks(const std::string& protocol, GameLogic& game_logic);
 
 private:
-    void DoAccept();
-    void StartWorkerThreads();
-    void SetupSignalHandlers();
-
     asio::io_context ioContext_;
     asio::ip::tcp::acceptor acceptor_;
-    asio::signal_set signals_;
 
     WorkerGroupConfig groupConfig_;
     const ConfigManager& globalConfig_;
@@ -56,8 +54,15 @@ private:
     std::vector<std::thread> workerThreads_;
     std::atomic<bool> running_{false};
 
-    std::shared_ptr<asio::ssl::context> sslContext_;   // optional, set if SSL is configured
+    std::shared_ptr<asio::ssl::context> sslContext_;
 
-    SessionFactory sessionFactory_;
-    WebSocketFactory webSocketFactory_;
+    std::function<std::shared_ptr<IConnection>(asio::ip::tcp::socket, std::shared_ptr<asio::ssl::context>)> sessionFactory_;
+    std::function<std::shared_ptr<IConnection>(asio::ip::tcp::socket, std::shared_ptr<asio::ssl::context>)> webSocketFactory_;
+
+    std::optional<asio::executor_work_guard<asio::io_context::executor_type>> work_guard_;
+
+    void DoAccept();
+    void StartWorkerThreads();
+    std::vector<std::shared_ptr<IConnection>> GetSessionsInRadius(const glm::vec3& position, float radius);
+
 };

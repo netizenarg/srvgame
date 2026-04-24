@@ -25,8 +25,8 @@ struct RaycastHit {
     glm::vec3 point;
     glm::vec3 normal;
     float distance = 0.0f;
-    uint64_t entityId = 0;
-    uint64_t chunkId = 0;
+    uint64_t entity_id = 0;
+    uint64_t chunk_id = 0;
 };
 
 // Define CollisionType enum here since it's specific to CollisionSystem
@@ -41,8 +41,8 @@ struct CollisionResult {
     bool collided = false;
     glm::vec3 resolution = glm::vec3(0.0f, 0.0f, 0.0f);
     float penetration = 0.0f;
-    uint64_t collidedWith = 0; // entityId or 0 for world
-    uint64_t chunkId = 0;      // chunkId for world collisions
+    uint64_t collided_id = 0; // collided with entityId or 0 for world
+    uint64_t chunk_id = 0;      // chunkId for world collisions
     CollisionType type = CollisionType::NONE;
 };
 
@@ -123,7 +123,7 @@ private:
     struct CollisionChunk {
         int chunkX = 0;
         int chunkZ = 0;
-        uint64_t chunkId = 0;
+        uint64_t chunk_id = 0;
         BoundingBox bounds;
         std::vector<glm::vec3> vertices;
         std::vector<std::array<uint32_t, 3>> triangles; // Triangle indices

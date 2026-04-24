@@ -42,7 +42,7 @@ public:
     void CreateLootEntity(const glm::vec3& position, std::shared_ptr<LootItem> item, int quantity);
 
     // Statistics
-    int GetActiveNPCCount() const { return activeNPCCount_; }
+    int GetActiveNPCCount() const { return npcManager_->GetNPCs().size(); }
 
 private:
     LogicEntity();
@@ -52,9 +52,7 @@ private:
     static LogicEntity* instance_;
 
     std::unique_ptr<NPCManager> npcManager_;
-    std::unordered_map<uint64_t, std::unique_ptr<NPCEntity>> npcEntities_;
     std::mutex npcMutex_;
-    std::atomic<int> activeNPCCount_{0};
 
     MobSystem& mobSystem_;
     EntityManager& entityManager_;

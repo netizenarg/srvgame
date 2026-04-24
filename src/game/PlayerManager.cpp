@@ -1,7 +1,7 @@
 #include "game/PlayerManager.hpp"
 
 PlayerManager& PlayerManager::GetInstance() {
-    static PlayerManager instance;   // Meyer's singleton – no static mutex needed
+    static PlayerManager instance;
     return instance;
 }
 
@@ -14,7 +14,6 @@ PlayerManager::PlayerManager()
 
     Logger::Info("PlayerManager initialized");
 
-    // Start background threads using RAIIThread
     saveThread_ = RAIIThread([this]() { SaveLoop(); });
     cleanupThread_ = RAIIThread([this]() { CleanupLoop(); });
 }
@@ -40,13 +39,11 @@ void PlayerManager::Shutdown() {
     Logger::Info("PlayerManager shutdown complete");
 }
 
-// =============== Player Creation / Retrieval ===============
-
-std::shared_ptr<Player> PlayerManager::CreatePlayer(const std::string& username) {
+std::shared_ptr<Player> PlayerManager::CreatePlayer(const std::string& username, const std::string& password) {
     static std::atomic<int64_t> nextPlayerId{1000000};
     int64_t playerId = nextPlayerId++;
 
-    auto player = std::make_shared<Player>(playerId, username);
+    auto player = std::make_shared<Player>(playerId, username, password);
 
     {
         std::unique_lock<std::shared_mutex> lock(playersMutex_);
@@ -120,29 +117,19 @@ uint64_t PlayerManager::GetSessionIdByPlayerId(int64_t playerId) const {
     return (it != playerToSession_.end()) ? it->second : 0;
 }
 
-// =============== Authentication / Connection ===============
-
-
 bool PlayerManager::AuthenticatePlayer(const std::string& username, const std::string& password) {
     try {
-        // Safely escape the username to prevent SQL injection.
-        // Assume dbManager_ has an EscapeString method (or use a dedicated escaping function).
-        std::string escapedUsername = dbManager_.EscapeString(username);
-
-        // Use the existing Query method with escaped input.
-        auto result = dbManager_.Query(
-            "SELECT password_hash FROM players WHERE username = '" + escapedUsername + "'"
-        );
-
+        std::string sql = dbManager_.GetSQLProvider().GetQuery("get_player_by_username");
+        if (sql.empty()) {
+            Logger::Error("Missing SQL: get_player_by_username");
+            return false;
+        }
+        auto result = dbManager_.QueryWithParams(sql, { username });
         if (result.empty()) {
             Logger::Debug("Authentication failed: username '{}' not found", username);
             return false;
         }
-
         std::string storedHash = result[0]["password_hash"].get<std::string>();
-
-        // Verify the password using a secure hashing algorithm.
-        // Replace with your actual password verification function.
         if (Passwords::VerifyPassword(password, storedHash)) {
             Logger::Debug("Authentication successful for user '{}'", username);
             return true;
@@ -150,7 +137,6 @@ bool PlayerManager::AuthenticatePlayer(const std::string& username, const std::s
             Logger::Debug("Authentication failed: invalid password for user '{}'", username);
             return false;
         }
-
     } catch (const std::exception& e) {
         Logger::Error("Authentication error for {}: {}", username, e.what());
         return false;
@@ -215,7 +201,25 @@ void PlayerManager::UpdateConnectionStats(int64_t playerId, bool connected) {
     }
 }
 
-// =============== Messaging & Broadcasting ===============
+void PlayerManager::MarkDirty(uint64_t playerId) {
+    std::unique_lock<std::shared_mutex> lock(dirtyMutex_);
+    dirtyPlayers_.insert(playerId);
+}
+
+std::vector<uint64_t> PlayerManager::GetDirtyPlayersAndClear() {
+    std::unique_lock<std::shared_mutex> lock(dirtyMutex_);
+    std::vector<uint64_t> result(dirtyPlayers_.begin(), dirtyPlayers_.end());
+    dirtyPlayers_.clear();
+    return result;
+}
+
+void PlayerManager::UpdatePosition(uint64_t playerId, float x, float y, float z) {
+    auto player = GetPlayer(playerId);
+    if (player) {
+        player->UpdatePosition(x, y, z);
+        MarkDirty(playerId);
+    }
+}
 
 void PlayerManager::BroadcastToNearbyPlayers(int64_t playerId, const nlohmann::json& message) {
     auto nearby = GetNearbyPlayers(playerId, DEFAULT_BROADCAST_RANGE);
@@ -223,7 +227,7 @@ void PlayerManager::BroadcastToNearbyPlayers(int64_t playerId, const nlohmann::j
     for (int64_t id : nearby) {
         if (auto sessionId = GetSessionIdByPlayerId(id)) {
             if (auto session = connMgr.GetSession(sessionId))
-                session->Send(message);
+                session->SendJson(message);
         }
     }
 }
@@ -251,8 +255,6 @@ std::vector<std::shared_ptr<Player>> PlayerManager::GetPlayersInRadius(const glm
     }
     return result;
 }
-
-// =============== Database Persistence ===============
 
 void PlayerManager::SaveAllPlayers() {
     Logger::Info("Saving all players to database...");
@@ -304,17 +306,20 @@ std::shared_ptr<Player> PlayerManager::LoadPlayer(int64_t playerId) {
 
 std::shared_ptr<Player> PlayerManager::LoadPlayerByUsername(const std::string& username) {
     try {
-        auto result = dbManager_.Query("SELECT player_id FROM players WHERE username = '" + username + "'");
+        std::string sql = dbManager_.GetSQLProvider().GetQuery("get_player_by_username");
+        if (sql.empty()) {
+            Logger::Error("Missing SQL: get_player_by_username");
+            return nullptr;
+        }
+        auto result = dbManager_.QueryWithParams(sql, { username });
         if (result.empty()) return nullptr;
-        int64_t playerId = result[0]["player_id"].get<int64_t>();
+        int64_t playerId = result[0]["id"].get<int64_t>();
         return LoadPlayer(playerId);
     } catch (const std::exception& e) {
         Logger::Error("Failed to load player by username {}: {}", username, e.what());
         return nullptr;
     }
 }
-
-// =============== Background Threads ===============
 
 void PlayerManager::SaveLoop() {
     Logger::Info("Player save loop started");
@@ -361,7 +366,6 @@ void PlayerManager::CleanupInactivePlayers() {
         if (it == players_.end()) continue;
         it->second->SaveToDatabase();
 
-        // Remove from username map
         {
             std::unique_lock<std::shared_mutex> ulock(usernameMutex_);
             for (auto uit = usernameToId_.begin(); uit != usernameToId_.end(); ) {
@@ -369,7 +373,6 @@ void PlayerManager::CleanupInactivePlayers() {
                 else ++uit;
             }
         }
-        // Remove from sessions map
         {
             std::unique_lock<std::shared_mutex> slock(sessionsMutex_);
             for (auto sit = sessionToPlayer_.begin(); sit != sessionToPlayer_.end(); ) {
@@ -378,7 +381,6 @@ void PlayerManager::CleanupInactivePlayers() {
             }
             playerToSession_.erase(id);
         }
-        // Remove stats
         {
             std::lock_guard<std::mutex> slock(statsMutex_);
             playerStats_.erase(id);
@@ -388,8 +390,6 @@ void PlayerManager::CleanupInactivePlayers() {
     }
     Logger::Info("Cleaned up {} inactive players", toRemove.size());
 }
-
-// =============== Player Stats ===============
 
 PlayerStats PlayerManager::GetPlayerStats(int64_t playerId) const {
     std::lock_guard<std::mutex> lock(statsMutex_);
@@ -445,8 +445,6 @@ void PlayerManager::PrintStats() {
     Logger::Info("=================================");
 }
 
-// =============== Search & Queries ===============
-
 std::vector<int64_t> PlayerManager::SearchPlayers(const std::string& query, int limit) {
     std::vector<int64_t> result;
     std::shared_lock<std::shared_mutex> lock(usernameMutex_);
@@ -470,8 +468,6 @@ std::vector<int64_t> PlayerManager::GetPlayersByLevelRange(int minLevel, int max
     }
     return result;
 }
-
-// =============== Parties ===============
 
 void PlayerManager::CreateParty(int64_t leaderId, const std::string& partyName) {
     std::lock_guard<std::mutex> lock(partyMutex_);
@@ -544,13 +540,11 @@ int64_t PlayerManager::GeneratePartyId() {
     return nextPartyId++;
 }
 
-// =============== Messaging ===============
-
 void PlayerManager::SendToPlayer(int64_t playerId, const nlohmann::json& message) {
     if (auto sessionId = GetSessionIdByPlayerId(playerId)) {
         auto& connMgr = ConnectionManager::GetInstance();
         if (auto session = connMgr.GetSession(sessionId))
-            session->Send(message);
+            session->SendJson(message);
     } else {
         Logger::Warn("Player {} is not online", playerId);
     }
@@ -561,12 +555,10 @@ void PlayerManager::SendToPlayers(const std::vector<int64_t>& playerIds, const n
     for (int64_t id : playerIds) {
         if (auto sessionId = GetSessionIdByPlayerId(id)) {
             if (auto session = connMgr.GetSession(sessionId))
-                session->Send(message);
+                session->SendJson(message);
         }
     }
 }
-
-// =============== Moderation ===============
 
 void PlayerManager::BanPlayer(int64_t playerId, const std::string& reason, int64_t durationSeconds) {
     auto player = GetPlayer(playerId);
@@ -584,8 +576,8 @@ void PlayerManager::BanPlayer(int64_t playerId, const std::string& reason, int64
     if (auto sessionId = GetSessionIdByPlayerId(playerId)) {
         auto& connMgr = ConnectionManager::GetInstance();
         if (auto session = connMgr.GetSession(sessionId)) {
-            nlohmann::json msg = {{"type", "banned"}, {"reason", reason}, {"duration", durationSeconds}};
-            session->Send(msg);
+            nlohmann::json msg = {{"msg", "banned"}, {"reason", reason}, {"duration", durationSeconds}};
+            session->SendJson(msg);
             session->Stop();
         }
     }
@@ -604,8 +596,6 @@ void PlayerManager::UnbanPlayer(int64_t playerId) {
     }
 }
 
-// =============== Teleportation ===============
-
 void PlayerManager::TeleportPlayer(int64_t playerId, float x, float y, float z) {
     auto player = GetPlayer(playerId);
     if (player) {
@@ -618,8 +608,6 @@ void PlayerManager::TeleportPlayer(int64_t playerId, float x, float y, float z) 
         Logger::Debug("Player {} teleported to ({}, {}, {})", playerId, x, y, z);
     }
 }
-
-// =============== Inventory ===============
 
 bool PlayerManager::GiveItemToPlayer(int64_t playerId, const std::string& itemId, int count) {
     auto player = GetPlayer(playerId);
@@ -648,8 +636,6 @@ bool PlayerManager::TakeItemFromPlayer(int64_t playerId, const std::string& item
     return true;
 }
 
-// =============== Achievements ===============
-
 void PlayerManager::AddAchievementToPlayer(int64_t playerId, const std::string& achievementId) {
     auto player = GetPlayer(playerId);
     if (player) {
@@ -662,8 +648,6 @@ void PlayerManager::AddAchievementToPlayer(int64_t playerId, const std::string& 
         Logger::Info("Player {} earned achievement {}", playerId, achievementId);
     }
 }
-
-// =============== Utility ===============
 
 std::vector<std::shared_ptr<Player>> PlayerManager::GetAllPlayers() const {
     std::shared_lock<std::shared_mutex> lock(playersMutex_);

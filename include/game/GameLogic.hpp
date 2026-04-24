@@ -1,13 +1,18 @@
 #pragma once
 
-#include <cmath>
 #include <memory>
+#include <shared_mutex>
 #include <unordered_map>
 
 #include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
 
+#include "database/DbService.hpp"
+
 #include "network/PredictionSystem.hpp"
+#include "network/IConnection.hpp"
+
+#include "scripting/PythonScripting.hpp"
 
 #include "game/LogicCore.hpp"
 #include "game/PlayerManager.hpp"
@@ -16,137 +21,145 @@
 #include "game/SkillSystem.hpp"
 #include "game/QuestManager.hpp"
 #include "game/EntityManager.hpp"
+#include "game/GameData.hpp"
 
-class GameLogic : public LogicCore
+class DatabaseService;
+
+class GameLogic : public LogicCore, public std::enable_shared_from_this<GameLogic>
 {
 public:
     static GameLogic& GetInstance();
 
-    // Core lifecycle
-    void Initialize();
-    void Shutdown();
+    void Initialize() override;
+    void Shutdown() override;
 
-    // Set connection manager for broadcasting
-    void SetConnectionManager(std::shared_ptr<ConnectionManager> connMgr) {
-        connectionManager_ = connMgr;
-        Logger::Info("ConnectionManager set for GameLogic");
-    }
-
-    // Database backend management
-    void SetDatabaseBackend(std::unique_ptr<DatabaseBackend> backend) {
-        databaseBackend_ = std::move(backend);
-        Logger::Info("Database backend set for GameLogic");
-    }
-    
-    DatabaseBackend* GetDatabaseBackend() const {
-        return databaseBackend_.get();
-    }
-
-    // World configuration
     struct WorldConfig : public LogicWorld::WorldConfig {};
     void SetWorldConfig(const WorldConfig& config);
     const WorldConfig& GetWorldConfig() const;
 
-    // World maintenance
     void PerformMaintenance();
 
-    // IPC message handling
-    void HandleIPCMessage(const nlohmann::json& message);
-
-    // World methods
     std::shared_ptr<WorldChunk> GetOrCreateChunk(int chunkX, int chunkZ);
     void GenerateWorldAroundPlayer(uint64_t playerId, const glm::vec3& position);
     void PreloadWorldData(float radius);
     float GetTerrainHeight(float x, float z) const;
     BiomeType GetBiomeAt(float x, float z) const;
 
-    // Entity methods
     uint64_t SpawnNPC(NPCType type, const glm::vec3& position, uint64_t ownerId = 0);
     void DespawnNPC(uint64_t npcId);
     NPCEntity* GetNPCEntity(uint64_t npcId);
     GameEntity* GetEntity(uint64_t entityId);
     std::shared_ptr<Player> GetPlayer(uint64_t playerId);
 
-    // Collision methods
     CollisionResult CheckCollision(const glm::vec3& position, float radius, uint64_t excludeEntityId = 0);
     bool Raycast(const glm::vec3& origin, const glm::vec3& direction, float maxDistance, RaycastHit& hit);
 
-    // Loot methods
     void CreateLootEntity(const glm::vec3& position, std::shared_ptr<LootItem> item, int quantity);
-    void HandleLootPickup(uint64_t sessionId, const nlohmann::json& data);
-    void HandleInventoryMove(uint64_t sessionId, const nlohmann::json& data);
-    void HandleItemUse(uint64_t sessionId, const nlohmann::json& data);
-    void HandleItemDrop(uint64_t sessionId, const nlohmann::json& data);
-    void HandleTradeRequest(uint64_t sessionId, const nlohmann::json& data);
-    void HandleGoldTransaction(uint64_t sessionId, const nlohmann::json& data);
 
-    // World message handlers
-    void HandleWorldChunkRequest(uint64_t sessionId, const nlohmann::json& data);
-    void HandlePlayerPositionUpdate(uint64_t sessionId, const nlohmann::json& data);
-    void HandleNPCInteraction(uint64_t sessionId, const nlohmann::json& data);
-    void HandleCollisionCheck(uint64_t sessionId, const nlohmann::json& data);
-    void HandleEntitySpawnRequest(uint64_t sessionId, const nlohmann::json& data);
-    void HandleFamiliarCommand(uint64_t sessionId, const nlohmann::json& data);
-    void HandlePlayerState(uint64_t sessionId, const std::vector<uint8_t>& data);
+    void OnPlayerConnected(uint64_t sessionId, uint64_t playerId) override;
+    void OnPlayerDisconnected(uint64_t sessionId) override;
 
-    // Message handling
-    void HandleMessage(uint64_t sessionId, const nlohmann::json& message);
-
-    // Player connection/disconnection
-    void OnPlayerConnected(uint64_t sessionId, uint64_t playerId);
-    void OnPlayerDisconnected(uint64_t sessionId);
-
-    // Broadcasting
-    void BroadcastToNearbyPlayers(const glm::vec3& position, uint16_t messageType,
-                                             const std::vector<uint8_t>& data, float radius = 50.0f);
-    void BroadcastToNearbyOnlinePlayers(const glm::vec3& position, uint16_t messageType,
-                                        const std::vector<uint8_t>& data, float radius = 50.0f);
     void SyncNearbyEntitiesToPlayer(uint64_t sessionId, const glm::vec3& position);
-
-    // Helper broadcast methods
     void BroadcastToAllPlayers(const nlohmann::json& message);
-    void BroadcastToAllPlayersBinary(uint16_t messageType, const std::vector<uint8_t>& data);
-    void BroadcastToPlayers(const std::vector<uint64_t>& sessionIds, const nlohmann::json& message);
-
-    // Broadcast entity spawn to nearby players
-    void BroadcastEntitySpawn(uint64_t entityId, EntityType type, const glm::vec3& position,
-                              float yaw, const std::string& name);
     void SendPositionCorrection(uint64_t sessionId, const glm::vec3& position, const glm::vec3& velocity);
-    void BroadcastPlayerState(uint64_t playerId, const ServerState& state);
-    void BroadcastEntityDespawn(uint64_t entityId, const glm::vec3& position);
+    void SendAuthentication(uint64_t sessionId, const std::string& message, uint64_t playerId);
+    void SendAuthenticationFailure(uint64_t sessionId, const std::string& message);
+
+    void SetSendAuthenticationResponseCallback(std::function<void(uint64_t sessionId, const std::string& message, uint64_t playerId)> cb);
+    void SetSendChunkCallback(std::function<void(uint64_t sessionId, const ChunkData&)> cb);
+    void SetSendCollisionResponseCallback(std::function<void(uint64_t session_id, const CollisionResult& result)> cb);
+
+    void SetPlayerStateCallback(std::function<void(const PlayerStateData&)> cb); // now it also used for update
+    void SetBroadcastPlayerPositionCallback(std::function<void(const PlayerPositionData&, float radius)> cb);
+    void SetSendPlayerUpdateCallback(std::function<void(uint64_t session_id, const PlayerUpdateData& data)> cb);
+    void SetSendPlayersUpdateCallback(std::function<void(uint64_t session_id, const PlayerUpdateData& data)> cb);
+
+    void SetSendNPCInteractionResponseCallback(std::function<void(uint64_t session_id, const NpcData& response)> cb);
+    void SetSendFamiliarCommandResponseCallback(std::function<void(uint64_t session_id, const FamiliarData& response)> cb);
+    void SetSendEntitySpawnResponseCallback(std::function<void(uint64_t session_id, const EntitySpawnData& response)> cb);
+    void SetSendLootPickupResponseCallback(std::function<void(uint64_t session_id, const LootPickupData& response)> cb);
+    void SetSendInventoryResponseCallback(std::function<void(uint64_t session_id, const InventoryData& response)> cb);
+
+    void OnAuthentication(const AuthenticationData& data);
+    void OnChunkRequest(const ChunkData& data);
+    void OnCollisionCheck(const CollisionData& data);
+    void OnPlayerPosition(const PlayerPositionData& data);
+    void OnPlayerState(const PlayerStateData& data);
+    void OnPlayerUpdate(const PlayerUpdateData& data);
+    void OnPlayersUpdate(const PlayerUpdateData& data);
+    void OnNPCInteraction(const NpcData& data);
+    void OnFamiliarCommand(const FamiliarData& data);
+    void OnEntitySpawnRequest(const EntitySpawnData& data);
+    void OnLootPickup(const LootPickupData& data);
+    void OnInventory(const InventoryData& data);
+
+    // scripting
+    void RegisterPythonEventHandlers() override;
+    void FirePythonEvent(const std::string& eventName, const nlohmann::json& data) override;
+    nlohmann::json CallPythonFunction(const std::string& moduleName, const std::string& functionName,
+                                      const nlohmann::json& args) override;
+
+    void SaveGameState() override;
+    void CleanupOldData() override;
+    void ProcessGameTick(float deltaTime) override;
+    void SpawnEnemies() override;
+    void RespawnNPCs() override;
+    void SpawnResources() override;
+    void SaveLoop() override;
+    void HandleLogin(uint64_t sessionId, const nlohmann::json& data) override;
+    void HandleChat(uint64_t sessionId, const nlohmann::json& data) override;
+    void HandleCombat(uint64_t sessionId, const nlohmann::json& data) override;
+    void HandleQuest(uint64_t sessionId, const nlohmann::json& data) override;
+
+    void SetDatabaseService(DatabaseService* dbService);
+    void SetConnectionManager(std::shared_ptr<ConnectionManager> connMgr);
+    void SetDatabaseBackend(std::unique_ptr<DatabaseBackend> backend);
+    DatabaseBackend* GetDatabaseBackend() const;
 
 private:
     GameLogic();
     ~GameLogic();
 
+    bool initialized_ = false;
     static std::mutex instanceMutex_;
     static GameLogic* instance_;
 
-    // Component systems
-    //PlayerManager& playerManager_;
-
-    // Database backend
     std::unique_ptr<DatabaseBackend> databaseBackend_;
-
-    // Connection manager for broadcasting
     std::shared_ptr<ConnectionManager> connectionManager_;
-
     std::unordered_map<uint64_t, PredictionSystem> playerPrediction_;
     std::mutex predictionMutex_;
+    DatabaseService* dbService_ = nullptr;
 
-    // Thread functions
-    void GameLoop();
-    void SpawnerLoop();
-    void SaveLoop();
+    std::function<void(uint64_t, const std::string&, uint64_t)> sendAuthResponseCb_;
+    std::function<void(uint64_t, const ChunkData&)> sendChunkCb_;
+    std::function<void(uint64_t, const CollisionResult&)> sendCollisionResponseCb_;
 
-    // Game tick processing
-    void ProcessGameTick(float deltaTime);
+    std::function<void(const PlayerPositionData&, float)> broadcastPlayerPositionCb_;
+    std::function<void(const PlayerStateData&)> playerStateCb_;
+    std::function<void(uint64_t, const PlayerUpdateData&)> sendPlayerUpdateCb_;
+    std::function<void(uint64_t, const PlayerUpdateData&)> sendPlayersUpdateCb_;
+
+    std::function<void(uint64_t, const NpcData&)> sendNPCInteractionResponseCb_;
+    std::function<void(uint64_t, const FamiliarData&)> sendFamiliarCommandResponseCb_;
+    std::function<void(uint64_t, const EntitySpawnData&)> sendEntitySpawnResponseCb_;
+    std::function<void(uint64_t, const LootPickupData&)> sendLootPickupResponseCb_;
+    std::function<void(uint64_t, const InventoryData&)> sendInventoryResponseCb_;
+
+    bool pythonEnabled_ = false;
+
+    void GameLoop() override;
+    void SpawnerLoop() override;
     void UpdateWorld(float deltaTime);
 
-    // Helper methods
-    void RegisterWorldHandlers();
     bool LoadGameData();
-    void SaveGameState();
     void SaveChunkData();
-    void CleanupOldData();
+
+    nlohmann::json PlayerUpdateToJson(uint64_t playerId, const glm::vec3& pos, float yaw,
+                                      float health, float maxHealth, const std::string& name);
+    nlohmann::json PlayerPositionToJson(const std::vector<uint8_t>& data);
+    nlohmann::json PlayerUpdateToJson(const std::vector<uint8_t>& data);
+    nlohmann::json EntitySpawnToJson(const std::vector<uint8_t>& data);
+    nlohmann::json EntityUpdateToJson(const std::vector<uint8_t>& data);
+    nlohmann::json EntityDespawnToJson(const std::vector<uint8_t>& data);
+    nlohmann::json ChunkDataToJson(const std::vector<uint8_t>& data);
 };

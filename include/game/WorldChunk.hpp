@@ -9,6 +9,9 @@
 #include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
 
+#include "network/BinaryProtocol.hpp"
+#include "game/GameData.hpp"
+
 struct LODConfig;
 class LODChunk;
 
@@ -61,29 +64,28 @@ struct Triangle {
 
 class WorldChunk {
 public:
-    static const int CHUNK_SIZE = 16;  // 16x16 blocks
     static const float BLOCK_SIZE;
     static const float CHUNK_WIDTH;
+    static constexpr int DEFAULT_SIZE = 32;  // 32x32 blocks
+    static constexpr float DEFAULT_SPACING = 1.0f;
 
     WorldChunk(int x, int z, ChunkLOD lod = ChunkLOD::HIGH);
     virtual ~WorldChunk() = default;
 
     // Geometry access
-    const std::vector<Vertex>& GetVertices() const { return vertices_; }
-    const std::vector<Triangle>& GetTriangles() const { return triangles_; }
-    const std::vector<glm::vec3>& GetCollisionVertices() const { return collisionVertices_; }
-    const std::vector<Triangle>& GetCollisionTriangles() const { return collisionTriangles_; }
+    const std::vector<Vertex>& GetVertices() const;
+    const std::vector<Triangle>& GetTriangles() const;
+    const std::vector<glm::vec3>& GetCollisionVertices() const;
+    const std::vector<Triangle>& GetCollisionTriangles() const;
 
     // Metadata
-    int GetChunkX() const { return chunkX_; }
-    int GetChunkZ() const { return chunkZ_; }
-    virtual ChunkLOD GetLOD() const { return lod_; }
-    BiomeType GetBiome() const { return biome_; }
-    void SetBiome(BiomeType biome) { biome_ = biome; }
+    int GetChunkX() const;
+    int GetChunkZ() const;
+    virtual ChunkLOD GetLOD() const;
+    BiomeType GetBiome() const;
+    void SetBiome(BiomeType biome);
 
-    glm::vec3 GetWorldPosition() const {
-        return glm::vec3(chunkX_ * CHUNK_WIDTH, 0.0f, chunkZ_ * CHUNK_WIDTH);
-    }
+    glm::vec3 GetWorldPosition() const;
 
     // Block access
     BlockType GetBlock(int x, int y, int z) const;
@@ -91,35 +93,35 @@ public:
     float GetHeightAt(float x, float z) const;
 
     // Entity management
-    void AddEntity(uint64_t entityId) { entities_.insert(entityId); }
-    void RemoveEntity(uint64_t entityId) { entities_.erase(entityId); }
-    const std::unordered_set<uint64_t>& GetEntities() const { return entities_; }
-    bool HasEntities() const { return !entities_.empty(); }
+    void AddEntity(uint64_t entityId);
+    void RemoveEntity(uint64_t entityId);
+    const std::unordered_set<uint64_t>& GetEntities() const;
+    bool HasEntities() const;
 
     // Serialization
-    virtual nlohmann::json Serialize() const;
+    void SerializeToWriter(BinaryProtocol::BinaryWriter& writer) const;
+    std::vector<uint8_t> SerializeBinary() const;
+    nlohmann::json SerializeJson() const;
     virtual void Deserialize(const nlohmann::json& data);
+    virtual nlohmann::json SerializeHeightmap() const;
 
     // Geometry generation
-    virtual void GenerateGeometry() { GenerateLowPolyGeometry(); }
+    virtual void GenerateGeometry();
     void GenerateLowPolyGeometry();
     void GenerateCollisionMesh();
 
     // LOD-specific geometry generation
-    virtual void GenerateHighLODGeometry() { GenerateLowPolyGeometry(); }
-    virtual void GenerateMediumLODGeometry() { GenerateLowPolyGeometry(); }
-    virtual void GenerateLowLODGeometry() { GenerateLowPolyGeometry(); }
-    virtual void GenerateBillboardGeometry() { }
+    virtual void GenerateHighLODGeometry();
+    virtual void GenerateMediumLODGeometry();
+    virtual void GenerateLowLODGeometry();
+    virtual void GenerateBillboardGeometry();
 
     // Utility
     bool IsPositionInside(const glm::vec3& position) const;
-    glm::vec3 GetCenter() const {
-        return glm::vec3(
-            chunkX_ * CHUNK_WIDTH + CHUNK_WIDTH / 2.0f,
-            0.0f,
-            chunkZ_ * CHUNK_WIDTH + CHUNK_WIDTH / 2.0f
-        );
-    }
+    glm::vec3 GetCenter() const;
+
+    glm::vec3 GetBlockColor(BlockType type) const;
+    glm::vec3 GetBiomeColor(BiomeType biome, float height) const;
 
 protected:
     int chunkX_;
@@ -142,15 +144,16 @@ protected:
     // Entities in this chunk
     std::unordered_set<uint64_t> entities_;
 
+    std::vector<StoneData> stones_;
+    std::vector<TreeData> trees_;
+    PortalData portal_;
+
     // Helper methods
     void GenerateBlockVertices(int x, int y, int z, BlockType type);
     void AddQuad(const glm::vec3& p1, const glm::vec3& p2,
                  const glm::vec3& p3, const glm::vec3& p4,
                  const glm::vec3& normal, const glm::vec3& color);
     void AddTriangle(uint32_t v0, uint32_t v1, uint32_t v2);
-
-    glm::vec3 GetBlockColor(BlockType type) const;
-    glm::vec3 GetBiomeColor(BiomeType biome, float height) const;
 
     friend class WorldGenerator;
 };

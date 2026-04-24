@@ -27,76 +27,55 @@
 #include "database/SQLiteClient.hpp"
 #endif
 
-/**
- * @brief Database Manager Singleton
- *
- * Manages database connections and provides access to the appropriate
- * database backend based on configuration.
- */
+enum BackendType {
+    SQLITE,
+    POSTGRESQL,
+    CITUS,
+    INVALID
+};
+
 class DbManager {
 public:
-    // Database types
-    enum BackendType {
-        SQLITE,
-        POSTGRESQL,
-        CITUS,
-        INVALID
-    };
-
     static DbManager& GetInstance();
 
-    // Lifecycle Management
     bool Initialize(const std::string& configPath = "");
     void Shutdown();
-    bool IsInitialized() const { return initialized_; }
+    bool IsInitialized() const;
 
-    const SQLProvider& GetSQLProvider() const { return sqlProvider_; }
+    const SQLProvider& GetSQLProvider() const;
     bool LoadSQLForBackend();
 
     bool EnsureDatabaseExists(const std::string& configPath = "");
 
     std::string EscapeString(const std::string& input);
 
-    // Backend Management
     bool SaveGameState(const std::string& key, const nlohmann::json& state);
     bool SetBackend(BackendType type, const nlohmann::json& config);
-    DatabaseBackend* GetBackend() const { return backend_.get(); }
-    BackendType GetCurrentType() const { return currentType_; }
-    nlohmann::json GetPlayer(uint64_t playerId){ return backend_->GetPlayer(playerId); };
+    DatabaseBackend* GetBackend() const;
+    BackendType GetCurrentType() const;
+    nlohmann::json GetPlayer(uint64_t playerId);
 
-    nlohmann::json Query(const std::string& sql) { return backend_->Query(sql); };
-    nlohmann::json QueryWithParams(const std::string& sql, const std::vector<std::string>& params)
-    { return backend_->QueryWithParams(sql, params); };
-    bool Execute(const std::string& sql) { return backend_->Execute(sql); };
-    bool ExecuteWithParams(const std::string& sql, const std::vector<std::string>& params)
-    { return backend_->ExecuteWithParams(sql, params); };
+    nlohmann::json Query(const std::string& sql);
+    nlohmann::json QueryWithParams(const std::string& sql, const std::vector<std::string>& params);
+    bool Execute(const std::string& sql);
+    bool ExecuteWithParams(const std::string& sql, const std::vector<std::string>& params);
 
-    bool UpdatePlayerPosition(uint64_t playerId, float x, float y, float z) {
-        if (backend_) {
-            return backend_->UpdatePlayerPosition(playerId, x, y, z);
-        }
-        return false;
-    }
+    bool UpdatePlayerPosition(uint64_t playerId, float x, float y, float z);
 
-    // Configuration
     bool LoadConfiguration(const std::string& configPath = "");
-    nlohmann::json GetConfiguration() const { return config_; }
+    nlohmann::json GetConfiguration() const;
 
-    // Connection Management
     bool Connect();
     bool Reconnect();
     void Disconnect();
     bool IsConnected() const;
 
-    // Shard Mapping
     int GetShardId(uint64_t entityId) const;
     int GetTotalShards() const;
 
-    // Statistics
     nlohmann::json GetStatistics() const;
     void PrintStatistics() const;
 
-    // Migration Management
     bool RunMigrations();
     bool CheckMigrationStatus();
     bool RollbackMigration(int version);
@@ -120,7 +99,6 @@ private:
     std::atomic<bool> initialized_;
     std::atomic<bool> connected_;
 
-    // Statistics
     struct Statistics {
         std::atomic<int64_t> queriesExecuted{0};
         std::atomic<int64_t> queriesFailed{0};
@@ -131,7 +109,6 @@ private:
     };
     mutable Statistics stats_;
 
-    // Helper methods
     bool ValidateConfiguration(const nlohmann::json& config) const;
     BackendType ParseBackendType(const std::string& typeStr) const;
     std::string BackendTypeToString(BackendType type) const;

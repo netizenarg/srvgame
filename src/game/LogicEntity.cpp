@@ -16,7 +16,7 @@ LogicEntity& LogicEntity::GetInstance() {
 LogicEntity::LogicEntity()
     : mobSystem_(MobSystem::GetInstance()),
       entityManager_(EntityManager::GetInstance()) {
-    Logger::Debug("LogicEntity created");
+    Logger::Trace("LogicEntity created");
 }
 
 LogicEntity::~LogicEntity() {
@@ -24,24 +24,17 @@ LogicEntity::~LogicEntity() {
 }
 
 void LogicEntity::Initialize() {
+    InitializeCollisionSystem();
     InitializeNPCSystem();
     InitializeMobSystem();
-    InitializeCollisionSystem();
-    //auto& config = ConfigManager::GetInstance();
-    // Initialize loot systems
     //inventorySystem_ = std::make_unique<InventorySystem>();
     //lootTableManager_ = std::make_unique<LootTableManager>();
-    //lootTableManager_->LoadLootTables("config/loot_tables.json");
-    LootTableManager::GetInstance().LoadLootTables("config/loot_tables.json");
+    //lootTableManager_->LoadLootTables();
+    //LootTableManager::GetInstance().LoadLootTables();
     Logger::Info("LogicEntity initialized");
 }
 
 void LogicEntity::Shutdown() {
-    {
-        std::lock_guard<std::mutex> lock(npcMutex_);
-        npcEntities_.clear();
-        activeNPCCount_ = 0;
-    }
     npcManager_.reset();
     collisionSystem_.reset();
     //inventorySystem_.reset();
@@ -73,7 +66,7 @@ void LogicEntity::InitializeMobSystem() {
     mobSystem_.Initialize();
     auto& config = ConfigManager::GetInstance();
     if (config.HasKey("mobs")) {
-        nlohmann::json mobConfig = config.GetJson("mobs");
+        static const nlohmann::json mobConfig = config.GetJson("mobs");
         mobSystem_.LoadMobConfig(mobConfig);
     }
 }
@@ -95,35 +88,34 @@ uint64_t LogicEntity::SpawnNPC(NPCType type, const glm::vec3& position, uint64_t
         Logger::Error("Failed to get spawned NPC");
         return 0;
     }
-    npcEntities_[npcId] = std::unique_ptr<NPCEntity>(npc);
-    activeNPCCount_++;
-    // Register in collision system
-    BoundingSphere bounds{position, 1.0f};
-    collisionSystem_->RegisterEntity(npcId, bounds, CollisionType::ENTITY);
-    Logger::Debug("Spawned NPC {} at [{:.1f}, {:.1f}, {:.1f}]",
-                  npcId, position.x, position.y, position.z);
+    if (!collisionSystem_) {
+        Logger::Error("Failed to register collision system for NPC {}", npcId);
+    } else {
+        BoundingSphere bounds{position, 1.0f};
+        collisionSystem_->RegisterEntity(npcId, bounds, CollisionType::ENTITY);
+    }
+    //Logger::Trace("Spawned NPC {} at [{:.1f}, {:.1f}, {:.1f}]",
+    //              npcId, position.x, position.y, position.z);
     return npcId;
 }
 
 void LogicEntity::DespawnNPC(uint64_t npcId) {
     std::lock_guard<std::mutex> lock(npcMutex_);
-    auto it = npcEntities_.find(npcId);
-    if (it == npcEntities_.end()) {
-        return;
+    if (!npcManager_->GetNPC(npcId)) return;
+    if (collisionSystem_) {
+        collisionSystem_->UnregisterEntity(npcId);
     }
-    collisionSystem_->UnregisterEntity(npcId);
     npcManager_->DespawnNPC(npcId);
-    npcEntities_.erase(it);
-    activeNPCCount_--;
-    Logger::Debug("Despawned NPC {}", npcId);
+    //Logger::Trace("Despawned NPC {}", npcId);
 }
 
 void LogicEntity::UpdateNPCs(float deltaTime) {
     std::lock_guard<std::mutex> lock(npcMutex_);
-    for (auto& [npcId, npc] : npcEntities_) {
-        if (!npc) continue;
-        npc->Update(deltaTime);
-        collisionSystem_->UpdateEntity(npcId, npc->GetPosition());
+    npcManager_->Update(deltaTime);
+    for (auto& [npcId, npc] : npcManager_->GetAllNPCs()) {
+        if (npc && collisionSystem_) {
+            collisionSystem_->UpdateEntity(npcId, npc->GetPosition());
+        }
     }
     mobSystem_.UpdateSpawnZones(deltaTime);
     mobSystem_.ProcessRespawns(deltaTime);
@@ -131,8 +123,7 @@ void LogicEntity::UpdateNPCs(float deltaTime) {
 
 NPCEntity* LogicEntity::GetNPCEntity(uint64_t npcId) {
     std::lock_guard<std::mutex> lock(npcMutex_);
-    auto it = npcEntities_.find(npcId);
-    return it != npcEntities_.end() ? it->second.get() : nullptr;
+    return npcManager_->GetNPC(npcId);
 }
 
 GameEntity* LogicEntity::GetEntity(uint64_t entityId) {
@@ -162,7 +153,9 @@ void LogicEntity::UpdateCollisions(float deltaTime) {
 
 void LogicEntity::CreateLootEntity(const glm::vec3& position, std::shared_ptr<LootItem> item, int quantity) {
     uint64_t entityId = entityManager_.CreateEntity(EntityType::ITEM, position);
-    BoundingSphere bounds{position, 0.5f};
-    collisionSystem_->RegisterEntity(entityId, bounds, CollisionType::TRIGGER);
-    Logger::Debug("Created loot entity {}: {} x{}", entityId, item->GetName(), quantity);
+    if (collisionSystem_) {
+        BoundingSphere bounds{position, 0.5f};
+        collisionSystem_->RegisterEntity(entityId, bounds, CollisionType::TRIGGER);
+    }
+    Logger::Trace("Created loot entity {}: {} x{}", entityId, item->GetName(), quantity);
 }
