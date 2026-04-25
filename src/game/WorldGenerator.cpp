@@ -85,10 +85,10 @@ float WorldGenerator::GetTerrainHeight(float x, float z) {
     float normalizedHeight = (baseHeight + detail + 1.0f) * 0.5f;
     normalizedHeight = std::pow(normalizedHeight, 1.5f);
     float result = normalizedHeight * config_.terrainHeight;
-    if (std::abs(x) < 1.0f && std::abs(z) < 1.0f) {
-        Logger::Trace("GetTerrainHeight({:.2f}, {:.2f}) = {:.4f} (base={:.4f}, norm={:.4f})",
-                     x, z, result, baseHeight, normalizedHeight);
-    }
+    // if (std::abs(x) < 1.0f && std::abs(z) < 1.0f) {
+    //     Logger::Trace("GetTerrainHeight({:.2f}, {:.2f}) = {:.4f} (base={:.4f}, norm={:.4f})",
+    //                  x, z, result, baseHeight, normalizedHeight);
+    // }
     return result;
 }
 

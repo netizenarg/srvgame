@@ -134,7 +134,7 @@ bool PlayerManager::AuthenticatePlayer(const std::string& username, const std::s
             Logger::Debug("Authentication successful for user '{}'", username);
             return true;
         } else {
-            Logger::Debug("Authentication failed: invalid password for user '{}'", username);
+            Logger::Debug("Authentication failed: invalid password '{}' (hash was '{}') for user '{}'", password, storedHash, username);
             return false;
         }
     } catch (const std::exception& e) {

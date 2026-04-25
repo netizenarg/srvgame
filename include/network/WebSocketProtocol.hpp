@@ -194,8 +194,7 @@ namespace WebSocketProtocol {
 
         Statistics GetStatistics() const;
 
-        void ReadFramePayload(bool fin, uint8_t opcode, bool masked, uint64_t payload_length, size_t header_size);
-        void ProcessFrameData(bool fin, uint8_t opcode, bool masked, uint64_t payload_length, size_t header_size);
+        void ReadFramePayload(bool fin, uint8_t opcode, bool masked, uint64_t payload_length);
 
     protected:
         enum class State {
