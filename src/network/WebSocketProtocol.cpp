@@ -447,140 +447,79 @@ void WebSocketConnection::WriteHandshakeResponse(const HandshakeResponse& respon
 }
 
 void WebSocketConnection::ReadFrame() {
-    if (state_ != State::OPEN && state_ != State::CLOSING) {
-        return;
-    }
+    if (state_ != State::OPEN && state_ != State::CLOSING) return;
     auto self = shared_from_this();
-    Logger::Trace("WebSocketConnection {} ReadFrame: starting async_read (2 bytes)", connection_id_);
     asio::async_read(socket_, read_buffer_, asio::transfer_exactly(2),
-    [self](std::error_code ec, size_t bytes) {
-        Logger::Trace("WebSocketConnection {} ReadFrame completion: ec={}, bytes={}", self->connection_id_, ec.message(), bytes);
+    [self](std::error_code ec, size_t) {
         if (ec) {
-            if (ec == asio::error::operation_aborted) {
-                Logger::Trace("WebSocketConnection {} read aborted", self->connection_id_);
-                return;
-            }
-            self->HandleError(ec);
+            if (ec != asio::error::operation_aborted) self->HandleError(ec);
             return;
         }
-        if (self->state_ == State::CLOSED || self->state_ == State::CLOSING) {
-            return;
-        }
-        auto buffers = self->read_buffer_.data();
-        auto it = asio::buffers_begin(buffers);
-        if (std::distance(it, asio::buffers_end(buffers)) < 2) {
-            Logger::Error("Insufficient data for frame header");
-            self->Close(1002, "Protocol error");
-            return;
-        }
-        uint8_t first_byte = *it;
-        uint8_t second_byte = *(++it);
-        bool fin = (first_byte & 0x80) != 0;
-        uint8_t opcode = first_byte & 0x0F;
-        bool masked = (second_byte & 0x80) != 0;
-        uint64_t payload_length = second_byte & 0x7F;
-        size_t header_size = 2;
-        if (payload_length == 126) {
-            header_size += 2;
-        } else if (payload_length == 127) {
-            header_size += 8;
-        }
-        if (masked) {
-            header_size += 4;
-        }
-        if (header_size > 2) {
-            self->read_buffer_.consume(2);
+        if (self->state_ == State::CLOSED || self->state_ == State::CLOSING) return;
+        auto bufs = self->read_buffer_.data();
+        auto it = asio::buffers_begin(bufs);
+        uint8_t b0 = *it; ++it; uint8_t b1 = *it;
+        bool fin = (b0 & 0x80) != 0;
+        uint8_t opcode = b0 & 0x0F;
+        bool masked = (b1 & 0x80) != 0;
+        uint64_t len7 = b1 & 0x7F;
+        self->read_buffer_.consume(2);
+        size_t ext_bytes = 0;
+        if (len7 == 126) ext_bytes = 2;
+        else if (len7 == 127) ext_bytes = 8;
+        if (ext_bytes > 0) {
             asio::async_read(self->socket_, self->read_buffer_,
-                asio::transfer_exactly(header_size - 2),
-                [self, fin, opcode, masked, payload_length, header_size]
-                (std::error_code ec, size_t bytes) {
-                    Logger::Trace("WebSocketConnection {} ReadFrame completion: ec={}, bytes={}", self->connection_id_, ec.message(), bytes);
-                    if (ec) {
-                        if (ec == asio::error::operation_aborted) {
-                            return;
-                        }
-                        self->HandleError(ec);
-                        return;
-                    }
-                    if (self->state_ == State::CLOSED || self->state_ == State::CLOSING) {
-                        return;
-                    }
-                    self->ReadFramePayload(fin, opcode, masked, payload_length, header_size);
+                asio::transfer_exactly(ext_bytes),
+                [self, fin, opcode, masked, len7](std::error_code ec, size_t) {
+                    if (ec) { if (ec != asio::error::operation_aborted) self->HandleError(ec); return; }
+                    std::vector<uint8_t> ext(len7 == 126 ? 2 : 8);
+                    self->read_buffer_.sgetn(reinterpret_cast<char*>(ext.data()), ext.size());
+                    uint64_t actual_len = 0;
+                    for (auto v : ext) actual_len = (actual_len << 8) | v;
+                    self->ReadFramePayload(fin, opcode, masked, actual_len);
                 });
         } else {
-            if (self->state_ == State::CLOSED || self->state_ == State::CLOSING) {
-                return;
-            }
-            self->ReadFramePayload(fin, opcode, masked, payload_length, header_size);
+            self->ReadFramePayload(fin, opcode, masked, len7);
         }
     });
 }
 
-void WebSocketConnection::ReadFramePayload(bool fin, uint8_t opcode, bool masked,
-                                          uint64_t payload_length, size_t header_size) {
-    auto self = shared_from_this();
-    Logger::Trace("WebSocketConnection {} ReadFramePayload: starting async_read", connection_id_);
-    if (payload_length > 0) {
-        asio::async_read(socket_, read_buffer_, asio::transfer_exactly(payload_length),
-            [self, fin, opcode, masked, payload_length, header_size]
-            (std::error_code ec, size_t bytes) {
-                Logger::Trace("WebSocketConnection {} ReadFramePayload completion: ec={}, bytes={}", self->connection_id_, ec.message(), bytes);
-                if (ec) {
-                    if (ec == asio::error::operation_aborted) {
-                        return;
-                    }
-                    self->HandleError(ec);
-                    return;
-                }
-                if (self->state_ == State::CLOSED || self->state_ == State::CLOSING) {
-                    return;
-                }
-                self->ProcessFrameData(fin, opcode, masked, payload_length, header_size);
-            });
-    } else {
-        if (state_ == State::CLOSED || state_ == State::CLOSING) {
-            return;
-        }
-        ProcessFrameData(fin, opcode, masked, payload_length, header_size);
-    }
-}
-
-void WebSocketConnection::ProcessFrameData(bool fin, uint8_t opcode, bool masked,
-                                           uint64_t payload_length, size_t header_size) {
-    (void)fin;
-    (void)opcode;
-    (void)masked;
-    size_t total_frame_size = header_size + payload_length;
-    constexpr size_t MAX_FRAME_SIZE = 16 * 1024 * 1024;
-    if (total_frame_size > MAX_FRAME_SIZE) {
-        Close(1009, "Frame too large");
-        return;
-    }
-    std::vector<uint8_t> frame_data(total_frame_size);
-    auto buffers = read_buffer_.data();
-    Logger::Trace("WebSocketConnection {} ProcessFrameData: starting buffer_copy", connection_id_);
-    size_t bytes_copied = asio::buffer_copy(
-        asio::buffer(frame_data),
-        buffers,
-        total_frame_size
-    );
-    if (bytes_copied != total_frame_size) {
-        Close(1002, "Protocol error");
-        return;
-    }
-    read_buffer_.consume(bytes_copied);
-    try {
-        WebSocketFrame frame = WebSocketFrame::Deserialize(frame_data);
+void WebSocketConnection::ReadFramePayload(bool fin, uint8_t opcode, bool masked, uint64_t payload_length)
+{
+    size_t to_read = payload_length + (masked ? 4 : 0);
+    if (to_read == 0) {
+        WebSocketFrame frame;
+        frame.fin = fin; frame.opcode = static_cast<Opcode>(opcode);
+        frame.masked = false; frame.payload_length = 0;
         HandleFrame(frame);
-    } catch (const std::exception& e) {
-        Logger::Error("WebSocket frame parsing error: {}", e.what());
-        Close(1002, "Protocol error");
+        if (state_ == State::OPEN || state_ == State::CLOSING) ReadFrame();
         return;
     }
-    if (state_ == State::OPEN || state_ == State::CLOSING) {
-        ReadFrame();
-    }
-    Logger::Trace("WebSocketConnection {} ProcessFrameData: complete", connection_id_);
+    auto self = shared_from_this();
+    asio::async_read(socket_, read_buffer_, asio::transfer_exactly(to_read),
+    [self, fin, opcode, masked, payload_length](std::error_code ec, size_t to_read) {
+        if (ec) { if (ec != asio::error::operation_aborted) self->HandleError(ec); return; }
+        std::vector<uint8_t> data(to_read);
+        self->read_buffer_.sgetn(reinterpret_cast<char*>(data.data()), to_read);
+        uint8_t mask[4] = {0};
+        size_t offset = 0;
+        if (masked) {
+            std::copy_n(data.begin(), 4, mask);
+            offset = 4;
+        }
+        std::vector<uint8_t> payload(data.begin() + offset, data.end());
+        if (masked) {
+            for (size_t i = 0; i < payload.size(); ++i)
+                payload[i] ^= mask[i % 4];
+        }
+        WebSocketFrame frame;
+        frame.fin = fin; frame.opcode = static_cast<Opcode>(opcode);
+        frame.masked = masked; frame.payload_length = payload_length;
+        frame.payload_data = std::move(payload);
+        self->HandleFrame(frame);
+        if (self->state_ == State::OPEN || self->state_ == State::CLOSING)
+            self->ReadFrame();
+    });
 }
 
 void WebSocketConnection::HandleFrame(const WebSocketFrame& frame) {

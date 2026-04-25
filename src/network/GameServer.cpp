@@ -277,6 +277,7 @@ void GameServer::InitSessionFactory(int workerId, ProcessPool* processPool, Game
             session->SetCloseHandler([session, workerId, &game_logic]() mutable{
                 Logger::Trace("Worker {} session {} closing", workerId, session->GetSessionId());
                 game_logic.OnPlayerDisconnected(session->GetSessionId());
+                ConnectionManager::GetInstance().Stop(session);
                 Logger::Trace("Worker {} session {} cleanup complete", workerId, session->GetSessionId());
             });
             return session;
@@ -397,6 +398,7 @@ void GameServer::InitSessionFactory(int workerId, ProcessPool* processPool, Game
             session->SetCloseHandler([session, workerId, &game_logic]() mutable{
                 Logger::Trace("Worker {} session {} closing", workerId, session->GetSessionId());
                 game_logic.OnPlayerDisconnected(session->GetSessionId());
+                ConnectionManager::GetInstance().Stop(session);
                 Logger::Trace("Worker {} session {} cleanup complete", workerId, session->GetSessionId());
             });
             return session;
