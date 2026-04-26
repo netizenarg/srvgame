@@ -245,7 +245,7 @@ std::string ConfigManager::GetDatabaseHost() const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_.at("database").at("host").get<std::string>();
-    } catch (const std::exception& err) {Logger::Warn("failed: {}", err.what());
+    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
         return "127.0.0.1";
     }
 }
@@ -254,7 +254,7 @@ uint16_t ConfigManager::GetDatabasePort() const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_.at("database").at("port").get<uint16_t>();
-    } catch (const std::exception& err) {Logger::Warn("failed: {}", err.what());
+    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
         return 5432;
     }
 }
@@ -263,7 +263,7 @@ std::string ConfigManager::GetDatabaseName() const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_.at("database").at("name").get<std::string>();
-    } catch (const std::exception& err) {Logger::Warn("failed: {}", err.what());
+    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
         return "game_db";
     }
 }
@@ -272,7 +272,7 @@ std::string ConfigManager::GetDatabaseUser() const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_.at("database").at("user").get<std::string>();
-    } catch (const std::exception& err) {Logger::Warn("failed: {}", err.what());
+    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
         return "game_user";
     }
 }
@@ -281,7 +281,7 @@ std::string ConfigManager::GetDatabasePassword() const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_.at("database").at("password").get<std::string>();
-    } catch (const std::exception& err) {Logger::Warn("failed: {}", err.what());
+    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
         return "";
     }
 }
@@ -290,7 +290,7 @@ std::string ConfigManager::GetDatabaseBackend() const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_.at("database").at("backend").get<std::string>();
-    } catch (const std::exception& err) {Logger::Warn("failed: {}", err.what());
+    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
         return "postgresql";
     }
 }
@@ -299,7 +299,7 @@ int ConfigManager::GetDatabasePoolSize() const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_.at("database").at("pool_size").get<int>();
-    } catch (const std::exception& err) {Logger::Warn("failed: {}", err.what());
+    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
         return 10;
     }
 }
@@ -308,23 +308,23 @@ std::vector<std::string> ConfigManager::GetCitusWorkerNodes() const {
     std::lock_guard<std::mutex> lock(configMutex_);
     std::vector<std::string> nodes;
     try {
-        auto& db = config_.at("database");
-        if (db.contains("citus_worker_nodes") && db["citus_worker_nodes"].is_array()) {
-            for (const auto& node : db["citus_worker_nodes"]) {
+        auto& citus = config_.at("database").at("citus");
+        if (citus.contains("worker_nodes") && citus["worker_nodes"].is_array()) {
+            for (const auto& node : citus["worker_nodes"]) {
                 if (node.is_string())
                     nodes.push_back(node.get<std::string>());
             }
         }
-    } catch (const std::exception& err) {Logger::Warn("failed: {}", err.what());}
+    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());}
     return nodes;
 }
 
-int ConfigManager::GetShardCount() const {
+int ConfigManager::GetShardCount(int default_value) const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
-        return config_.at("database").at("shard_count").get<int>();
-    } catch (const std::exception& err) {Logger::Warn("failed: {}", err.what());
-        return 32;
+        return config_.at("database").at("citus").at("shard_count").get<int>();
+    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
+        return default_value;
     }
 }
 
@@ -335,7 +335,7 @@ int ConfigManager::GetMaxPlayersPerSession() const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_.at("game").at("max_players_per_session").get<int>();
-    } catch (const std::exception& err) {Logger::Warn("failed: {}", err.what());
+    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
         return 100;
     }
 }
@@ -344,7 +344,7 @@ int ConfigManager::GetHeartbeatInterval() const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_.at("game").at("heartbeat_interval_seconds").get<int>();
-    } catch (const std::exception& err) {Logger::Warn("failed: {}", err.what());
+    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
         return 30;
     }
 }
@@ -353,7 +353,7 @@ int ConfigManager::GetSessionTimeout() const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_.at("game").at("session_timeout_seconds").get<int>();
-    } catch (const std::exception& err) {Logger::Warn("failed: {}", err.what());
+    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
         return 300;
     }
 }
@@ -365,7 +365,7 @@ int ConfigManager::GetWorldSeed() const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_.at("world").at("seed").get<int>();
-    } catch (const std::exception& err) {Logger::Warn("failed: {}", err.what());
+    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
         return 12345;
     }
 }
@@ -374,7 +374,7 @@ int ConfigManager::GetViewDistance() const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_.at("world").at("view_distance").get<int>();
-    } catch (const std::exception& err) {Logger::Warn("failed: {}", err.what());
+    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
         return 1000;
     }
 }
@@ -383,7 +383,7 @@ int ConfigManager::GetChunkSize() const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_.at("world").at("chunk_size").get<int>();
-    } catch (const std::exception& err) {Logger::Warn("failed: {}", err.what());
+    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
         return 32;
     }
 }
@@ -392,7 +392,7 @@ int ConfigManager::GetMaxActiveChunks() const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_.at("world").at("max_active_chunks").get<int>();
-    } catch (const std::exception& err) {Logger::Warn("failed: {}", err.what());
+    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
         return 1000;
     }
 }
@@ -401,7 +401,7 @@ float ConfigManager::GetTerrainScale() const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_.at("world").at("terrain_scale").get<float>();
-    } catch (const std::exception& err) {Logger::Warn("failed: {}", err.what());
+    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
         return 1.0f;
     }
 }
@@ -410,7 +410,7 @@ float ConfigManager::GetMaxTerrainHeight() const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_.at("world").at("max_terrain_height").get<float>();
-    } catch (const std::exception& err) {Logger::Warn("failed: {}", err.what());
+    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
         return 100.0f;
     }
 }
@@ -419,7 +419,7 @@ float ConfigManager::GetWaterLevel() const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_.at("world").at("water_level").get<float>();
-    } catch (const std::exception& err) {Logger::Warn("failed: {}", err.what());
+    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
         return 10.0f;
     }
 }
@@ -428,7 +428,7 @@ bool ConfigManager::ShouldPreloadWorld() const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_.at("world").at("preload_world").get<bool>();
-    } catch (const std::exception& err) {Logger::Warn("failed: {}", err.what());
+    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
         return false;
     }
 }
@@ -437,7 +437,7 @@ int ConfigManager::GetWorldPreloadRadius() const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_.at("world").at("preload_radius").get<int>();
-    } catch (const std::exception& err) {Logger::Warn("failed: {}", err.what());
+    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
         return 500;
     }
 }
@@ -451,7 +451,7 @@ std::string ConfigManager::GetLogLevel() const {
         std::string level = config_.at("logging").at("level").get<std::string>();
         std::transform(level.begin(), level.end(), level.begin(), ::tolower);
         return level;
-    } catch (const std::exception& err) {Logger::Warn("failed: {}", err.what());
+    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
         return "info";
     }
 }
@@ -460,7 +460,7 @@ std::string ConfigManager::GetLogFilePath() const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_.at("logging").at("file").get<std::string>();
-    } catch (const std::exception& err) {Logger::Warn("failed: {}", err.what());
+    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
         return "gameserver.log";
     }
 }
@@ -468,9 +468,9 @@ std::string ConfigManager::GetLogFilePath() const {
 int ConfigManager::GetMaxLogFileSize() const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
-        return config_.at("logging").at("max_file_size_mb").get<int>();
-    } catch (const std::exception& err) {Logger::Warn("failed: {}", err.what());
-        return 100;
+        return config_.at("logging").at("max_file_size").get<int>();
+    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
+        return 1048576;//1Mb default
     }
 }
 
@@ -478,7 +478,7 @@ int ConfigManager::GetMaxLogFiles() const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_.at("logging").at("max_files").get<int>();
-    } catch (const std::exception& err) {Logger::Warn("failed: {}", err.what());
+    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
         return 10;
     }
 }
@@ -487,7 +487,7 @@ bool ConfigManager::GetConsoleOutput() const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
         return config_.at("logging").at("console_output").get<bool>();
-    } catch (const std::exception& err) {Logger::Warn("failed: {}", err.what());
+    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
         return true;
     }
 }
@@ -501,7 +501,7 @@ int ConfigManager::GetInt(const std::string& key, int defaultValue) const {
         std::string keyPath = key;
         std::replace(keyPath.begin(), keyPath.end(), '.', '/');
         return config_.at(nlohmann::json::json_pointer("/" + keyPath)).get<int>();
-    } catch (const std::exception& err) {Logger::Warn("failed: {}", err.what());
+    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
         return defaultValue;
     }
 }
@@ -512,7 +512,7 @@ float ConfigManager::GetFloat(const std::string& key, float defaultValue) const 
         std::string keyPath = key;
         std::replace(keyPath.begin(), keyPath.end(), '.', '/');
         return config_.at(nlohmann::json::json_pointer("/" + keyPath)).get<float>();
-    } catch (const std::exception& err) {Logger::Warn("failed: {}", err.what());
+    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
         return defaultValue;
     }
 }
@@ -523,7 +523,7 @@ bool ConfigManager::GetBool(const std::string& key, bool defaultValue) const {
         std::string keyPath = key;
         std::replace(keyPath.begin(), keyPath.end(), '.', '/');
         return config_.at(nlohmann::json::json_pointer("/" + keyPath)).get<bool>();
-    } catch (const std::exception& err) {Logger::Warn("failed: {}", err.what());
+    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
         return defaultValue;
     }
 }
@@ -534,7 +534,7 @@ std::string ConfigManager::GetString(const std::string& key, const std::string& 
         std::string keyPath = key;
         std::replace(keyPath.begin(), keyPath.end(), '.', '/');
         return config_.at(nlohmann::json::json_pointer("/" + keyPath)).get<std::string>();
-    } catch (const std::exception& err) {Logger::Warn("failed: {}", err.what());
+    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
         return defaultValue;
     }
 }
@@ -554,7 +554,7 @@ std::vector<std::string> ConfigManager::GetStringArray(const std::string& key) c
                     result.push_back(item.dump());
             }
         }
-    } catch (const std::exception& err) {Logger::Warn("failed: {}", err.what());}
+    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());}
     return result;
 }
 
@@ -564,7 +564,7 @@ nlohmann::json ConfigManager::GetJson(const std::string& key) const {
         std::string keyPath = key;
         std::replace(keyPath.begin(), keyPath.end(), '.', '/');
         return config_.at(nlohmann::json::json_pointer("/" + keyPath));
-    } catch (const std::exception& err) {Logger::Warn("failed: {}", err.what());
+    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
         return nlohmann::json();
     }
 }
@@ -575,7 +575,7 @@ bool ConfigManager::HasKey(const std::string& key) const {
         std::string keyPath = key;
         std::replace(keyPath.begin(), keyPath.end(), '.', '/');
         return config_.contains(nlohmann::json::json_pointer("/" + keyPath));
-    } catch (const std::exception& err) {Logger::Warn("failed: {}", err.what());
+    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
         return false;
     }
 }

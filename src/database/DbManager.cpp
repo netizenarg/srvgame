@@ -26,6 +26,10 @@ DbManager::~DbManager() {
     Logger::Debug("DbManager destroyed");
 }
 
+bool DbManager::IsInitialized() const { return initialized_; }
+
+const SQLProvider& DbManager::GetSQLProvider() const { return sqlProvider_; }
+
 bool DbManager::LoadSQLForBackend() {
     std::string sqlPath = "dbschema/";  // configurable base path
     switch (currentType_) {
@@ -265,8 +269,11 @@ bool DbManager::LoadConfiguration(const std::string& configPath) {
                 {"min_connections", poolConfig.value("min", 5)},
                 {"max_connections", poolConfig.value("max", 20)}
             }},
-            {"shards", config_.value("shards", 32)},
-            {"replication", config_.value("replication", false)},
+            {"citus", {
+                {"shard_count", config_.value("shard_count", 32)},
+                {"replication_factor", config_.value("replication_factor", 2)},
+                {"worker_nodes", config_.value("worker_nodes", "[]")},
+            }},
             {"ssl", config_.value("ssl", false)},
             {"timeout", config_.value("timeout", 30)}
         };
@@ -274,8 +281,8 @@ bool DbManager::LoadConfiguration(const std::string& configPath) {
         Logger::Debug("Database configuration finalized");
         return true;
 
-    } catch (const std::exception& e) {
-        Logger::Error("Failed to load database configuration: {}", e.what());
+    } catch (const std::exception& err) {
+        Logger::Error("Failed to load database configuration: {}", err.what());
         return false;
     }
 }
@@ -733,7 +740,7 @@ bool DbManager::RollbackMigration(int version) {
     }
 }
 
-DbManager::BackendType DbManager::ParseBackendType(const std::string& backendStr) const {
+BackendType DbManager::ParseBackendType(const std::string& backendStr) const {
     std::string lowerType = backendStr;
     std::transform(lowerType.begin(), lowerType.end(), lowerType.begin(), ::tolower);
 
@@ -872,3 +879,28 @@ bool DbManager::CheckDefaultTablesExist() {
     }
     return true;
 }
+
+DatabaseBackend* DbManager::GetBackend() const { return backend_.get(); }
+
+BackendType DbManager::GetCurrentType() const { return currentType_; }
+
+nlohmann::json DbManager::GetPlayer(uint64_t playerId){ return backend_->GetPlayer(playerId); }
+
+nlohmann::json DbManager::Query(const std::string& sql) { return backend_->Query(sql); }
+
+nlohmann::json DbManager::QueryWithParams(const std::string& sql, const std::vector<std::string>& params)
+{ return backend_->QueryWithParams(sql, params); }
+
+bool DbManager::Execute(const std::string& sql) { return backend_->Execute(sql); }
+
+bool DbManager::ExecuteWithParams(const std::string& sql, const std::vector<std::string>& params)
+{ return backend_->ExecuteWithParams(sql, params); }
+
+bool DbManager::UpdatePlayerPosition(uint64_t playerId, float x, float y, float z) {
+    if (backend_) {
+        return backend_->UpdatePlayerPosition(playerId, x, y, z);
+    }
+    return false;
+}
+
+nlohmann::json DbManager::GetConfiguration() const { return config_; }

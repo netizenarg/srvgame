@@ -98,7 +98,7 @@ set(NETWORK_SOURCES
     src/network/BinaryProtocol.cpp
     src/network/ConnectionManager.cpp
     src/network/GameServer.cpp
-    src/network/GameSession.cpp
+    src/network/BinarySession.cpp
     src/network/NetworkQualityMonitor.cpp
     src/network/PredictionSystem.cpp
     src/network/WebSocketProtocol.cpp
@@ -139,6 +139,8 @@ set(LOGIC_CORE_SOURCES
 
 # Database system
 set(DATABASE_SOURCES
+    src/database/SQLProvider.cpp
+    src/database/DbService.cpp
     src/database/DbManager.cpp
     src/database/PostgreSqlClient.cpp
 )
@@ -163,6 +165,8 @@ include_directories(
     ${OPENSSL_INCLUDE_DIR}
 )
 
+option(ENABLE_ASAN "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+
 # Main executable
 add_executable(gameserver
     src/main.cpp
@@ -176,6 +180,23 @@ add_executable(gameserver
     ${WORLD_SOURCES}
     ${DATABASE_SOURCES}
 )
+
+if(ENABLE_ASAN)
+    message(STATUS "Enabling AddressSanitizer and UndefinedBehaviorSanitizer")
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(gameserver PRIVATE
+            -fsanitize=address,undefined
+            -fno-omit-frame-pointer
+            -g
+            -O1
+        )
+        target_link_options(gameserver PRIVATE
+            -fsanitize=address,undefined
+        )
+    elseif(MSVC)
+        target_compile_options(gameserver PRIVATE /fsanitize=address)
+    endif()
+endif()
 
 # Add target-specific preprocessor definitions
 if(USE_CITUS)

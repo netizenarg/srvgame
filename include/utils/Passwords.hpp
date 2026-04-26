@@ -1,27 +1,43 @@
 #pragma once
 
 #include <string>
-#include <unistd.h>
+#include <random>
+#include <cstring>
 #include <crypt.h>
 
 namespace Passwords {
 
-inline bool VerifyPassword(const std::string& plain, const std::string& hash) {
-    // crypt() returns a string starting with the salt (first two characters of hash)
-    // We assume the hash includes the salt (e.g., "$2y$...")
-    std::string salt = hash.substr(0, 2);   // Not correct for bcrypt – adjust as needed
-    // Actually, for crypt() the salt is the entire hash up to the last '$'
-    // Better: use a library that understands the hash format.
-    // This is a placeholder – you must adapt to your actual hash format.
-    char* encrypted = crypt(plain.c_str(), hash.c_str());
-    return encrypted && hash == encrypted;
-}
+    inline std::string generate_bcrypt_salt(int cost = 10) {
+        static const char base64_chars[] = "./ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution<> dis(0, 63);
+        std::string salt = "$2b$" + std::to_string(cost) + "$";
+        for (int i = 0; i < 22; ++i) {
+            salt += base64_chars[dis(gen)];
+        }
+        return salt;
+    }
 
-inline std::string HashPassword(const std::string& plain) {
-    // Generate a random salt (simplified – use a proper random source)
-    std::string salt = "$2y$10$" + std::to_string(rand()) + std::to_string(rand());
-    char* hash = crypt(plain.c_str(), salt.c_str());
-    return hash ? std::string(hash) : "";
-}
+    inline bool VerifyPassword(const std::string& plain, const std::string& hash) {
+        if (hash.empty() || hash[0] == '*') {
+            return plain.empty();
+        }
+        char* encrypted = crypt(plain.c_str(), hash.c_str());
+        if (!encrypted) return false;
+        return hash == encrypted;
+    }
+
+    inline std::string HashPassword(const std::string& plain) {
+        std::string salt = generate_bcrypt_salt();
+        char* hash = crypt(plain.c_str(), salt.c_str());
+        if (!hash) {
+            // fallback to avoid storing an error marker
+            static const char fallback_salt[] = "$2b$10$.......................";
+            hash = crypt(plain.c_str(), fallback_salt);
+            if (!hash) return "";
+        }
+        return std::string(hash);
+    }
 
 } // namespace Passwords

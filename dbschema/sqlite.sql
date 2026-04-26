@@ -2,6 +2,7 @@
 CREATE TABLE IF NOT EXISTS players (
     id INTEGER PRIMARY KEY,
     data TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
     position_x REAL DEFAULT 0,
     position_y REAL DEFAULT 0,
     position_z REAL DEFAULT 0,
@@ -81,7 +82,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 );
 
 -- [save_player_data]
-INSERT OR REPLACE INTO players (id, data, updated_at) VALUES (?, ?, datetime('now'));
+INSERT OR REPLACE INTO players (id, data, password_hash, updated_at) VALUES (?, ?, ?, datetime('now'));
 
 -- [load_player_data]
 SELECT data FROM players WHERE id = ?;
@@ -95,12 +96,11 @@ SELECT 1 FROM players WHERE id = ? LIMIT 1;
 -- [get_player_stats]
 SELECT level, experience, health, max_health, mana, max_mana, currency_gold, currency_gems, total_playtime FROM players WHERE id = ?;
 
--- [update_player_stats]  (generic update, we'll build the SET part in code, but we can use a parameterized query; here we provide a template)
--- This is a special case; we'll keep the SQL building in C++ for flexibility.
--- For now, we leave it out; the client will continue to build the UPDATE dynamically.
-
 -- [get_player]
 SELECT * FROM players WHERE id = ?;
+
+-- [get_player_by_username]
+SELECT id, password_hash FROM players WHERE json_extract(data, '$.username') = ?;
 
 -- [save_game_state]
 INSERT OR REPLACE INTO game_state (key, value, updated_at) VALUES (?, ?, datetime('now'));

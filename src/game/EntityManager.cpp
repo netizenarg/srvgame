@@ -109,13 +109,13 @@ std::vector<uint64_t> EntityManager::GetEntitiesInRadius(const glm::vec3& positi
 std::vector<uint64_t> EntityManager::GetEntitiesInChunk(int chunkX, int chunkZ) const {
     std::lock_guard<std::mutex> lock(mutex_);
     std::vector<uint64_t> result;
-    const float CHUNK_SIZE = 32.0f;
-    const float HALF_CHUNK = CHUNK_SIZE / 2.0f;
+    const float chunk_size = float(WorldChunk::DEFAULT_SIZE);
+    const float HALF_CHUNK = chunk_size / 2.0f;
 
-    float minX = chunkX * CHUNK_SIZE - HALF_CHUNK;
-    float maxX = (chunkX + 1) * CHUNK_SIZE - HALF_CHUNK;
-    float minZ = chunkZ * CHUNK_SIZE - HALF_CHUNK;
-    float maxZ = (chunkZ + 1) * CHUNK_SIZE - HALF_CHUNK;
+    float minX = chunkX * chunk_size - HALF_CHUNK;
+    float maxX = (chunkX + 1) * chunk_size - HALF_CHUNK;
+    float minZ = chunkZ * chunk_size - HALF_CHUNK;
+    float maxZ = (chunkZ + 1) * chunk_size - HALF_CHUNK;
 
     for (const auto& [id, entity] : entities_) {
         glm::vec3 pos = entity->GetPosition();

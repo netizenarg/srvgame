@@ -64,8 +64,8 @@ public:
     int GenerateGold(const LootTable& table, float luckMultiplier = 1.0f) const;
     
     // Serialization
-    bool LoadLootTables(const std::string& filePath);
-    bool SaveLootTables(const std::string& filePath) const;
+    bool LoadLootTables(const std::string& filePath="");
+    bool SaveLootTables(const std::string& filePath="") const;
     bool LoadLootTablesFromJson(const nlohmann::json& jsonData);
     nlohmann::json SerializeAllTables() const;
     
@@ -107,6 +107,8 @@ private:
     void GenerateRandomStats(std::shared_ptr<LootItem> item, int itemLevel) const;
     void ApplyRandomEnchantment(std::shared_ptr<LootItem> item, LootRarity rarity) const;
     
+    std::string file_path_ ="config/loot_tables.json";
+
     // Random number generation
     float GetRandomFloat(float min = 0.0f, float max = 1.0f) const;
     int GetRandomInt(int min, int max) const;

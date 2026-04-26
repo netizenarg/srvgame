@@ -12,7 +12,7 @@ LogicWorld& LogicWorld::GetInstance() {
 }
 
 LogicWorld::LogicWorld() {
-    Logger::Debug("LogicWorld created");
+    Logger::Info("LogicWorld created");
 }
 
 LogicWorld::~LogicWorld() {
@@ -45,15 +45,29 @@ std::string LogicWorld::GetChunkKey(int chunkX, int chunkZ) const {
 }
 
 std::shared_ptr<WorldChunk> LogicWorld::GetOrCreateChunk(int chunkX, int chunkZ) {
-    std::string chunkKey = GetChunkKey(chunkX, chunkZ);
-
     std::lock_guard<std::mutex> lock(chunksMutex_);
+    //Logger::Trace("worldGenerator_ raw pointer: {}", static_cast<void*>(worldGenerator_.get()));
+    if (canary_ != 0xDEADBEEF) {
+        Logger::Critical("LogicWorld memory corrupted! canary=0x{:x}", canary_);
+        std::abort();
+    }
 
+    // --- Workaround: reinitialize generator if lost ---
+    if (!worldGenerator_) {
+        Logger::Error("World generator was null! Reinitializing...");
+        GenerationConfig genConfig;
+        genConfig.seed = worldConfig_.seed;
+        genConfig.terrainScale = worldConfig_.terrainScale;
+        genConfig.terrainHeight = worldConfig_.maxTerrainHeight;
+        genConfig.waterLevel = worldConfig_.waterLevel;
+        worldGenerator_ = std::make_unique<WorldGenerator>(genConfig);
+    }
+
+    std::string chunkKey = GetChunkKey(chunkX, chunkZ);
     auto it = loadedChunks_.find(chunkKey);
     if (it != loadedChunks_.end()) {
         return it->second;
     }
-
     if (activeChunkCount_ >= worldConfig_.maxActiveChunks) {
         if (!loadedChunks_.empty()) {
             auto first = loadedChunks_.begin();
@@ -61,18 +75,19 @@ std::shared_ptr<WorldChunk> LogicWorld::GetOrCreateChunk(int chunkX, int chunkZ)
             activeChunkCount_--;
         }
     }
-
+    if (!worldGenerator_) {
+        Logger::Error("World generator is null! Cannot generate chunk ({},{})", chunkX, chunkZ);
+        return nullptr;
+    }
     std::unique_ptr<WorldChunk> uniqueChunk = worldGenerator_->GenerateChunk(chunkX, chunkZ);
     if (!uniqueChunk) {
         Logger::Error("Failed to generate chunk [{}, {}]", chunkX, chunkZ);
         return nullptr;
     }
-
     std::shared_ptr<WorldChunk> chunk = std::move(uniqueChunk);
     loadedChunks_[chunkKey] = chunk;
     activeChunkCount_++;
-
-    Logger::Debug("Generated chunk [{}, {}], total: {}", chunkX, chunkZ, activeChunkCount_.load());
+    //Logger::Trace("Generated chunk [{}, {}], total: {}", chunkX, chunkZ, activeChunkCount_.load());
     return chunk;
 }
 
@@ -144,7 +159,7 @@ void LogicWorld::SaveChunkData() {
     }
     for (const auto& [key, chunk] : loadedChunks_) {
         try {
-            nlohmann::json chunkData = chunk->Serialize();
+            nlohmann::json chunkData = chunk->SerializeJson();
             backend->SaveChunkData(chunk->GetChunkX(), chunk->GetChunkZ(), chunkData);
         } catch (const std::exception& e) {
             Logger::Error("Failed to save chunk [{}, {}]: {}",

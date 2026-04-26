@@ -641,13 +641,10 @@ std::vector<std::shared_ptr<IConnection>> ConnectionManager::GetSessionsByWorker
 }
 
 void ConnectionManager::RedistributeSessions(const std::vector<int>& workerIds) {
-    // This is a simplified example. In production, you'd implement
-    // a proper session migration strategy between workers.
-
     Logger::Info("Redistributing sessions across {} workers", workerIds.size());
-
-    // Implementation would depend on your load balancing strategy
-    // For example, you could move sessions between groups or workers
+    // TODO
+    // Implementation would depend on load balancing strategy
+    // move sessions between groups or workers
     // based on load metrics.
 }
 

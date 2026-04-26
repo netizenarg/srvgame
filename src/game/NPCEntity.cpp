@@ -272,12 +272,12 @@ NPCEntity::NPCEntity(NPCType type, const glm::vec3& position, int level)
     // Set spawn position
     spawn_position_ = position;
 
-    Logger::Debug("NPCEntity created: {} (ID: {}) at [{:.1f}, {:.1f}, {:.1f}]",
-                  name_, GetId(), position.x, position.y, position.z);
+    // Logger::Trace("NPCEntity created: {} (ID: {}) at [{:.1f}, {:.1f}, {:.1f}]",
+    //               name_, GetId(), position.x, position.y, position.z);
 }
 
 NPCEntity::~NPCEntity() {
-    Logger::Debug("NPCEntity destroyed: {} (ID: {})", name_, GetId());
+    //Logger::Trace("NPCEntity destroyed: {} (ID: {})", name_, GetId());
 }
 
 // =============== NPC Type Management ===============
@@ -615,13 +615,11 @@ void NPCEntity::SetDefaultAIProfile() {
 void NPCEntity::SetAIState(NPCAIState state) {
     if (ai_state_ == state) return;
 
-    NPCAIState old_state = ai_state_;
+    //NPCAIState old_state = ai_state_;
     ai_state_ = state;
 
-    // Reset state timer
     state_timer_ = 0.0f;
 
-    // State entry logic
     switch (ai_state_) {
         case NPCAIState::IDLE:
             ChangeToIdle();
@@ -649,15 +647,13 @@ void NPCEntity::SetAIState(NPCAIState state) {
             break;
     }
 
-    Logger::Debug("NPC {} changed AI state from {} to {}",
-                  GetId(), AIStateToString(old_state), GetAIStateString());
+    // Logger::Trace("NPC {} changed AI state from {} to {}",
+    //               GetId(), AIStateToString(old_state), GetAIStateString());
 }
 
 void NPCEntity::ChangeToIdle() {
     Stop();
     idle_timer_ = 0.0f;
-
-    // Set random idle time
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_real_distribution<float> dis(
@@ -668,19 +664,15 @@ void NPCEntity::ChangeToIdle() {
 }
 
 void NPCEntity::ChangeToPatrol() {
-    // If no patrol points, generate random patrol area
     if (ai_profile_.patrol_points.empty() && ai_profile_.patrol_radius > 0) {
         std::random_device rd;
         std::mt19937 gen(rd());
         std::uniform_real_distribution<float> dis(-ai_profile_.patrol_radius, ai_profile_.patrol_radius);
-
         glm::vec3 patrol_point = spawn_position_;
         patrol_point.x += dis(gen);
         patrol_point.z += dis(gen);
-
         MoveTo(patrol_point, ai_profile_.patrol_speed);
     } else if (!ai_profile_.patrol_points.empty()) {
-        // Move to first patrol point
         glm::vec3 target = GetNextPatrolPoint();
         MoveTo(target, ai_profile_.patrol_speed);
     }
@@ -688,7 +680,6 @@ void NPCEntity::ChangeToPatrol() {
 
 void NPCEntity::ChangeToChase(uint64_t target_id) {
     target_id_ = target_id;
-    // Chase logic handled in UpdateChase
 }
 
 void NPCEntity::ChangeToAttack(uint64_t target_id) {
@@ -698,20 +689,14 @@ void NPCEntity::ChangeToAttack(uint64_t target_id) {
 
 void NPCEntity::ChangeToFlee() {
     flee_timer_ = 0.0f;
-
-    // Calculate flee direction away from target
     if (target_id_ != 0) {
-        // This would require getting target position from EntityManager
-        // For now, just move in a random direction
         std::random_device rd;
         std::mt19937 gen(rd());
         std::uniform_real_distribution<float> dis(-1.0f, 1.0f);
-
         glm::vec3 flee_dir = glm::vec3(dis(gen), 0.0f, dis(gen));
         if (glm::length(flee_dir) > 0.01f) {
             flee_dir = glm::normalize(flee_dir);
         }
-
         glm::vec3 flee_target = GetPosition() + flee_dir * 20.0f;
         MoveTo(flee_target, npc_stats_.flee_speed);
     }
@@ -722,8 +707,6 @@ void NPCEntity::ChangeToDead() {
     SetActive(false);
     SetVisible(false);
     SetCollidable(false);
-
-    // Schedule despawn
     state_timer_ = DESPAWN_DELAY;
     ai_state_ = NPCAIState::DESPAWNING;
 }
@@ -731,8 +714,6 @@ void NPCEntity::ChangeToDead() {
 // =============== AI Update Methods ===============
 void NPCEntity::Update(float delta_time) {
     GameEntity::Update(delta_time);
-
-    // Auto-stop when close to move target
     if (has_move_target_) {
         float distance = glm::distance(GetPosition(), move_target_);
         if (distance < 0.5f) { // Threshold – can be a constant or configurable
@@ -740,45 +721,29 @@ void NPCEntity::Update(float delta_time) {
             has_move_target_ = false;
         }
     }
-
-    // Update AI if active and not dead
     if (IsActive() && ai_state_ != NPCAIState::DEAD && ai_state_ != NPCAIState::DESPAWNING) {
         UpdateAI(delta_time);
     }
-
-    // Update timers
     state_timer_ += delta_time;
-
-    // Update attack cooldown
     if (attack_cooldown_ > 0.0f) {
         attack_cooldown_ -= delta_time;
     }
-
-    // Update stun timer
     if (stun_timer_ > 0.0f) {
         stun_timer_ -= delta_time;
         if (stun_timer_ <= 0.0f && ai_state_ == NPCAIState::IDLE) {
-            // Return to previous state after stun
             SetAIState(NPCAIState::IDLE);
         }
     }
-
-    // Update summon cooldown
     if (summon_cooldown_ > 0.0f) {
         summon_cooldown_ -= delta_time;
     }
 }
 
 void NPCEntity::UpdateAI(float delta_time) {
-    // Don't update AI if stunned
     if (stun_timer_ > 0.0f) {
         return;
     }
-
-    // Update target selection
     UpdateTargetSelection();
-
-    // Update current AI state
     switch (ai_state_) {
         case NPCAIState::IDLE:
             UpdateIdle(delta_time);
@@ -802,56 +767,41 @@ void NPCEntity::UpdateAI(float delta_time) {
             UpdateDespawning(delta_time);
             break;
         default:
-            // Other states don't need AI updates
             break;
     }
 }
 
 void NPCEntity::UpdateIdle(float delta_time) {
     idle_timer_ += delta_time;
-
-    // Check for targets if aggressive
     if (ai_profile_.is_aggressive && HasTarget()) {
         SetAIState(NPCAIState::CHASE);
         return;
     }
-
-    // Check if idle time is up
     if (idle_timer_ >= state_timer_) {
-        // Transition to patrol or wander
         if (!ai_profile_.patrol_points.empty() || ai_profile_.patrol_radius > 0) {
             SetAIState(NPCAIState::PATROL);
         } else {
-            // Reset idle timer
             ChangeToIdle();
         }
     }
 }
 
 void NPCEntity::UpdatePatrol(float delta_time) {
-    // Check for targets if aggressive
     if (ai_profile_.is_aggressive && HasTarget()) {
         SetAIState(NPCAIState::CHASE);
         return;
     }
-
     if (waiting_at_patrol_point_) {
-        // Decrease wait timer
         patrol_wait_timer_ -= delta_time;
         if (patrol_wait_timer_ <= 0.0f) {
-            // Finished waiting, move to next point
             waiting_at_patrol_point_ = false;
             glm::vec3 next_point = GetNextPatrolPoint();
             MoveTo(next_point, ai_profile_.patrol_speed);
         }
         return;
     }
-
-    // Check if reached patrol point
     if (!IsMoving()) {
-        // Arrived at point – start waiting
         waiting_at_patrol_point_ = true;
-        // Random wait duration (e.g., 2–5 seconds)
         std::random_device rd;
         std::mt19937 gen(rd());
         std::uniform_real_distribution<float> wait_dist(2.0f, 5.0f);
@@ -864,31 +814,20 @@ void NPCEntity::UpdateChase(float delta_time) {
         SetAIState(NPCAIState::IDLE);
         return;
     }
-
-    // Check if target is in attack range
-    // This would require getting target position from EntityManager
-    // For now, simulate with random chance
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_real_distribution<float> dis(0.0f, 1.0f);
-
-    if (dis(gen) < 0.1f) { // 10% chance per frame to enter attack range
+    if (dis(gen) < 0.1f) {
         SetAIState(NPCAIState::ATTACK);
         return;
     }
-
-    // Check if target is out of chase range
-    if (dis(gen) < 0.05f) { // 5% chance per frame to lose target
+    if (dis(gen) < 0.05f) {
         target_id_ = 0;
         SetAIState(NPCAIState::IDLE);
         return;
     }
-
-    // Move toward target (simulated)
-    // In real implementation, you would get target position and move toward it
-    glm::vec3 chase_dir = glm::vec3(1.0f, 0.0f, 1.0f); // Simplified
+    glm::vec3 chase_dir = glm::vec3(1.0f, 0.0f, 1.0f);
     chase_dir = glm::normalize(chase_dir);
-
     glm::vec3 velocity = chase_dir * npc_stats_.chase_speed * delta_time;
     Translate(velocity);
 }
@@ -899,21 +838,15 @@ void NPCEntity::UpdateAttack(float delta_time) {
         SetAIState(NPCAIState::IDLE);
         return;
     }
-
-    // Check if should flee
     if (ai_profile_.can_flee &&
         GetHealth() / GetMaxHealth() <= ai_profile_.flee_health_threshold) {
         SetAIState(NPCAIState::FLEE);
         return;
     }
-
-    // Check attack cooldown
     if (attack_cooldown_ <= 0.0f) {
         PerformAttack();
         attack_cooldown_ = ATTACK_COOLDOWN_BASE / npc_stats_.attack_speed;
     }
-
-    // Check if should summon allies
     if (ai_profile_.can_summon_allies && summon_cooldown_ <= 0.0f) {
         SummonAllies();
         summon_cooldown_ = ai_profile_.summon_cooldown;
@@ -922,14 +855,10 @@ void NPCEntity::UpdateAttack(float delta_time) {
 
 void NPCEntity::UpdateFlee(float delta_time) {
     flee_timer_ += delta_time;
-
-    // Check if flee time is up
     if (flee_timer_ >= FLEE_DURATION) {
         SetAIState(NPCAIState::IDLE);
         return;
     }
-
-    // Check if still need to flee
     if (GetHealth() / GetMaxHealth() > ai_profile_.flee_health_threshold * 1.5f) {
         SetAIState(NPCAIState::IDLE);
         return;
@@ -938,7 +867,6 @@ void NPCEntity::UpdateFlee(float delta_time) {
 
 void NPCEntity::UpdateSpawning(float delta_time) {
     (void)delta_time;
-    // For now, just transition to idle after a short time
     if (state_timer_ >= 2.0f) {
         SetAIState(NPCAIState::IDLE);
     }
@@ -947,67 +875,42 @@ void NPCEntity::UpdateSpawning(float delta_time) {
 void NPCEntity::UpdateDespawning(float delta_time) {
     (void)delta_time;
     if (state_timer_ >= DESPAWN_DELAY) {
-        // Mark for removal (should be handled by EntityManager)
         SetActive(false);
-
-        // If respawns, schedule respawn
-        if (ai_profile_.respawns) {
-            // This would be handled by a respawn system
-            Logger::Debug("NPC {} scheduled for respawn", GetId());
-        }
+        // if (ai_profile_.respawns) {
+        //     Logger::Trace("NPC {} scheduled for respawn", GetId());
+        // }
     }
 }
 
 // =============== Targeting ===============
 void NPCEntity::SetTarget(uint64_t target_id) {
-    if (target_id == GetId()) return; // Can't target self
-
+    if (target_id == GetId()) return;
     target_id_ = target_id;
-
-    // If we have a target and are aggressive, start chasing
     if (target_id_ != 0 && ai_profile_.is_aggressive) {
         SetAIState(NPCAIState::CHASE);
     }
 }
 
 void NPCEntity::UpdateTargetSelection() {
-    // Only update target if we don't have one or current target is invalid
     if (HasTarget() || !ai_profile_.is_aggressive) {
         return;
     }
-
-    // In real implementation, you would:
-    // 1. Query EntityManager for entities in sight range
-    // 2. Filter by faction (hostile to player, etc.)
-    // 3. Select closest or most threatening target
-
-    // For now, this is a placeholder
 }
 
 void NPCEntity::UpdateHateList(uint64_t attacker_id, float damage) {
     if (attacker_id == 0 || attacker_id == GetId()) return;
-
-    // Add damage to the attacker's total
     damage_taken_[attacker_id] += damage;
-
-    // Update hate list order
     hate_list_.clear();
     for (const auto& [id, dmg] : damage_taken_) {
         hate_list_.push_back(id);
     }
-
-    // Sort by damage dealt (descending)
     std::sort(hate_list_.begin(), hate_list_.end(),
-        [this](uint64_t a, uint64_t b) {
-            return damage_taken_[a] > damage_taken_[b];
-        });
-
-    // Limit hate list size
+    [this](uint64_t a, uint64_t b) {
+        return damage_taken_[a] > damage_taken_[b];
+    });
     if (hate_list_.size() > 10) {
         hate_list_.resize(10);
     }
-
-    // Update target to top hated
     if (!hate_list_.empty()) {
         SetTarget(hate_list_[0]);
     }
@@ -1028,28 +931,19 @@ void NPCEntity::PerformAttack() {
     if (!HasTarget() || attack_cooldown_ > 0.0f) {
         return;
     }
-
-    // Calculate damage with critical chance
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_real_distribution<float> dis(0.0f, 1.0f);
-
     float damage = npc_stats_.attack_damage;
-
-    // Critical hit check
     if (dis(gen) < npc_stats_.critical_chance) {
         damage *= npc_stats_.critical_damage;
-        Logger::Debug("NPC {} critical hit on target {}: {:.1f} damage",
-                      GetId(), target_id_, damage);
-    } else {
-        Logger::Debug("NPC {} attacks target {}: {:.1f} damage",
-                      GetId(), target_id_, damage);
+        // Logger::Trace("NPC {} critical hit on target {}: {:.1f} damage",
+        //               GetId(), target_id_, damage);
+    // } else {
+    //     Logger::Trace("NPC {} attacks target {}: {:.1f} damage",
+    //                   GetId(), target_id_, damage);
     }
-
-    // Apply damage to target (would be handled by combat system)
     FireEvent("on_attack");
-
-    // Reset attack cooldown
     attack_cooldown_ = ATTACK_COOLDOWN_BASE / npc_stats_.attack_speed;
 }
 
@@ -1057,58 +951,38 @@ void NPCEntity::SummonAllies() {
     if (!ai_profile_.can_summon_allies || summon_cooldown_ > 0.0f) {
         return;
     }
-
-    int allies_to_summon = std::min(ai_profile_.max_allies, 5); // Limit
+    int allies_to_summon = std::min(ai_profile_.max_allies, 5);
     Logger::Debug("NPC {} summoning {} allies", GetId(), allies_to_summon);
-
-    // This would create new NPC entities around this NPC
-    // For now, just log it
-
     summon_cooldown_ = ai_profile_.summon_cooldown;
 }
 
 void NPCEntity::TakeDamage(float damage, uint64_t attacker_id) {
     if (IsDead() || damage <= 0.0f) return;
-
-    // Update hate list
     UpdateHateList(attacker_id, damage);
-
-    // Call base class to apply damage
     GameEntity::TakeDamage(damage, attacker_id);
-
-    // Update AI state based on damage
     if (IsAlive()) {
-        // If we have a target and are not already chasing/attacking, start chasing
         if (HasTarget() && ai_state_ != NPCAIState::CHASE && ai_state_ != NPCAIState::ATTACK) {
             SetAIState(NPCAIState::CHASE);
         }
-
-        // Check for stun (simplified)
-        if (damage > GetMaxHealth() * 0.3f) { // Large hit stuns
+        if (damage > GetMaxHealth() * 0.3f) {
             stun_timer_ = STUN_DURATION;
             Stop();
         }
-    } else {
-        // Died
+    } else { // Died
         SetAIState(NPCAIState::DEAD);
-
-        // Generate loot and experience
         if (ai_profile_.drops_loot) {
             auto loot = GenerateLoot();
             int gold = GenerateGold();
-
-            Logger::Debug("NPC {} died. Loot: {} items, {} gold",
-                          GetId(), loot.size(), gold);
+            (void)gold;
+            // Logger::Trace("NPC {} died. Loot: {} items, {} gold",
+            //               GetId(), loot.size(), gold);
         }
     }
 }
 
 void NPCEntity::Heal(float amount, uint64_t healer_id) {
     GameEntity::Heal(amount, healer_id);
-
-    // Update AI if healed significantly
     if (amount > GetMaxHealth() * 0.2f && ai_state_ == NPCAIState::FLEE) {
-        // Stop fleeing if healed enough
         SetAIState(NPCAIState::IDLE);
     }
 }
@@ -1128,25 +1002,18 @@ void NPCEntity::ClearPatrolPoints() {
 
 glm::vec3 NPCEntity::GetNextPatrolPoint() {
     if (patrol_queue_.empty()) {
-        // Regenerate patrol queue from points
         for (const auto& point : ai_profile_.patrol_points) {
             patrol_queue_.push(point);
         }
-
-        // If still empty, return current position
         if (patrol_queue_.empty()) {
             return GetPosition();
         }
     }
-
     glm::vec3 next_point = patrol_queue_.front();
     patrol_queue_.pop();
-
-    // If looping, add back to end
     if (ai_profile_.patrol_loop) {
         patrol_queue_.push(next_point);
     }
-
     return next_point;
 }
 
@@ -1171,41 +1038,30 @@ void NPCEntity::RemoveDropItem(const std::string& item_id) {
 
 std::vector<std::pair<std::string, int>> NPCEntity::GenerateLoot() const {
     std::vector<std::pair<std::string, int>> loot;
-
     if (!ai_profile_.drops_loot) {
         return loot;
     }
-
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_real_distribution<float> dis(0.0f, 1.0f);
-
-    // Check if loot should drop
     if (dis(gen) > loot_table_.drop_chance) {
         return loot;
     }
-
-    // Determine number of items
     std::uniform_int_distribution<int> count_dis(
         loot_table_.min_items,
         loot_table_.max_items
     );
     int item_count = count_dis(gen);
-
-    // Generate items
     for (int i = 0; i < item_count && !loot_table_.item_drop_rates.empty(); ++i) {
         for (const auto& [item_id, drop_rate] : loot_table_.item_drop_rates) {
             if (dis(gen) <= drop_rate) {
-                // Determine quantity (usually 1, but could be more for stackable items)
                 std::uniform_int_distribution<int> qty_dis(1, 3);
                 int quantity = qty_dis(gen);
-
                 loot.emplace_back(item_id, quantity);
-                break; // One item per iteration
+                break;
             }
         }
     }
-
     return loot;
 }
 
@@ -1216,7 +1072,6 @@ int NPCEntity::GenerateGold() const {
         npc_stats_.min_gold,
         npc_stats_.max_gold
     );
-
     return dis(gen);
 }
 
@@ -1227,8 +1082,6 @@ void NPCEntity::SetDialogue(const NPCDialogue& dialogue) {
 
 void NPCEntity::AddDialogueTopic(const std::string& topic, const std::string& response) {
     dialogue_.responses[topic] = response;
-
-    // Add to topics list if not already there
     if (std::find(dialogue_.topics.begin(), dialogue_.topics.end(), topic) == dialogue_.topics.end()) {
         dialogue_.topics.push_back(topic);
     }
@@ -1287,81 +1140,54 @@ int NPCEntity::GetItemPrice(const std::string& item_id) const {
 // =============== Spawn/Respawn ===============
 void NPCEntity::Respawn() {
     if (!IsDead()) return;
-
-    // Reset position to spawn point
     SetPosition(spawn_position_);
-
-    // Reset stats
     CalculateStats();
     SetHealth(GetMaxHealth());
-
-    // Reset AI state
     ClearHateList();
     SetAIState(NPCAIState::SPAWNING);
-
-    // Reset visual state
     SetActive(true);
     SetVisible(true);
     SetCollidable(true);
-
-    Logger::Debug("NPC {} respawned at [{:.1f}, {:.1f}, {:.1f}]",
-                  GetId(), spawn_position_.x, spawn_position_.y, spawn_position_.z);
+    // Logger::Trace("NPC {} respawned at [{:.1f}, {:.1f}, {:.1f}]",
+    //               GetId(), spawn_position_.x, spawn_position_.y, spawn_position_.z);
 }
 
 // =============== Serialization ===============
 nlohmann::json NPCEntity::Serialize() const {
     nlohmann::json json = GameEntity::Serialize();
-
-    // NPC-specific data
     json["npc_type"] = static_cast<int>(npc_type_);
     json["rarity"] = static_cast<int>(rarity_);
     json["faction"] = static_cast<int>(faction_);
     json["ai_state"] = static_cast<int>(ai_state_);
-
-    // Spawn position
     json["spawn_position"] = {spawn_position_.x, spawn_position_.y, spawn_position_.z};
-
-    // Targeting
     json["target_id"] = target_id_;
-
-    // Serialize NPC systems
     SaveStatsToJson(json);
     SaveAIProfileToJson(json);
     SaveLootTableToJson(json);
     SaveDialogueToJson(json);
     SaveQuestsToJson(json);
     SaveTradeItemsToJson(json);
-
-    // Serialize hate list and damage taken
     json["hate_list"] = hate_list_;
-
     nlohmann::json damage_json;
     for (const auto& [attacker_id, damage] : damage_taken_) {
         damage_json[std::to_string(attacker_id)] = damage;
     }
     json["damage_taken"] = damage_json;
-
-    // Serialize timers
     json["state_timer"] = state_timer_;
     json["idle_timer"] = idle_timer_;
     json["attack_cooldown"] = attack_cooldown_;
     json["stun_timer"] = stun_timer_;
     json["flee_timer"] = flee_timer_;
     json["summon_cooldown"] = summon_cooldown_;
-
     return json;
 }
 
 void NPCEntity::Deserialize(const nlohmann::json& data) {
     GameEntity::Deserialize(data);
-
-    // NPC-specific data
     npc_type_ = static_cast<NPCType>(data.value("npc_type", 0));
     rarity_ = static_cast<NPCRarity>(data.value("rarity", 0));
     faction_ = static_cast<NPCFaction>(data.value("faction", 0));
     ai_state_ = static_cast<NPCAIState>(data.value("ai_state", 0));
-
-    // Spawn position
     if (data.contains("spawn_position") && data["spawn_position"].is_array() &&
         data["spawn_position"].size() >= 3) {
         spawn_position_.x = data["spawn_position"][0];
@@ -1370,24 +1196,17 @@ void NPCEntity::Deserialize(const nlohmann::json& data) {
     } else {
         spawn_position_ = GetPosition();
     }
-
-    // Targeting
     target_id_ = data.value("target_id", 0);
-
-    // Deserialize NPC systems
     LoadStatsFromJson(data);
     LoadAIProfileFromJson(data);
     LoadLootTableFromJson(data);
     LoadDialogueFromJson(data);
     LoadQuestsFromJson(data);
     LoadTradeItemsFromJson(data);
-
-    // Deserialize hate list and damage taken
     hate_list_.clear();
     if (data.contains("hate_list") && data["hate_list"].is_array()) {
         hate_list_ = data["hate_list"].get<std::vector<uint64_t>>();
     }
-
     damage_taken_.clear();
     if (data.contains("damage_taken")) {
         for (const auto& [attacker_str, damage] : data["damage_taken"].items()) {
@@ -1395,16 +1214,12 @@ void NPCEntity::Deserialize(const nlohmann::json& data) {
             damage_taken_[attacker_id] = damage.get<float>();
         }
     }
-
-    // Deserialize timers
     state_timer_ = data.value("state_timer", 0.0f);
     idle_timer_ = data.value("idle_timer", 0.0f);
     attack_cooldown_ = data.value("attack_cooldown", 0.0f);
     stun_timer_ = data.value("stun_timer", 0.0f);
     flee_timer_ = data.value("flee_timer", 0.0f);
     summon_cooldown_ = data.value("summon_cooldown", 0.0f);
-
-    // Update name based on type
     name_ = GetNPCTypeString() + "_" + std::to_string(GetId());
 }
 
@@ -1492,10 +1307,7 @@ void NPCEntity::OnDestroy() {
 
 void NPCEntity::OnCollision(std::shared_ptr<GameEntity> other) {
     GameEntity::OnCollision(other);
-
-    // NPC-specific collision logic
     if (other && other->GetType() == EntityType::PLAYER) {
-        // If aggressive and sees player, attack
         if (ai_profile_.is_aggressive && ai_state_ != NPCAIState::ATTACK) {
             SetTarget(other->GetId());
             SetAIState(NPCAIState::ATTACK);
@@ -1506,26 +1318,19 @@ void NPCEntity::OnCollision(std::shared_ptr<GameEntity> other) {
 // =============== Fixed Update ===============
 void NPCEntity::FixedUpdate(float delta_time) {
     GameEntity::FixedUpdate(delta_time);
-
-    // NPC-specific physics updates
-    // (Could include pathfinding, collision avoidance, etc.)
 }
 
 void NPCEntity::MoveTo(const glm::vec3& destination, float speed_multiplier) {
     move_target_ = destination;
     move_speed_multiplier_ = speed_multiplier;
     has_move_target_ = true;
-
-    // Calculate direction and set velocity
     glm::vec3 direction = destination - GetPosition();
     float distance = glm::length(direction);
     if (distance > 0.01f) {
         direction /= distance;
-        // Use npc_stats_.move_speed as base speed multiplied by multiplier
         float base_speed = npc_stats_.move_speed;
         SetVelocity(direction * base_speed * speed_multiplier);
     } else {
-        // Already at target
         Stop();
         has_move_target_ = false;
     }

@@ -6,12 +6,25 @@
 #include <vector>
 #include <map>
 #include <set>
+#include <unordered_map>
 
 #include <nlohmann/json.hpp>
+
+enum class ProtocolMode { Binary, Json, Unknown };
+
+static const std::unordered_map<std::string, int> IPCMessageTypes = {
+    {"welcome", 1},
+    {"heartbeat", 2},
+    {"broadcast", 3},
+    {"shutdown", 4},
+    {"reload_config", 5}
+};
 
 class IConnection {
 public:
     virtual ~IConnection() = default;
+
+    virtual ProtocolMode GetProtocolMode() const = 0;
 
     // Core methods
     virtual void Start() = 0;
@@ -21,9 +34,10 @@ public:
     virtual uint64_t GetSessionId() const = 0;
 
     // Send methods
-    virtual void Send(const nlohmann::json& message) = 0;
+    virtual void Send(uint16_t message_type, const std::vector<uint8_t>& data) = 0;
     virtual void SendRaw(const std::string& data) = 0;
-    virtual void SendBinary(uint16_t message_type, const std::vector<uint8_t>& data) = 0;
+    virtual void SendJson(const nlohmann::json& message) = 0;
+    virtual void SendError(uint16_t message_type, const std::string& error_message, int code) = 0;
 
     // Callback setters
     using MessageHandler = std::function<void(const nlohmann::json&)>;

@@ -23,7 +23,7 @@ public:
         float terrainScale = 100.0f;
         float maxTerrainHeight = 50.0f;
         float waterLevel = 10.0f;
-        float chunkUnloadDistance = 200.0f;
+        float unloadDistance = 200.0f;
     };
 
     static LogicWorld& GetInstance();
@@ -78,4 +78,5 @@ private:
     std::unordered_map<uint64_t, std::shared_ptr<GameEntity>> entities_;
     mutable std::mutex entitiesMutex_;
     std::atomic<float> currentTimeOfDay_{0.0f};  // 0.0 to 1.0
+    uint32_t canary_ = 0xDEADBEEF;
 };

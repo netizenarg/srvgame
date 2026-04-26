@@ -8,6 +8,8 @@
 
 #include "database/DbManager.hpp"
 #include "logging/Logger.hpp"
+
+#include "game/GameData.hpp"
 #include "game/LootItem.hpp"
 
 struct InventorySlot {
@@ -27,15 +29,16 @@ public:
     // Inventory management
     bool AddItem(uint64_t playerId, const LootItem& item, int quantity = 1);
     bool RemoveItem(uint64_t playerId, uint64_t itemId, int quantity = 1);
+    bool UseItem(uint64_t playerId, uint64_t itemId, int quantity = 1);
     bool MoveItem(uint64_t playerId, int fromSlot, int toSlot);
     bool SwapItems(uint64_t playerId, int slot1, int slot2);
     bool SplitStack(uint64_t playerId, int slot, int splitQuantity);
     bool MergeStacks(uint64_t playerId, int sourceSlot, int targetSlot);
 
     // Equipment management
-    bool EquipItem(uint64_t playerId, int inventorySlot);
-    bool UnequipItem(uint64_t playerId, int equipmentSlot);
-    bool AutoEquip(uint64_t playerId, uint64_t itemId);
+    bool EquipItem(uint64_t playerId, int inventorySlot, int quantity = 1);
+    bool UnequipItem(uint64_t playerId, int equipmentSlot, int quantity = 1);
+    bool AutoEquip(uint64_t playerId, uint64_t itemId, int quantity = 1);
 
     // Query methods
     std::shared_ptr<LootItem> GetItem(uint64_t playerId, int slot);

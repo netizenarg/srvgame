@@ -1,11 +1,11 @@
-#include "network/GameSession.hpp"
+#include "network/BinarySession.hpp"
 
 // Static member initialization
-std::atomic<uint64_t> GameSession::nextSessionId_{1};
+std::atomic<uint64_t> BinarySession::nextSessionId_{1};
 
 // =============== Constructor and Destructor ===============
 
-GameSession::GameSession(asio::ip::tcp::socket socket,
+BinarySession::BinarySession(asio::ip::tcp::socket socket,
                          std::shared_ptr<asio::ssl::context> ssl_context)
     : socket_(std::move(socket))
     , ssl_context_(ssl_context)
@@ -51,24 +51,24 @@ GameSession::GameSession(asio::ip::tcp::socket socket,
     rate_limit_.tokens = rate_limit_.burst_size;
     rate_limit_.last_refill = std::chrono::steady_clock::now();
 
-    Logger::Info("GameSession {} created for {}",
+    Logger::Info("BinarySession {} created for {}",
                  sessionId_, GetRemoteEndpoint().address().to_string());
 }
 
-GameSession::~GameSession() {
+BinarySession::~BinarySession() {
     Stop();
-    Logger::Debug("GameSession {} destroyed", sessionId_);
+    Logger::Debug("BinarySession {} destroyed", sessionId_);
 }
 
 // =============== Core Session Management ===============
 
-void GameSession::Start() {
+void BinarySession::Start() {
     if (!connected_) {
         Logger::Warn("Session {} already closed", sessionId_);
         return;
     }
 
-    Logger::Debug("Starting GameSession {}", sessionId_);
+    Logger::Debug("Starting BinarySession {}", sessionId_);
 
     if (ssl_stream_) {
         // Start TLS handshake for encrypted connections
@@ -79,7 +79,7 @@ void GameSession::Start() {
     }
 }
 
-void GameSession::StartTLSHandshake() {
+void BinarySession::StartTLSHandshake() {
     if (!ssl_stream_) return;
 
     auto self = shared_from_this();
@@ -97,7 +97,7 @@ void GameSession::StartTLSHandshake() {
         });
 }
 
-void GameSession::StartProtocolNegotiation() {
+void BinarySession::StartProtocolNegotiation() {
     // Send protocol capabilities to client
     SendProtocolCapabilities();
 
@@ -113,80 +113,71 @@ void GameSession::StartProtocolNegotiation() {
     // Start network adaptation monitoring
     StartNetworkAdaptation();
 
-    Logger::Info("GameSession {} started", sessionId_);
+    Logger::Info("BinarySession {} started", sessionId_);
 }
 
-void GameSession::Stop() {
+void BinarySession::Stop() {
     if (closing_.exchange(true)) {
-        return; // Already closing
+        return;
     }
-
-    Logger::Debug("Stopping GameSession {}", sessionId_);
-
+    Logger::Debug("Stopping BinarySession {}", sessionId_);
     connected_ = false;
-
-    // Cancel all timers
     try {
         heartbeat_timer_.cancel();
-    } catch (const std::exception& e) {
-        Logger::Debug("Error cancelling heartbeat timer: {}", e.what());
+    } catch (const std::exception& err) {
+        Logger::Debug("Error cancelling heartbeat timer: {}", err.what());
     }
-
     try {
         shutdown_timer_.cancel();
-    } catch (const std::exception& e) {
-        Logger::Debug("Error cancelling shutdown timer: {}", e.what());
+    } catch (const std::exception& err) {
+        Logger::Debug("Error cancelling shutdown timer: {}", err.what());
     }
-
     try {
         network_adaptation_timer_.cancel();
-    } catch (const std::exception& e) {
-        Logger::Debug("Error cancelling network adaptation timer: {}", e.what());
+    } catch (const std::exception& err) {
+        Logger::Debug("Error cancelling network adaptation timer: {}", err.what());
     }
-
     std::error_code ec;
     if (ec) {
         Logger::Debug("Error cancelling timers: {}", ec.message());
     }
-
-    // Close socket
     if (GetSocket().is_open()) {
         try {
+            GetSocket().cancel(ec);
+            if (ec) {
+                Logger::Debug("Error cancel socket: {}", ec.message());
+            }
             GetSocket().shutdown(asio::ip::tcp::socket::shutdown_both, ec);
             if (ec && ec != asio::error::not_connected) {
                 Logger::Debug("Error shutting down socket: {}", ec.message());
             }
-
             GetSocket().close(ec);
             if (ec) {
                 Logger::Debug("Error closing socket: {}", ec.message());
             }
-        } catch (const std::exception& e) {
-            Logger::Error("Exception closing socket: {}", e.what());
+        } catch (const std::exception& err) {
+            Logger::Error("Exception closing socket: {}", err.what());
         }
     }
-
-    // Notify close handler
     if (close_handler_) {
         try {
             close_handler_();
-        } catch (const std::exception& e) {
-            Logger::Error("Error in close handler: {}", e.what());
+        } catch (const std::exception& err) {
+            Logger::Error("Error in close handler: {}", err.what());
         }
     }
-
-    Logger::Info("GameSession {} stopped", sessionId_);
+    Logger::Info("BinarySession {} stopped", sessionId_);
 }
 
-void GameSession::Disconnect() {
+void BinarySession::Disconnect() {
     Stop();
 }
 
-bool GameSession::IsConnected() const {
+bool BinarySession::IsConnected() const {
     return connected_ && !closing_ && GetSocket().is_open();
 }
 
-asio::ip::tcp::endpoint GameSession::GetRemoteEndpoint() const {
+asio::ip::tcp::endpoint BinarySession::GetRemoteEndpoint() const {
     try {
         // if (GetSocket().is_open()) {
         //     return GetSocket().remote_endpoint();
@@ -203,8 +194,7 @@ asio::ip::tcp::endpoint GameSession::GetRemoteEndpoint() const {
 }
 
 // =============== Binary Protocol Implementation ===============
-
-void GameSession::DoBinaryRead() {
+void BinarySession::DoBinaryRead() {
     if (!connected_ || closing_) return;
 
     auto self = shared_from_this();
@@ -215,7 +205,7 @@ void GameSession::DoBinaryRead() {
     asio::async_read(GetSocket(),
         asio::buffer(&header, sizeof(BinaryProtocol::NetworkHeader)),
         [self, header](std::error_code ec, std::size_t length) mutable {
-            Logger::Debug("GameSession::DoBinaryRead asio::async_read length = {}", length);
+            Logger::Debug("BinarySession::DoBinaryRead asio::async_read length = {}", length);
             if (ec) {
                 self->HandleNetworkError(ec);
                 return;
@@ -225,7 +215,7 @@ void GameSession::DoBinaryRead() {
             if (header.version > BinaryProtocol::CURRENT_PROTOCOL_VERSION) {
                 Logger::Warn("Session {}: incompatible protocol version {}",
                             self->sessionId_, header.version);
-                self->SendBinaryError(BinaryProtocol::MESSAGE_TYPE_ERROR,
+                self->SendError(BinaryProtocol::MESSAGE_TYPE_ERROR,
                                      "Incompatible protocol version", 400);
                 self->DoBinaryRead();
                 return;
@@ -247,23 +237,35 @@ void GameSession::DoBinaryRead() {
                 return;
             }
 
+            // Create deadline timer for payload read
+            auto deadline = std::make_shared<asio::steady_timer>(self->GetSocket().get_executor());
+            deadline->expires_after(std::chrono::seconds(10));
+            deadline->async_wait([self, deadline](std::error_code ec) {
+                if (!ec && self->connected_) {
+                    Logger::Warn("Session {}: payload read timeout", self->sessionId_);
+                    self->Stop();
+                }
+            });
+
             // Read message body
             std::vector<uint8_t> body(header.length);
 
             asio::async_read(self->GetSocket(),
                 asio::buffer(body),
-                [self, header, body](std::error_code ec, std::size_t length) mutable {
-                    Logger::Debug("GameSession::DoBinaryRead asio::async_read length = {}", length);
+                [self, header, body, deadline](std::error_code ec, std::size_t length) mutable {
+                    deadline->cancel();  // Cancel timeout on successful read or error
                     if (ec) {
                         self->HandleNetworkError(ec);
                         return;
                     }
 
+                    Logger::Debug("BinarySession::DoBinaryRead asio::async_read length = {}", length);
+
                     // Verify checksum
                     uint32_t calculated = BinaryProtocol::CalculateCRC32(body.data(), body.size());
                     if (calculated != header.checksum) {
                         Logger::Error("Session {}: checksum mismatch", self->sessionId_);
-                        self->SendBinaryError(BinaryProtocol::MESSAGE_TYPE_ERROR,
+                        self->SendError(BinaryProtocol::MESSAGE_TYPE_ERROR,
                                              "Checksum error", 400);
                         self->DoBinaryRead();
                         return;
@@ -277,7 +279,7 @@ void GameSession::DoBinaryRead() {
                         } catch (const std::exception& e) {
                             Logger::Error("Session {}: decompression failed: {}",
                                         self->sessionId_, e.what());
-                            self->SendBinaryError(BinaryProtocol::MESSAGE_TYPE_ERROR,
+                            self->SendError(BinaryProtocol::MESSAGE_TYPE_ERROR,
                                                  "Decompression failed", 400);
                             self->DoBinaryRead();
                             return;
@@ -307,50 +309,49 @@ void GameSession::DoBinaryRead() {
         });
 }
 
-void GameSession::HandleBinaryMessage(const BinaryProtocol::BinaryMessage& message) {
-    // Update heartbeat on any valid message
+void BinarySession::HandleBinaryMessage(const BinaryProtocol::BinaryMessage& message) {
     last_heartbeat_ = std::chrono::steady_clock::now();
-
-    // Record message for statistics
     RecordMessageReceived(message.data.size());
-
-    // Check rate limiting
     if (!CheckRateLimit()) {
-        SendBinaryError(BinaryProtocol::MESSAGE_TYPE_ERROR, "Rate limit exceeded", 429);
+        SendError(BinaryProtocol::MESSAGE_TYPE_ERROR, "Rate limit exceeded", 429);
         return;
     }
-
-    // Handle special message types
     switch (message.header.message_type) {
         case BinaryProtocol::MESSAGE_TYPE_HEARTBEAT:
-            // This is a ping, send pong
-            SendBinary(BinaryProtocol::MESSAGE_TYPE_HEARTBEAT, message.data);
+            Send(BinaryProtocol::MESSAGE_TYPE_HEARTBEAT, message.data);
             return;
-
         case BinaryProtocol::MESSAGE_TYPE_PROTOCOL_NEGOTIATION:
             HandleProtocolNegotiation(message.data);
             return;
-
+        case BinaryProtocol::MESSAGE_TYPE_CHUNK_REQUEST: {
+            BinaryProtocol::BinaryReader reader(message.data.data(), message.data.size());
+            ChunkData req;
+            req.x = reader.ReadInt32();
+            req.z = reader.ReadInt32();
+            req.lod = reader.ReadUInt8();
+            req.player_x = reader.ReadFloat();
+            req.player_y = reader.ReadFloat();
+            req.player_z = reader.ReadFloat();
+            req.session_id = sessionId_;
+            GameLogic::GetInstance().OnChunkRequest(req);
+            break;
+        }
         case BinaryProtocol::MESSAGE_TYPE_ERROR:
             Logger::Warn("Session {} received error from client", sessionId_);
             return;
-
         case BinaryProtocol::MESSAGE_TYPE_SUCCESS:
-            // Process success acknowledgment
             return;
     }
 
-    // Look for registered binary handler
     std::lock_guard<std::mutex> lock(binary_handlers_mutex_);
     auto it = binary_handlers_.find(message.header.message_type);
-
     if (it != binary_handlers_.end()) {
         try {
             it->second(message.header.message_type, message.data);
         } catch (const std::exception& e) {
             Logger::Error("Session {} error in binary handler {}: {}",
                           sessionId_, message.header.message_type, e.what());
-            SendBinaryError(BinaryProtocol::MESSAGE_TYPE_ERROR,
+            SendError(BinaryProtocol::MESSAGE_TYPE_ERROR,
                            "Handler error", 500);
         }
     } else if (default_binary_handler_) {
@@ -363,17 +364,16 @@ void GameSession::HandleBinaryMessage(const BinaryProtocol::BinaryMessage& messa
     } else {
         Logger::Warn("Session {}: no handler for binary message type {}",
                      sessionId_, message.header.message_type);
-        SendBinaryError(BinaryProtocol::MESSAGE_TYPE_ERROR,
+        SendError(BinaryProtocol::MESSAGE_TYPE_ERROR,
                        "Unknown message type", 400);
     }
 }
 
-void GameSession::SendBinary(uint16_t message_type, const std::vector<uint8_t>& data) {
+void BinarySession::Send(uint16_t message_type, const std::vector<uint8_t>& data) {
     if (!connected_ || closing_) {
         Logger::Warn("Session {} not connected, cannot send binary", sessionId_);
         return;
     }
-
     BinaryProtocol::BinaryMessage message;
     message.header.version = BinaryProtocol::CURRENT_PROTOCOL_VERSION;
     message.header.message_type = message_type;
@@ -382,12 +382,10 @@ void GameSession::SendBinary(uint16_t message_type, const std::vector<uint8_t>& 
         std::chrono::system_clock::now().time_since_epoch()).count();
     message.data = data;
     message.header.length = static_cast<uint32_t>(data.size());
-
-    // Apply compression if enabled and beneficial
     if (compression_enabled_ && data.size() > 1024) {
         try {
             auto compressed = BinaryProtocol::CompressData(data);
-            if (compressed.size() < data.size() * 0.9) { // Only compress if we save at least 10%
+            if (compressed.size() < data.size() * 0.9) {
                 message.data = compressed;
                 message.header.length = static_cast<uint32_t>(compressed.size());
                 message.header.flags |= BinaryProtocol::FLAG_COMPRESSED;
@@ -396,47 +394,49 @@ void GameSession::SendBinary(uint16_t message_type, const std::vector<uint8_t>& 
             Logger::Warn("Session {} compression failed: {}", sessionId_, e.what());
         }
     }
-
-    // Add encryption flag if using TLS
     if (ssl_stream_) {
         message.header.flags |= BinaryProtocol::FLAG_ENCRYPTED;
     }
-
-    // Calculate checksum
     message.header.checksum = BinaryProtocol::CalculateCRC32(
         message.data.data(), message.data.size());
-
     auto serialized = message.Serialize();
-
-    // Record for network monitoring
     network_monitor_.RecordPacketSent(message.header.sequence, serialized.size());
-
-    // Add to write queue
     std::lock_guard<std::mutex> lock(write_mutex_);
     write_queue_.push(serialized);
-
     if (write_queue_.size() == 1) {
         DoBinaryWrite();
     }
 }
 
-void GameSession::SendBinary(uint16_t message_type, const void* data, size_t length) {
-    SendBinary(message_type, std::vector<uint8_t>(
+void BinarySession::Send(uint16_t message_type, const void* data, size_t length) {
+    Send(message_type, std::vector<uint8_t>(
         static_cast<const uint8_t*>(data),
         static_cast<const uint8_t*>(data) + length
     ));
 }
 
-void GameSession::SendBinaryWithAck(uint16_t message_type, const std::vector<uint8_t>& data) {
-    // Store in pending acks for reliability
-    uint32_t sequence = next_sequence_.load();
+void BinarySession::SendRaw(const std::string& data) {
+    if (!connected_ || closing_) {
+        Logger::Warn("Session {} not connected, cannot send", sessionId_);
+    }
+    else
+    {
+        std::lock_guard<std::mutex> lock(write_mutex_);
+        bool write_in_progress = !write_queue_.empty();
+        std::vector<uint8_t> binary_data(data.begin(), data.end());
+        write_queue_.push(binary_data);
+        if (!write_in_progress) {
+            DoBinaryWrite();
+        }
+    }
+}
 
+void BinarySession::SendWithAck(uint16_t message_type, const std::vector<uint8_t>& data) {
+    uint32_t sequence = next_sequence_.load();
     {
         std::lock_guard<std::mutex> lock(ack_mutex_);
         pending_acks_[sequence] = std::chrono::steady_clock::now();
     }
-
-    // Send with reliable flag
     BinaryProtocol::BinaryMessage message;
     message.header.version = BinaryProtocol::CURRENT_PROTOCOL_VERSION;
     message.header.message_type = message_type;
@@ -444,27 +444,48 @@ void GameSession::SendBinaryWithAck(uint16_t message_type, const std::vector<uin
     message.header.flags = BinaryProtocol::FLAG_RELIABLE;
     message.header.timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
-    message.data = data;
-    message.header.length = static_cast<uint32_t>(data.size());
-    message.header.checksum = BinaryProtocol::CalculateCRC32(data.data(), data.size());
-
-    auto serialized = message.Serialize();
-
-    // Record for network monitoring
-    network_monitor_.RecordPacketSent(sequence, serialized.size());
-
-    std::lock_guard<std::mutex> lock(write_mutex_);
-    write_queue_.push(serialized);
-
-    if (write_queue_.size() == 1) {
-        DoBinaryWrite();
-    }
-
-    // Increment sequence number
-    next_sequence_++;
+        message.data = data;
+        message.header.length = static_cast<uint32_t>(data.size());
+        message.header.checksum = BinaryProtocol::CalculateCRC32(data.data(), data.size());
+        auto serialized = message.Serialize();
+        network_monitor_.RecordPacketSent(sequence, serialized.size());
+        std::lock_guard<std::mutex> lock(write_mutex_);
+        write_queue_.push(serialized);
+        if (write_queue_.size() == 1) {
+            DoBinaryWrite();
+        }
+        next_sequence_++;
 }
 
-void GameSession::DoBinaryWrite() {
+void BinarySession::SendError(uint16_t message_type, const std::string& error_message, int code) {
+    BinaryProtocol::BinaryWriter writer;
+    writer.WriteUInt32(static_cast<uint32_t>(code));
+    writer.WriteString(error_message);
+    writer.WriteUInt64(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count());
+
+    Send(message_type, writer.GetBuffer());
+}
+
+void BinarySession::SendJson(const nlohmann::json& message)
+{
+    SendRaw(message.dump());
+}
+
+
+void BinarySession::SendBinaryWithAck(uint16_t message_type, const std::vector<uint8_t>& data) {
+    SendWithAck(message_type, data);
+}
+
+void BinarySession::SendPing() {
+    Send(BinaryProtocol::MESSAGE_TYPE_HEARTBEAT, {});
+}
+
+void BinarySession::SendPong() {
+    Send(BinaryProtocol::MESSAGE_TYPE_HEARTBEAT, {});
+}
+
+void BinarySession::DoBinaryWrite() {
     if (!connected_ || closing_ || write_queue_.empty()) return;
 
     std::lock_guard<std::mutex> lock(write_mutex_);
@@ -500,7 +521,7 @@ void GameSession::DoBinaryWrite() {
         });
 }
 
-void GameSession::SendAcknowledgment(uint32_t sequence) {
+void BinarySession::SendAcknowledgment(uint32_t sequence) {
     BinaryProtocol::BinaryWriter writer;
     writer.WriteUInt32(sequence);
 
@@ -523,7 +544,7 @@ void GameSession::SendAcknowledgment(uint32_t sequence) {
     }
 }
 
-void GameSession::ProcessAcknowledgment(uint32_t sequence) {
+void BinarySession::ProcessAcknowledgment(uint32_t sequence) {
     std::lock_guard<std::mutex> lock(ack_mutex_);
 
     auto it = pending_acks_.find(sequence);
@@ -540,19 +561,9 @@ void GameSession::ProcessAcknowledgment(uint32_t sequence) {
     }
 }
 
-void GameSession::SendBinaryError(uint16_t message_type, const std::string& error_message, int code) {
-    BinaryProtocol::BinaryWriter writer;
-    writer.WriteUInt32(static_cast<uint32_t>(code));
-    writer.WriteString(error_message);
-    writer.WriteUInt64(std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch()).count());
-
-    SendBinary(message_type, writer.GetBuffer());
-}
-
 // =============== Protocol Negotiation ===============
 
-void GameSession::SendProtocolCapabilities() {
+void BinarySession::SendProtocolCapabilities() {
     BinaryProtocol::ProtocolCapabilities caps;
     caps.version = BinaryProtocol::CURRENT_PROTOCOL_VERSION;
     caps.supports_compression = true;
@@ -565,10 +576,10 @@ void GameSession::SendProtocolCapabilities() {
     }
 
     auto caps_data = caps.Serialize();
-    SendBinary(BinaryProtocol::MESSAGE_TYPE_PROTOCOL_NEGOTIATION, caps_data);
+    Send(BinaryProtocol::MESSAGE_TYPE_PROTOCOL_NEGOTIATION, caps_data);
 }
 
-void GameSession::HandleProtocolNegotiation(const std::vector<uint8_t>& data) {
+void BinarySession::HandleProtocolNegotiation(const std::vector<uint8_t>& data) {
     try {
         auto client_caps = BinaryProtocol::ProtocolCapabilities::Deserialize(
             data.data(), data.size());
@@ -591,95 +602,19 @@ void GameSession::HandleProtocolNegotiation(const std::vector<uint8_t>& data) {
         writer.WriteUInt8(1); // success
         writer.WriteString("Protocol negotiation successful");
 
-        SendBinary(BinaryProtocol::MESSAGE_TYPE_SUCCESS, writer.GetBuffer());
+        Send(BinaryProtocol::MESSAGE_TYPE_SUCCESS, writer.GetBuffer());
 
     } catch (const std::exception& e) {
         Logger::Error("Session {}: protocol negotiation failed: {}",
                      sessionId_, e.what());
-        SendBinaryError(BinaryProtocol::MESSAGE_TYPE_ERROR,
+        SendError(BinaryProtocol::MESSAGE_TYPE_ERROR,
                        "Protocol negotiation failed", 400);
     }
 }
 
-// =============== JSON Compatibility Methods ===============
-
-void GameSession::Send(const nlohmann::json& message) {
-    try {
-        std::string data = message.dump() + "\n";
-        SendRaw(data);
-    } catch (const std::exception& e) {
-        Logger::Error("Session {} failed to serialize JSON: {}",
-                     sessionId_, e.what());
-    }
-}
-
-void GameSession::SendRaw(const std::string& data) {
-    if (!connected_ || closing_) {
-        Logger::Warn("Session {} not connected, cannot send", sessionId_);
-        return;
-    }
-
-    {
-        std::lock_guard<std::mutex> lock(write_mutex_);
-        bool write_in_progress = !write_queue_.empty();
-
-        // Convert string to vector<uint8_t>
-        std::vector<uint8_t> binary_data(data.begin(), data.end());
-        write_queue_.push(binary_data);
-
-        if (!write_in_progress) {
-            DoBinaryWrite();
-        }
-    }
-}
-
-void GameSession::SendError(const std::string& message, int code) {
-    nlohmann::json error = {
-        {"type", "error"},
-        {"code", code},
-        {"message", message},
-        {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count()}
-    };
-    Send(error);
-}
-
-void GameSession::SendSuccess(const std::string& message, const nlohmann::json& data) {
-    nlohmann::json success = {
-        {"type", "success"},
-        {"message", message},
-        {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count()}
-    };
-
-    if (!data.empty()) {
-        success["data"] = data;
-    }
-
-    Send(success);
-}
-
-void GameSession::SendPing() {
-    nlohmann::json ping = {
-        {"type", "ping"},
-        {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count()}
-    };
-    Send(ping);
-}
-
-void GameSession::SendPong() {
-    nlohmann::json pong = {
-        {"type", "pong"},
-        {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count()}
-    };
-    Send(pong);
-}
-
 // =============== Heartbeat Management ===============
 
-void GameSession::StartHeartbeat() {
+void BinarySession::StartHeartbeat() {
     if (!connected_ || closing_) return;
 
     // Set initial heartbeat time
@@ -689,7 +624,7 @@ void GameSession::StartHeartbeat() {
     CheckHeartbeat();
 }
 
-void GameSession::CheckHeartbeat() {
+void BinarySession::CheckHeartbeat() {
     if (!connected_ || closing_) return;
 
     heartbeat_timer_.expires_after(std::chrono::seconds(30));
@@ -725,13 +660,13 @@ void GameSession::CheckHeartbeat() {
         });
 }
 
-void GameSession::UpdateHeartbeat() {
+void BinarySession::UpdateHeartbeat() {
     last_heartbeat_ = std::chrono::steady_clock::now();
 }
 
 // =============== Network Quality Monitoring ===============
 
-void GameSession::StartNetworkAdaptation() {
+void BinarySession::StartNetworkAdaptation() {
     auto self = shared_from_this();
 
     network_adaptation_timer_.expires_after(std::chrono::seconds(10));
@@ -743,7 +678,7 @@ void GameSession::StartNetworkAdaptation() {
     });
 }
 
-void GameSession::CheckNetworkConditions() {
+void BinarySession::CheckNetworkConditions() {
     // Update network monitor statistics
     network_monitor_.Update();
 
@@ -779,8 +714,8 @@ void GameSession::CheckNetworkConditions() {
 
         // Send warning to client
         nlohmann::json warning = {
-            {"type", "network_warning"},
-            {"message", "Unstable network connection detected"},
+            {"msg", "network_warning"},
+            {"desc", "Unstable network connection detected"},
             {"metrics", {
                 {"latency", metrics.average_latency_ms},
                 {"packet_loss", metrics.packet_loss_percent},
@@ -789,47 +724,47 @@ void GameSession::CheckNetworkConditions() {
             {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count()}
         };
-        Send(warning);
+        SendJson(warning);
     }
 }
 
-void GameSession::AdaptToNetworkConditions() {
+void BinarySession::AdaptToNetworkConditions() {
     CheckNetworkConditions();
 }
 
 // =============== Binary Message Handlers ===============
 
-void GameSession::SetBinaryMessageHandler(uint16_t message_type, BinaryMessageHandler handler) {
+void BinarySession::SetBinaryMessageHandler(uint16_t message_type, BinaryMessageHandler handler) {
     std::lock_guard<std::mutex> lock(binary_handlers_mutex_);
     binary_handlers_[message_type] = std::move(handler);
 }
 
-void GameSession::SetDefaultBinaryMessageHandler(BinaryMessageHandler handler) {
+void BinarySession::SetDefaultBinaryMessageHandler(BinaryMessageHandler handler) {
     std::lock_guard<std::mutex> lock(binary_handlers_mutex_);
     default_binary_handler_ = std::move(handler);
 }
 
-void GameSession::SetMessageHandler(std::function<void(const nlohmann::json&)> handler) {
+void BinarySession::SetMessageHandler(std::function<void(const nlohmann::json&)> handler) {
     message_handler_ = std::move(handler);
 }
 
-void GameSession::SetCloseHandler(std::function<void()> handler) {
+void BinarySession::SetCloseHandler(std::function<void()> handler) {
     close_handler_ = std::move(handler);
 }
 
 // =============== Session Statistics ===============
 
-SessionStats GameSession::GetStats() const {
+SessionStats BinarySession::GetStats() const {
     std::lock_guard<std::mutex> lock(stats_mutex_);
     return stats_;
 }
 
-void GameSession::ResetStats() {
+void BinarySession::ResetStats() {
     std::lock_guard<std::mutex> lock(stats_mutex_);
     stats_ = SessionStats{};
 }
 
-void GameSession::RecordMessageReceived(size_t size) {
+void BinarySession::RecordMessageReceived(size_t size) {
     std::lock_guard<std::mutex> lock(stats_mutex_);
     stats_.messages_received++;
     stats_.bytes_received += size;
@@ -839,7 +774,7 @@ void GameSession::RecordMessageReceived(size_t size) {
     network_monitor_.RecordBytesReceived(size);
 }
 
-void GameSession::RecordMessageSent(size_t size) {
+void BinarySession::RecordMessageSent(size_t size) {
     std::lock_guard<std::mutex> lock(stats_mutex_);
     stats_.messages_sent++;
     stats_.bytes_sent += size;
@@ -851,17 +786,17 @@ void GameSession::RecordMessageSent(size_t size) {
 
 // =============== Compression ===============
 
-void GameSession::SetCompressionEnabled(bool enabled) {
+void BinarySession::SetCompressionEnabled(bool enabled) {
     compression_enabled_ = enabled;
 }
 
-bool GameSession::IsCompressionEnabled() const {
+bool BinarySession::IsCompressionEnabled() const {
     return compression_enabled_;
 }
 
 // =============== Rate Limiting ===============
 
-void GameSession::SetRateLimit(int messages_per_second, int burst_size) {
+void BinarySession::SetRateLimit(int messages_per_second, int burst_size) {
     std::lock_guard<std::mutex> lock(rate_limit_mutex_);
     rate_limit_.messages_per_second = messages_per_second;
     rate_limit_.burst_size = burst_size;
@@ -869,7 +804,7 @@ void GameSession::SetRateLimit(int messages_per_second, int burst_size) {
     rate_limit_.last_refill = std::chrono::steady_clock::now();
 }
 
-bool GameSession::CheckRateLimit() {
+bool BinarySession::CheckRateLimit() {
     if (!rate_limit_enabled_) {
         return true;
     }
@@ -903,40 +838,40 @@ bool GameSession::CheckRateLimit() {
     return false;
 }
 
-void GameSession::SetRateLimitEnabled(bool enabled) {
+void BinarySession::SetRateLimitEnabled(bool enabled) {
     rate_limit_enabled_ = enabled;
 }
 
 // =============== Session Groups ===============
 
-void GameSession::JoinGroup(const std::string& groupId) {
+void BinarySession::JoinGroup(const std::string& groupId) {
     std::lock_guard<std::mutex> lock(groups_mutex_);
     joined_groups_.insert(groupId);
 }
 
-void GameSession::LeaveGroup(const std::string& groupId) {
+void BinarySession::LeaveGroup(const std::string& groupId) {
     std::lock_guard<std::mutex> lock(groups_mutex_);
     joined_groups_.erase(groupId);
 }
 
-void GameSession::LeaveAllGroups() {
+void BinarySession::LeaveAllGroups() {
     std::lock_guard<std::mutex> lock(groups_mutex_);
     joined_groups_.clear();
 }
 
-std::set<std::string> GameSession::GetJoinedGroups() const {
+std::set<std::string> BinarySession::GetJoinedGroups() const {
     std::lock_guard<std::mutex> lock(groups_mutex_);
     return joined_groups_;
 }
 
-bool GameSession::IsInGroup(const std::string& groupId) const {
+bool BinarySession::IsInGroup(const std::string& groupId) const {
     std::lock_guard<std::mutex> lock(groups_mutex_);
     return joined_groups_.find(groupId) != joined_groups_.end();
 }
 
 // =============== Authentication and Security ===============
 
-void GameSession::Authenticate(const std::string& authToken) {
+void BinarySession::Authenticate(const std::string& authToken) {
     std::lock_guard<std::mutex> lock(auth_mutex_);
     auth_token_ = authToken;
     authenticated_ = true;
@@ -945,7 +880,7 @@ void GameSession::Authenticate(const std::string& authToken) {
     Logger::Info("Session {} authenticated", sessionId_);
 }
 
-void GameSession::Deauthenticate() {
+void BinarySession::Deauthenticate() {
     std::lock_guard<std::mutex> lock(auth_mutex_);
     auth_token_.clear();
     authenticated_ = false;
@@ -954,36 +889,36 @@ void GameSession::Deauthenticate() {
     Logger::Info("Session {} deauthenticated", sessionId_);
 }
 
-bool GameSession::IsAuthenticated() const {
+bool BinarySession::IsAuthenticated() const {
     std::lock_guard<std::mutex> lock(auth_mutex_);
     return authenticated_;
 }
 
-std::string GameSession::GetAuthToken() const {
+std::string BinarySession::GetAuthToken() const {
     std::lock_guard<std::mutex> lock(auth_mutex_);
     return auth_token_;
 }
 
-void GameSession::SetPlayerId(int64_t playerId) {
+void BinarySession::SetPlayerId(int64_t playerId) {
     std::lock_guard<std::mutex> lock(auth_mutex_);
     player_id_ = playerId;
 
     Logger::Debug("Session {} assigned to player {}", sessionId_, playerId);
 }
 
-int64_t GameSession::GetPlayerId() const {
+int64_t BinarySession::GetPlayerId() const {
     std::lock_guard<std::mutex> lock(auth_mutex_);
     return player_id_;
 }
 
 // =============== Session Data Storage ===============
 
-void GameSession::SetData(const std::string& key, const nlohmann::json& value) {
+void BinarySession::SetData(const std::string& key, const nlohmann::json& value) {
     std::lock_guard<std::mutex> lock(data_mutex_);
     session_data_[key] = value;
 }
 
-nlohmann::json GameSession::GetData(const std::string& key, const nlohmann::json& defaultValue) const {
+nlohmann::json BinarySession::GetData(const std::string& key, const nlohmann::json& defaultValue) const {
     std::lock_guard<std::mutex> lock(data_mutex_);
     auto it = session_data_.find(key);
     if (it != session_data_.end()) {
@@ -992,22 +927,22 @@ nlohmann::json GameSession::GetData(const std::string& key, const nlohmann::json
     return defaultValue;
 }
 
-bool GameSession::HasData(const std::string& key) const {
+bool BinarySession::HasData(const std::string& key) const {
     std::lock_guard<std::mutex> lock(data_mutex_);
     return session_data_.find(key) != session_data_.end();
 }
 
-void GameSession::RemoveData(const std::string& key) {
+void BinarySession::RemoveData(const std::string& key) {
     std::lock_guard<std::mutex> lock(data_mutex_);
     session_data_.erase(key);
 }
 
-void GameSession::ClearData() {
+void BinarySession::ClearData() {
     std::lock_guard<std::mutex> lock(data_mutex_);
     session_data_.clear();
 }
 
-nlohmann::json GameSession::GetAllData() const {
+nlohmann::json BinarySession::GetAllData() const {
     std::lock_guard<std::mutex> lock(data_mutex_);
     nlohmann::json result;
     for (const auto& [key, value] : session_data_) {
@@ -1018,12 +953,12 @@ nlohmann::json GameSession::GetAllData() const {
 
 // =============== Session Properties ===============
 
-void GameSession::SetProperty(const std::string& key, const std::string& value) {
+void BinarySession::SetProperty(const std::string& key, const std::string& value) {
     std::lock_guard<std::mutex> lock(properties_mutex_);
     properties_[key] = value;
 }
 
-std::string GameSession::GetProperty(const std::string& key, const std::string& defaultValue) const {
+std::string BinarySession::GetProperty(const std::string& key, const std::string& defaultValue) const {
     std::lock_guard<std::mutex> lock(properties_mutex_);
     auto it = properties_.find(key);
     if (it != properties_.end()) {
@@ -1032,14 +967,14 @@ std::string GameSession::GetProperty(const std::string& key, const std::string& 
     return defaultValue;
 }
 
-std::map<std::string, std::string> GameSession::GetAllProperties() const {
+std::map<std::string, std::string> BinarySession::GetAllProperties() const {
     std::lock_guard<std::mutex> lock(properties_mutex_);
     return properties_;
 }
 
 // =============== Metrics and Monitoring ===============
 
-SessionMetrics GameSession::GetMetrics() const {
+SessionMetrics BinarySession::GetMetrics() const {
     auto now = std::chrono::steady_clock::now();
     auto connected_time = std::chrono::duration_cast<std::chrono::seconds>(
         now - connected_time_);
@@ -1087,7 +1022,7 @@ SessionMetrics GameSession::GetMetrics() const {
     return metrics;
 }
 
-void GameSession::PrintMetrics() const {
+void BinarySession::PrintMetrics() const {
     auto metrics = GetMetrics();
 
     Logger::Info("Session {} Metrics:", metrics.session_id);
@@ -1111,9 +1046,9 @@ void GameSession::PrintMetrics() const {
 
 // =============== Utility Methods ===============
 
-std::string GameSession::ToString() const {
+std::string BinarySession::ToString() const {
     std::stringstream ss;
-    ss << "GameSession[" << sessionId_ << "] ";
+    ss << "BinarySession[" << sessionId_ << "] ";
 
     try {
         auto endpoint = GetRemoteEndpoint();
@@ -1133,7 +1068,7 @@ std::string GameSession::ToString() const {
     return ss.str();
 }
 
-uint64_t GameSession::GetUptimeSeconds() const {
+uint64_t BinarySession::GetUptimeSeconds() const {
     if (!connected_) {
         return 0;
     }
@@ -1147,26 +1082,26 @@ uint64_t GameSession::GetUptimeSeconds() const {
 
 // =============== Connection Quality Monitoring ===============
 
-void GameSession::RecordLatency(uint64_t latencyMs) {
+void BinarySession::RecordLatency(uint64_t latencyMs) {
     network_monitor_.RecordLatencySample(latencyMs);
 }
 
-uint64_t GameSession::GetAverageLatency() const {
+uint64_t BinarySession::GetAverageLatency() const {
     auto metrics = network_monitor_.GetMetrics();
     return metrics.average_latency_ms;
 }
 
-uint64_t GameSession::GetMinLatency() const {
+uint64_t BinarySession::GetMinLatency() const {
     auto metrics = network_monitor_.GetMetrics();
     return metrics.min_latency_ms;
 }
 
-uint64_t GameSession::GetMaxLatency() const {
+uint64_t BinarySession::GetMaxLatency() const {
     auto metrics = network_monitor_.GetMetrics();
     return metrics.max_latency_ms;
 }
 
-std::vector<uint64_t> GameSession::GetLatencySamples() const {
+std::vector<uint64_t> BinarySession::GetLatencySamples() const {
     // Note: NetworkQualityMonitor doesn't expose samples directly
     // In a full implementation, we would add this method
     return {};
@@ -1174,18 +1109,18 @@ std::vector<uint64_t> GameSession::GetLatencySamples() const {
 
 // =============== Custom Event Handlers ===============
 
-void GameSession::SetCustomEventHandler(const std::string& eventName,
+void BinarySession::SetCustomEventHandler(const std::string& eventName,
                                         std::function<void(const nlohmann::json&)> handler) {
     std::lock_guard<std::mutex> lock(event_handlers_mutex_);
     custom_event_handlers_[eventName] = handler;
 }
 
-void GameSession::RemoveCustomEventHandler(const std::string& eventName) {
+void BinarySession::RemoveCustomEventHandler(const std::string& eventName) {
     std::lock_guard<std::mutex> lock(event_handlers_mutex_);
     custom_event_handlers_.erase(eventName);
 }
 
-void GameSession::HandleCustomEvent(const std::string& eventName, const nlohmann::json& data) {
+void BinarySession::HandleCustomEvent(const std::string& eventName, const nlohmann::json& data) {
     std::lock_guard<std::mutex> lock(event_handlers_mutex_);
     auto it = custom_event_handlers_.find(eventName);
     if (it != custom_event_handlers_.end()) {
@@ -1199,74 +1134,29 @@ void GameSession::HandleCustomEvent(const std::string& eventName, const nlohmann
 
 // =============== Message Queue Management ===============
 
-size_t GameSession::GetPendingMessageCount() const {
+size_t BinarySession::GetPendingMessageCount() const {
     std::lock_guard<std::mutex> lock(write_mutex_);
     return write_queue_.size();
 }
 
-void GameSession::ClearPendingMessages() {
+void BinarySession::ClearPendingMessages() {
     std::lock_guard<std::mutex> lock(write_mutex_);
     std::queue<std::vector<uint8_t>> empty;
     std::swap(write_queue_, empty);
 }
 
-bool GameSession::IsWriteQueueFull() const {
+bool BinarySession::IsWriteQueueFull() const {
     std::lock_guard<std::mutex> lock(write_mutex_);
     return write_queue_.size() >= max_write_queue_size_;
 }
 
-void GameSession::SetMaxWriteQueueSize(size_t maxSize) {
+void BinarySession::SetMaxWriteQueueSize(size_t maxSize) {
     max_write_queue_size_ = maxSize;
-}
-
-// =============== Graceful Shutdown ===============
-
-void GameSession::BeginGracefulShutdown() {
-    if (graceful_shutdown_) {
-        return;
-    }
-
-    Logger::Info("Beginning graceful shutdown for session {}", sessionId_);
-    graceful_shutdown_ = true;
-
-    // Send shutdown notification to client
-    nlohmann::json shutdown_msg = {
-        {"type", "shutdown_notice"},
-        {"message", "Server shutting down"},
-        {"timeout_seconds", 30},
-        {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count()}
-    };
-    Send(shutdown_msg);
-
-    // Start shutdown timer
-    shutdown_timer_.expires_after(std::chrono::seconds(30));
-    shutdown_timer_.async_wait([self = shared_from_this()](std::error_code ec) {
-        if (!ec) {
-            Logger::Info("Graceful shutdown timeout for session {}", self->sessionId_);
-            self->Stop();
-        }
-    });
-}
-
-void GameSession::CancelGracefulShutdown() {
-    if (!graceful_shutdown_) {
-        return;
-    }
-
-    Logger::Info("Cancelling graceful shutdown for session {}", sessionId_);
-    graceful_shutdown_ = false;
-
-    try {
-        shutdown_timer_.cancel();
-    } catch (const std::exception& e) {
-        Logger::Debug("Error cancelling shutdown timer: {}", e.what());
-    }
 }
 
 // =============== World and Entity Methods ===============
 
-void GameSession::SendWorldChunkBinary(int chunkX, int chunkZ, const std::vector<uint8_t>& chunkData) {
+void BinarySession::SendWorldChunkBinary(int chunkX, int chunkZ, const std::vector<uint8_t>& chunkData) {
     BinaryProtocol::BinaryWriter writer;
     writer.WriteInt32(chunkX);
     writer.WriteInt32(chunkZ);
@@ -1278,10 +1168,10 @@ void GameSession::SendWorldChunkBinary(int chunkX, int chunkZ, const std::vector
     std::copy(metadata.begin(), metadata.end(), combined_data.begin());
     std::copy(chunkData.begin(), chunkData.end(), combined_data.begin() + metadata.size());
 
-    SendBinary(BinaryProtocol::MESSAGE_TYPE_CHUNK_DATA, combined_data);
+    Send(BinaryProtocol::MESSAGE_TYPE_CHUNK_DATA, combined_data);
 }
 
-void GameSession::SendEntityUpdateBinary(uint64_t entityId, const std::vector<uint8_t>& entityData) {
+void BinarySession::SendEntityUpdateBinary(uint64_t entityId, const std::vector<uint8_t>& entityData) {
     BinaryProtocol::BinaryWriter writer;
     writer.WriteUInt64(entityId);
 
@@ -1292,10 +1182,10 @@ void GameSession::SendEntityUpdateBinary(uint64_t entityId, const std::vector<ui
     std::copy(id_data.begin(), id_data.end(), combined_data.begin());
     std::copy(entityData.begin(), entityData.end(), combined_data.begin() + id_data.size());
 
-    SendBinary(BinaryProtocol::MESSAGE_TYPE_ENTITY_UPDATE, combined_data);
+    Send(BinaryProtocol::MESSAGE_TYPE_ENTITY_UPDATE, combined_data);
 }
 
-void GameSession::SendEntitySpawnBinary(uint64_t entityId, const std::vector<uint8_t>& spawnData) {
+void BinarySession::SendEntitySpawnBinary(uint64_t entityId, const std::vector<uint8_t>& spawnData) {
     BinaryProtocol::BinaryWriter writer;
     writer.WriteUInt64(entityId);
 
@@ -1305,19 +1195,19 @@ void GameSession::SendEntitySpawnBinary(uint64_t entityId, const std::vector<uin
     std::copy(id_data.begin(), id_data.end(), combined_data.begin());
     std::copy(spawnData.begin(), spawnData.end(), combined_data.begin() + id_data.size());
 
-    SendBinary(BinaryProtocol::MESSAGE_TYPE_ENTITY_SPAWN, combined_data);
+    Send(BinaryProtocol::MESSAGE_TYPE_ENTITY_SPAWN, combined_data);
 }
 
-void GameSession::SendEntityDespawnBinary(uint64_t entityId) {
+void BinarySession::SendEntityDespawnBinary(uint64_t entityId) {
     BinaryProtocol::BinaryWriter writer;
     writer.WriteUInt64(entityId);
 
-    SendBinary(BinaryProtocol::MESSAGE_TYPE_ENTITY_DESPAWN, writer.GetBuffer());
+    Send(BinaryProtocol::MESSAGE_TYPE_ENTITY_DESPAWN, writer.GetBuffer());
 }
 
 // =============== Player State Synchronization ===============
 
-void GameSession::SyncPlayerStateBinary(const glm::vec3& position, const glm::vec3& rotation,
+void BinarySession::SyncPlayerStateBinary(const glm::vec3& position, const glm::vec3& rotation,
                                         const glm::vec3& velocity, uint32_t last_input_id) {
     BinaryProtocol::BinaryWriter writer;
 
@@ -1328,10 +1218,10 @@ void GameSession::SyncPlayerStateBinary(const glm::vec3& position, const glm::ve
     writer.WriteUInt64(std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count());
 
-    SendBinary(BinaryProtocol::MESSAGE_TYPE_PLAYER_STATE, writer.GetBuffer());
+    Send(BinaryProtocol::MESSAGE_TYPE_PLAYER_STATE, writer.GetBuffer());
 }
 
-void GameSession::SendPositionCorrection(const glm::vec3& position, const glm::vec3& velocity) {
+void BinarySession::SendPositionCorrection(const glm::vec3& position, const glm::vec3& velocity) {
     BinaryProtocol::BinaryWriter writer;
 
     writer.WriteVector3(position);
@@ -1339,26 +1229,26 @@ void GameSession::SendPositionCorrection(const glm::vec3& position, const glm::v
     writer.WriteUInt64(std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count());
 
-    SendBinary(BinaryProtocol::MESSAGE_TYPE_PLAYER_POSITION_CORRECTION, writer.GetBuffer());
+    Send(BinaryProtocol::MESSAGE_TYPE_PLAYER_POSITION_CORRECTION, writer.GetBuffer());
 }
 
 // =============== Private Helper Methods ===============
 
-asio::ip::tcp::socket& GameSession::GetSocket() {
+asio::ip::tcp::socket& BinarySession::GetSocket() {
     if (ssl_stream_) {
         return ssl_stream_->next_layer();
     }
     return socket_;
 }
 
-const asio::ip::tcp::socket& GameSession::GetSocket() const {
+const asio::ip::tcp::socket& BinarySession::GetSocket() const {
     if (ssl_stream_) {
         return ssl_stream_->next_layer();
     }
     return socket_;
 }
 
-void GameSession::HandleNetworkError(std::error_code ec) {
+void BinarySession::HandleNetworkError(std::error_code ec) {
     if (ec == asio::error::eof || ec == asio::error::connection_reset) {
         Logger::Debug("Session {} disconnected: {}",
                       sessionId_, ec.message());
@@ -1369,7 +1259,7 @@ void GameSession::HandleNetworkError(std::error_code ec) {
     Stop();
 }
 
-void GameSession::HandleMessage(const std::string& message) {
+void BinarySession::HandleMessage(const std::string& message) {
     if (message.empty()) {
         return;
     }
@@ -1393,7 +1283,7 @@ void GameSession::HandleMessage(const std::string& message) {
                       sessionId_, e.what(), message);
 
         // Send error response for malformed JSON
-        SendError("Invalid JSON format", 400);
+        SendError(BinaryProtocol::MESSAGE_TYPE_ERROR, "Invalid JSON format", 400);
 
     } catch (const std::exception& e) {
         Logger::Error("Session {} message handling error: {}",
@@ -1401,222 +1291,15 @@ void GameSession::HandleMessage(const std::string& message) {
     }
 }
 
-// =============== Prediction System Integration ===============
-
-PredictionSystem& GameSession::GetPredictionSystem() {
+PredictionSystem& BinarySession::GetPredictionSystem() {
     return prediction_system_;
 }
 
-// =============== Legacy JSON Handlers (for backward compatibility) ===============
-
-// These methods handle the old JSON-based protocol for backward compatibility
-void GameSession::SendWorldChunk(int chunkX, int chunkZ, const nlohmann::json& chunkData) {
-    nlohmann::json message = {
-        {"type", "world_chunk"},
-        {"chunkX", chunkX},
-        {"chunkZ", chunkZ},
-        {"data", chunkData},
-        {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count()}
-    };
-    Send(message);
-}
-
-void GameSession::SendEntityUpdate(uint64_t entityId, const nlohmann::json& entityData) {
-    nlohmann::json message = {
-        {"type", "entity_update"},
-        {"entityId", entityId},
-        {"data", entityData},
-        {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count()}
-    };
-    Send(message);
-}
-
-void GameSession::SendEntitySpawn(uint64_t entityId, const nlohmann::json& spawnData) {
-    nlohmann::json message = {
-        {"type", "entity_spawn"},
-        {"entityId", entityId},
-        {"data", spawnData},
-        {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count()}
-    };
-    Send(message);
-}
-
-void GameSession::SendEntityDespawn(uint64_t entityId) {
-    nlohmann::json message = {
-        {"type", "entity_despawn"},
-        {"entityId", entityId},
-        {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count()}
-    };
-    Send(message);
-}
-
-void GameSession::SendCollisionEvent(uint64_t entityId1, uint64_t entityId2, const glm::vec3& point) {
-    nlohmann::json message = {
-        {"type", "collision_event"},
-        {"entityId1", entityId1},
-        {"entityId2", entityId2},
-        {"point", {point.x, point.y, point.z}},
-        {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count()}
-    };
-    Send(message);
-}
-
-void GameSession::SyncPlayerState(const glm::vec3& position, const glm::vec3& rotation, const glm::vec3& velocity) {
-    nlohmann::json message = {
-        {"type", "player_state_sync"},
-        {"position", {position.x, position.y, position.z}},
-        {"rotation", {rotation.x, rotation.y, rotation.z}},
-        {"velocity", {velocity.x, velocity.y, velocity.z}},
-        {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count()}
-    };
-    Send(message);
-}
-
-void GameSession::SendNearbyEntities(const std::vector<nlohmann::json>& entities) {
-    nlohmann::json message = {
-        {"type", "nearby_entities"},
-        {"entities", entities},
-        {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count()}
-    };
-    Send(message);
-}
-
-void GameSession::SendNPCInteraction(uint64_t npcId, const std::string& interactionType, const nlohmann::json& data) {
-    nlohmann::json message = {
-        {"type", "npc_interaction"},
-        {"npcId", npcId},
-        {"interaction", interactionType},
-        {"data", data},
-        {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count()}
-    };
-    Send(message);
-}
-
-void GameSession::SendCompressedWorldData(const std::vector<uint8_t>& compressedData) {
-    // Convert binary data to base64 for JSON transmission
-    std::string base64_data;
-    const char base64_chars[] =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-    size_t i = 0;
-    while (i < compressedData.size()) {
-        uint32_t octet_a = i < compressedData.size() ? compressedData[i++] : 0;
-        uint32_t octet_b = i < compressedData.size() ? compressedData[i++] : 0;
-        uint32_t octet_c = i < compressedData.size() ? compressedData[i++] : 0;
-
-        uint32_t triple = (octet_a << 16) + (octet_b << 8) + octet_c;
-
-        base64_data += base64_chars[(triple >> 18) & 0x3F];
-        base64_data += base64_chars[(triple >> 12) & 0x3F];
-        base64_data += base64_chars[(triple >> 6) & 0x3F];
-        base64_data += base64_chars[triple & 0x3F];
-    }
-
-    // Add padding
-    size_t padding = compressedData.size() % 3;
-    if (padding > 0) {
-        for (size_t j = 0; j < 3 - padding; ++j) {
-            base64_data[base64_data.size() - 1 - j] = '=';
-        }
-    }
-
-    nlohmann::json message = {
-        {"type", "compressed_world_data"},
-        {"data", base64_data},
-        {"compression", "base64"},
-        {"original_size", compressedData.size()},
-        {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count()}
-    };
-    Send(message);
-}
-
-// =============== Legacy Handlers (Kept for backward compatibility) ===============
-
-void GameSession::HandleWorldRequest(const nlohmann::json& data) {
-    // Legacy handler - convert to binary protocol
-    Logger::Debug("Session {}: converting legacy world request to binary", sessionId_);
-
-    BinaryProtocol::BinaryWriter writer;
-    writer.WriteInt32(data.value("chunkX", 0));
-    writer.WriteInt32(data.value("chunkZ", 0));
-    writer.WriteUInt8(data.value("lod", 0));
-
-    // Forward to binary handler
-    auto handler_it = binary_handlers_.find(BinaryProtocol::MESSAGE_TYPE_CHUNK_REQUEST);
-    if (handler_it != binary_handlers_.end()) {
-        handler_it->second(BinaryProtocol::MESSAGE_TYPE_CHUNK_REQUEST, writer.GetBuffer());
-    }
-}
-
-void GameSession::HandleEntityInteraction(const nlohmann::json& data) {
-    // Legacy handler - convert to binary protocol
-    BinaryProtocol::BinaryWriter writer;
-    writer.WriteUInt64(data.value("entityId", 0ULL));
-    writer.WriteString(data.value("interaction", ""));
-    writer.WriteJson(data.value("data", nlohmann::json()));
-
-    // Forward to appropriate binary handler
-    auto handler_it = binary_handlers_.find(BinaryProtocol::MESSAGE_TYPE_NPC_INTERACTION);
-    if (handler_it != binary_handlers_.end()) {
-        handler_it->second(BinaryProtocol::MESSAGE_TYPE_NPC_INTERACTION, writer.GetBuffer());
-    }
-}
-
-void GameSession::HandleMovementUpdate(const nlohmann::json& data) {
-    // Legacy handler - convert to binary protocol
-    BinaryProtocol::BinaryWriter writer;
-
-    glm::vec3 position(
-        data.value("x", 0.0f),
-        data.value("y", 0.0f),
-        data.value("z", 0.0f)
-    );
-
-    glm::vec3 velocity(
-        data.value("vx", 0.0f),
-        data.value("vy", 0.0f),
-        data.value("vz", 0.0f)
-    );
-
-    writer.WriteVector3(position);
-    writer.WriteVector3(velocity);
-    writer.WriteUInt32(data.value("input_id", 0U));
-
-    // Forward to binary handler
-    auto handler_it = binary_handlers_.find(BinaryProtocol::MESSAGE_TYPE_PLAYER_POSITION);
-    if (handler_it != binary_handlers_.end()) {
-        handler_it->second(BinaryProtocol::MESSAGE_TYPE_PLAYER_POSITION, writer.GetBuffer());
-    }
-}
-
-void GameSession::HandleFamiliarCommand(const nlohmann::json& data) {
-    // Legacy handler - convert to binary protocol
-    BinaryProtocol::BinaryWriter writer;
-    writer.WriteUInt64(data.value("familiarId", 0ULL));
-    writer.WriteString(data.value("command", ""));
-    writer.WriteUInt64(data.value("targetId", 0ULL));
-
-    // Forward to binary handler (using entity interaction as fallback)
-    auto handler_it = binary_handlers_.find(BinaryProtocol::MESSAGE_TYPE_NPC_INTERACTION);
-    if (handler_it != binary_handlers_.end()) {
-        handler_it->second(BinaryProtocol::MESSAGE_TYPE_NPC_INTERACTION, writer.GetBuffer());
-    }
-}
-
-void GameSession::SetPlayerStateHandler(std::function<void(const ClientInput&)> handler) {
+void BinarySession::SetPlayerStateHandler(std::function<void(const ClientInput&)> handler) {
     player_state_handler_ = std::move(handler);
 }
 
-void GameSession::SetupDefaultHandlers() {
+void BinarySession::SetupDefaultHandlers() {
     SetBinaryMessageHandler(BinaryProtocol::MESSAGE_TYPE_PLAYER_STATE,
         [this](uint16_t type, const std::vector<uint8_t>& data) {
             (void)type;

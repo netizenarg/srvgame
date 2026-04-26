@@ -80,16 +80,10 @@ public:
     bool ReplicateReferenceTables();
 
     // Backward compatibility methods
-    bool ExecuteDatabase(const std::string& sql) { return Execute(sql); }
-    nlohmann::json QueryDatabase(const std::string& sql) { return Query(sql); }
-
-    // Legacy singleton access (for backward compatibility)
-    static CitusClient* GetInstancePtr() {
-        std::lock_guard<std::mutex> lock(instanceMutex_);
-        return instance_;
-    }
-
-    bool IsCitusEnabled() const { return citusEnabled_; }
+    bool ExecuteDatabase(const std::string& sql);
+    nlohmann::json QueryDatabase(const std::string& sql);
+    static CitusClient* GetInstancePtr();
+    bool IsCitusEnabled() const;
     bool ConnectToDatabase(const std::string& dbname) override;
 
 private:

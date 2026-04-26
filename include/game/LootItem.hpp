@@ -7,27 +7,9 @@
 #include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
 
-enum class LootRarity {
-    COMMON = 0,
-    UNCOMMON = 1,
-    RARE = 2,
-    EPIC = 3,
-    LEGENDARY = 4,
-    MYTHIC = 5
-};
+#include "game/GameData.hpp"
 
-enum class ItemType {
-    WEAPON = 0,
-    ARMOR = 1,
-    CONSUMABLE = 2,
-    MATERIAL = 3,
-    QUEST = 4,
-    KEY = 5,
-    CURRENCY = 6,
-    JEWELRY = 7
-};
-
-struct ItemStat {
+struct LootStat {
     std::string statName;
     float baseValue;
     float currentValue;
@@ -37,7 +19,7 @@ struct ItemStat {
     void Deserialize(const nlohmann::json& data);
 };
 
-struct ItemModifier {
+struct LootModifier {
     std::string modifierType;  // "add", "multiply", "set"
     std::string targetStat;
     float value;
@@ -48,12 +30,12 @@ struct ItemModifier {
 class LootItem {
 public:
     LootItem();
-    LootItem(uint64_t id, const std::string& name = "", ItemType type = ItemType::MATERIAL, LootRarity rarity = LootRarity::COMMON);
+    LootItem(uint64_t id, const std::string& name = "", LootType type = LootType::MATERIAL, LootRarity rarity = LootRarity::COMMON);
 
     // Getters
     uint64_t GetId() const { return id_; }
     const std::string& GetName() const { return name_; }
-    ItemType GetType() const { return type_; }
+    LootType GetType() const { return type_; }
     LootRarity GetRarity() const { return rarity_; }
     int GetStackSize() const { return stackSize_; }
     int GetMaxStackSize() const { return maxStackSize_; }
@@ -70,12 +52,12 @@ public:
 
     // Stats management
     void AddStat(const std::string& name, float baseValue, float maxValue = 0.0f);
-    ItemStat* GetStat(const std::string& name);
-    const std::vector<ItemStat>& GetStats() const { return stats_; }
+    LootStat* GetStat(const std::string& name);
+    const std::vector<LootStat>& GetStats() const { return stats_; }
 
     // Modifiers management
-    void AddModifier(const ItemModifier& modifier);
-    std::vector<ItemModifier> GetModifiersForStat(const std::string& statName) const;
+    void AddModifier(const LootModifier& modifier);
+    std::vector<LootModifier> GetModifiersForStat(const std::string& statName) const;
 
     // Serialization
     nlohmann::json Serialize() const;
@@ -91,7 +73,7 @@ private:
     uint64_t id_;
     std::string name_;
     std::string description_;
-    ItemType type_;
+    LootType type_;
     LootRarity rarity_;
 
     int stackSize_ = 1;
@@ -101,8 +83,8 @@ private:
     glm::vec3 iconColor_ = glm::vec3(1.0f);
     std::string iconTexture_;
 
-    std::vector<ItemStat> stats_;
-    std::vector<ItemModifier> modifiers_;
+    std::vector<LootStat> stats_;
+    std::vector<LootModifier> modifiers_;
 
     // Trading properties
     bool tradable_ = true;
