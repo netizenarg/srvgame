@@ -52,21 +52,25 @@ void GameLogic::Initialize() {
     if (!LoadGameData()) {
         Logger::Error("Failed to load game data");
     }
-    pythonEnabled_ = config.GetBool("python.enabled", false);
-    if (pythonEnabled_) {
-        auto& pythonScripting = PythonScripting::GetInstance();
-        if (pythonScripting.Initialize()) {
-            Logger::Info("Python scripting initialized");
-            RegisterPythonEventHandlers();
-            bool hotReloadEnabled = config.GetBool("python.hot_reload", true);
-            if (hotReloadEnabled) {
-                std::string scriptDir = config.GetString("python.script_dir", "./scripts");
-                g_hotReloader = std::make_unique<ScriptHotReloader>(scriptDir, 2000);
-                g_hotReloader->Start();
+    if (config.HasKey("scripting.python"))
+    {
+        nlohmann::json json_py_conf = config.GetJson("scripting.python");
+        pythonEnabled_ = json_py_conf.value("enabled", false);
+        if (pythonEnabled_) {
+            auto& pythonScripting = PythonScripting::GetInstance();
+            if (pythonScripting.Initialize()) {
+                Logger::Info("Python scripting initialized");
+                RegisterPythonEventHandlers();
+                bool hotReloadEnabled = json_py_conf.value("hot_reload", true);
+                if (hotReloadEnabled) {
+                    std::string scriptDir = json_py_conf.value("directory", "./scripts");
+                    g_hotReloader = std::make_unique<ScriptHotReloader>(scriptDir, 2000);
+                    g_hotReloader->Start();
+                }
+            } else {
+                Logger::Warn("Failed to initialize Python scripting");
+                pythonEnabled_ = false;
             }
-        } else {
-            Logger::Warn("Failed to initialize Python scripting");
-            pythonEnabled_ = false;
         }
     }
     Logger::Info("GameLogic world system initialized successfully");

@@ -141,12 +141,20 @@ void ProcessPool::MasterProcess() {
         }
     }
 
+    workersReady_.store(true);
     UnblockSignals(&oldset);
 
     while (running_.load() && !shutdownRequested_.load()) {
         CleanupDeadWorkers();
         for (int i = 0; i < 10 && running_.load() && !shutdownRequested_.load(); ++i) {
+            if (g_shutdown.load()) {
+                shutdownRequested_.store(true);
+                break;
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        if (shutdownRequested_.load()) {
+            break;
         }
     }
 
@@ -201,6 +209,17 @@ void ProcessPool::MasterProcess() {
     Logger::Info("Master process shutdown complete");
 }
 
+bool ProcessPool::IsWorkersReady() const
+{
+    return workersReady_.load();
+}
+
+void ProcessPool::WaitForWorkers() {
+    while (!workersReady_.load() && running_.load() && !shutdownRequested_.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+}
+
 void ProcessPool::WorkerProcess(int globalWorkerId, const WorkerGroupConfig& config) {
     this->workerId_ = globalWorkerId;
     this->groupConfig_ = config;
@@ -227,7 +246,7 @@ void ProcessPool::CleanupDeadWorkers() {
                     workerPipes_[write_idx] = -1;
                 }
 
-                if (!shutdownRequested_.load()) {
+                if (!shutdownRequested_.load() && !g_shutdown.load()) {
                     RestartWorker(i);
                 } else {
                     std::lock_guard<std::mutex> lock(healthMutex_);

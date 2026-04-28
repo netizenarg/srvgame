@@ -32,11 +32,11 @@ bool PostgreSqlClient::Connect() {
     if (poolInitialized_) return true;
 
     try {
-        if (config_.contains("connection_pool") &&
-            config_["connection_pool"].value("enabled", true)) {
+        if (config_.contains("pool") &&
+            config_["pool"].value("enabled", true)) {
 
-            size_t minConn = config_["connection_pool"].value("min_connections", 5);
-            size_t maxConn = config_["connection_pool"].value("max_connections", 20);
+            size_t minConn = config_["pool"].value("min_connections", 5);
+            size_t maxConn = config_["pool"].value("max_connections", 20);
 
             if (!InitializeConnectionPool(minConn, maxConn)) {
                 Logger::Error("Failed to initialize connection pool");
@@ -993,8 +993,8 @@ nlohmann::json PostgreSqlClient::GetDatabaseStats() {
     stats["failed_queries"] = stats_.failedQueries.load();
     stats["total_transactions"] = stats_.totalTransactions.load();
     stats["connection_errors"] = stats_.connectionErrors.load();
-    stats["connection_pool_hits"] = stats_.connectionPoolHits.load();
-    stats["connection_pool_misses"] = stats_.connectionPoolMisses.load();
+    stats["pool_hits"] = stats_.connectionPoolHits.load();
+    stats["pool_misses"] = stats_.connectionPoolMisses.load();
     stats["active_connections"] = GetActiveConnections();
     stats["idle_connections"] = GetIdleConnections();
     stats["total_connections"] = connections_.size();

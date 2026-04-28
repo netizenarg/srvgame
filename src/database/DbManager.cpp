@@ -264,7 +264,7 @@ bool DbManager::LoadConfiguration(const std::string& configPath) {
             {"name", config_.value("name", "game_db")},
             {"user", config_.value("user", "postgres")},
             {"password", config_.value("password", "")},
-            {"connection_pool", {
+            {"pool", {
                 {"enabled", poolConfig.value("enabled", true)},
                 {"min_connections", poolConfig.value("min", 5)},
                 {"max_connections", poolConfig.value("max", 20)}
@@ -289,24 +289,18 @@ bool DbManager::LoadConfiguration(const std::string& configPath) {
 
 bool DbManager::ValidateConfiguration(const nlohmann::json& config) const {
     try {
-        // Check required fields
         if (config.contains("host") && !config["host"].is_string()) {
             Logger::Error("Invalid 'host' in database configuration (must be string)");
             return false;
         }
-
         if (!config.contains("name") || !config["name"].is_string()) {
             Logger::Error("Missing or invalid 'name' in database configuration");
             return false;
         }
-
         if (!config.contains("user") || !config["user"].is_string()) {
             Logger::Error("Missing or invalid 'user' in database configuration");
             return false;
         }
-
-        // Validate port
-        // Port is optional (default 5432), but if present must be valid
         if (config.contains("port")) {
             if (!config["port"].is_number()) {
                 Logger::Error("Invalid 'port' in database configuration (must be number)");
@@ -318,10 +312,8 @@ bool DbManager::ValidateConfiguration(const nlohmann::json& config) const {
                 return false;
             }
         }
-
-        // Validate connection pool settings if present
-        if (config.contains("connection_pool")) {
-            const auto& pool = config["connection_pool"];
+        if (config.contains("pool")) {
+            const auto& pool = config["pool"];
             if (pool.contains("min_connections") && pool["min_connections"] <= 0) {
                 Logger::Error("Invalid min_connections in connection pool");
                 return false;
@@ -338,11 +330,9 @@ bool DbManager::ValidateConfiguration(const nlohmann::json& config) const {
                 }
             }
         }
-
         return true;
-
-    } catch (const std::exception& e) {
-        Logger::Error("Configuration validation error: {}", e.what());
+    } catch (const std::exception& err) {
+        Logger::Error("Configuration validation error: {}", err.what());
         return false;
     }
 }
@@ -354,22 +344,13 @@ bool DbManager::SetBackend(BackendType backendType, const nlohmann::json& config
         Logger::Error("Invalid configuration for new backend");
         return false;
     }
-
-    // Temporarily store old backend (not needed but kept for safety)
     std::unique_ptr<DatabaseBackend> oldBackend = std::move(backend_);
-
-    // Update current type and config
     currentType_ = backendType;
     config_ = config;
-
-    // Reload SQL for the new backend
     if (!LoadSQLForBackend()) {
         Logger::Error("Failed to load SQL queries for new backend");
-        // Restore old backend? We'll just return false and leave backend_ empty
         return false;
     }
-
-    // Create new backend with the provider
     switch (backendType) {
         case SQLITE:
 #ifdef USE_SQLITE
@@ -399,16 +380,12 @@ bool DbManager::SetBackend(BackendType backendType, const nlohmann::json& config
             Logger::Error("Unsupported database backend");
             return false;
     }
-
-    connected_ = false; // Will need to reconnect
+    connected_ = false;
     Logger::Info("Database backend changed to {}", BackendTypeToString(currentType_));
     return true;
 }
 
 std::string DbManager::EscapeString(const std::string& input) {
-    // Use your database client's escaping function.
-    // For PostgreSQL via libpq, you might use PQescapeLiteral.
-    // For simplicity, this example doubles single quotes.
     std::string escaped;
     for (char c : input) {
         if (c == '\'') escaped += "''";
@@ -426,19 +403,14 @@ bool DbManager::Connect() {
         Logger::Error("DbManager not initialized");
         return false;
     }
-
     if (!backend_) {
         Logger::Error("No database backend available");
         return false;
     }
-
     if (connected_) {
         Logger::Debug("Already connected to database");
         return true;
     }
-
-    // The master process has already ensured the database exists.
-    // Simply attempt to connect.
     try {
         if (backend_->Connect()) {
             connected_ = true;
@@ -448,8 +420,8 @@ bool DbManager::Connect() {
             Logger::Error("Failed to connect to database");
             return false;
         }
-    } catch (const std::exception& e) {
-        Logger::Error("Connection error: {}", e.what());
+    } catch (const std::exception& err) {
+        Logger::Error("Connection error: {}", err.what());
         return false;
     }
 }
@@ -458,20 +430,16 @@ bool DbManager::Reconnect() {
     if (!initialized_ || !backend_) {
         return false;
     }
-
     Logger::Info("Attempting to reconnect to database...");
-
     if (connected_) {
         backend_->Disconnect();
         connected_ = false;
     }
-
     if (backend_->Reconnect()) {
         connected_ = true;
         Logger::Info("Reconnected to database");
         return true;
     }
-
     Logger::Error("Failed to reconnect to database");
     return false;
 }
@@ -504,41 +472,32 @@ int DbManager::GetTotalShards() const {
 
 nlohmann::json DbManager::GetStatistics() const {
     nlohmann::json stats;
-
-    // Basic info
     stats["backend"] = BackendTypeToString(currentType_);
     stats["initialized"] = initialized_.load();
     stats["connected"] = connected_.load();
-
     if (backend_) {
         stats["connection_info"] = backend_->GetConnectionInfo();
         stats["database_stats"] = backend_->GetDatabaseStats();
         stats["active_connections"] = backend_->GetActiveConnections();
         stats["idle_connections"] = backend_->GetIdleConnections();
     }
-
-    // Manager statistics
     auto now = std::chrono::steady_clock::now();
     auto uptime = std::chrono::duration_cast<std::chrono::seconds>(now - stats_.startTime).count();
-
     stats["uptime_seconds"] = uptime;
     stats["queries_executed"] = stats_.queriesExecuted.load();
     stats["queries_failed"] = stats_.queriesFailed.load();
     stats["transactions_committed"] = stats_.transactionsCommitted.load();
     stats["transactions_rolled_back"] = stats_.transactionsRolledBack.load();
     stats["bytes_transferred"] = stats_.bytesTransferred.load();
-
     if (stats_.queriesExecuted > 0) {
         double successRate = 100.0 * (1.0 - (double)stats_.queriesFailed / stats_.queriesExecuted);
         stats["success_rate_percent"] = successRate;
     }
-
     return stats;
 }
 
 void DbManager::PrintStatistics() const {
     auto stats = GetStatistics();
-
     Logger::Info("=== Database Statistics ===");
     Logger::Info("  Backend: {}", stats["backend"].get<std::string>());
     Logger::Info("  Status: {}", stats["connected"].get<bool>() ? "Connected" : "Disconnected");
@@ -554,7 +513,6 @@ void DbManager::PrintStatistics() const {
     Logger::Info("    Transactions Rolled Back: {}", stats["transactions_rolled_back"].get<int64_t>());
     Logger::Info("    Bytes Transferred: {}", stats["bytes_transferred"].get<int64_t>());
     Logger::Info("  ");
-
     if (stats.contains("database_stats")) {
         Logger::Info("  Database Statistics:");
         for (const auto& [key, value] : stats["database_stats"].items()) {
@@ -569,21 +527,15 @@ bool DbManager::RunMigrations() {
         Logger::Error("Cannot run migrations: not connected to database");
         return false;
     }
-
     try {
         Logger::Info("Running database migrations...");
-
-        // Check if migrations table exists
         nlohmann::json result = backend_->Query(
             "SELECT EXISTS (SELECT FROM information_schema.tables "
             "WHERE table_name = 'schema_migrations')");
-
         bool migrationsTableExists = false;
         if (!result.empty() && result[0].contains("exists")) {
             migrationsTableExists = result[0]["exists"].get<bool>();
         }
-
-        // Create migrations table if it doesn't exist
         if (!migrationsTableExists) {
             Logger::Info("Creating migrations table...");
             backend_->Execute(
@@ -594,25 +546,20 @@ bool DbManager::RunMigrations() {
                 "  checksum VARCHAR(64)"
                 ")");
         }
-
-        // Get current migration version
         int currentVersion = 0;
         result = backend_->Query("SELECT MAX(version) as current_version FROM schema_migrations");
         if (!result.empty() && result[0].contains("current_version") &&
             !result[0]["current_version"].is_null()) {
             currentVersion = result[0]["current_version"].get<int>();
         }
-
         Logger::Info("Current migration version: {}", currentVersion);
 
         // TODO: Load migration files from disk and apply them
-        // This would be implemented based on your migration system
 
         Logger::Info("Migrations completed up to version {}", currentVersion);
         return true;
-
-    } catch (const std::exception& e) {
-        Logger::Error("Migration error: {}", e.what());
+    } catch (const std::exception& err) {
+        Logger::Error("Migration error: {}", err.what());
         return false;
     }
 }
@@ -621,12 +568,10 @@ bool DbManager::CheckMigrationStatus() {
     if (!IsConnected()) {
         return false;
     }
-
     try {
         nlohmann::json result = backend_->Query(
             "SELECT version, name, applied_at FROM schema_migrations "
             "ORDER BY version DESC LIMIT 10");
-
         if (result.empty()) {
             Logger::Info("No migrations have been applied");
         } else {
@@ -639,11 +584,9 @@ bool DbManager::CheckMigrationStatus() {
             }
             Logger::Info("=======================");
         }
-
         return true;
-
-    } catch (const std::exception& e) {
-        Logger::Error("Failed to check migration status: {}", e.what());
+    } catch (const std::exception& err) {
+        Logger::Error("Failed to check migration status: {}", err.what());
         return false;
     }
 }
@@ -653,13 +596,9 @@ bool DbManager::RollbackMigration(int version) {
         Logger::Error("Cannot rollback migration: not connected to database");
         return false;
     }
-
-    // Path to migrations directory – could be configurable
     const std::string migrationsDir = "migrations/";
-    std::string downFileName = "U" + std::to_string(version) + "*.sql"; // wildcard for description
-
+    std::string downFileName = "U" + std::to_string(version) + "*.sql";
     try {
-        // Find the actual down file (there should be exactly one)
         std::vector<std::filesystem::path> downFiles;
         for (const auto& entry : std::filesystem::directory_iterator(migrationsDir)) {
             if (entry.is_regular_file()) {
@@ -667,10 +606,9 @@ bool DbManager::RollbackMigration(int version) {
                 if (filename.rfind("U" + std::to_string(version), 0) == 0 &&
                     filename.size() > 3 && filename.substr(filename.size() - 4) == ".sql") {
                     downFiles.push_back(entry.path());
-                    }
+                }
             }
         }
-
         if (downFiles.empty()) {
             Logger::Error("No down migration found for version {}", version);
             return false;
@@ -679,8 +617,6 @@ bool DbManager::RollbackMigration(int version) {
             Logger::Error("Multiple down migrations found for version {}: {}", version, downFiles.size());
             return false;
         }
-
-        // Read the down SQL script
         std::ifstream file(downFiles[0]);
         if (!file.is_open()) {
             Logger::Error("Failed to open down migration file: {}", downFiles[0].string());
@@ -689,22 +625,14 @@ bool DbManager::RollbackMigration(int version) {
         std::stringstream buffer;
         buffer << file.rdbuf();
         std::string downSql = buffer.str();
-
         Logger::Info("Rolling back migration version {} using file: {}", version, downFiles[0].string());
-
-        // Execute the down script within a transaction
         if (!backend_->BeginTransaction()) {
             Logger::Error("Failed to begin transaction for rollback");
             return false;
         }
-
         bool success = false;
         try {
-            // Execute the down SQL (may contain multiple statements)
-            // Simple approach: execute whole script. If your backend doesn't support multiple statements,
-            // you may need to split by ';'. We'll assume Execute handles batches.
             if (backend_->Execute(downSql)) {
-                // Remove the migration record
                 std::string deleteSql = "DELETE FROM schema_migrations WHERE version = " + std::to_string(version);
                 if (backend_->Execute(deleteSql)) {
                     success = true;
@@ -714,7 +642,6 @@ bool DbManager::RollbackMigration(int version) {
             } else {
                 Logger::Error("Failed to execute down migration SQL for version {}", version);
             }
-
             if (success) {
                 if (!backend_->CommitTransaction()) {
                     Logger::Error("Failed to commit transaction during rollback");
@@ -723,19 +650,18 @@ bool DbManager::RollbackMigration(int version) {
             } else {
                 backend_->RollbackTransaction();
             }
-        } catch (const std::exception& e) {
-            Logger::Error("Exception during rollback: {}", e.what());
+        } catch (const std::exception& err) {
+            Logger::Error("Exception during rollback: {}", err.what());
             backend_->RollbackTransaction();
             return false;
         }
-
         if (success) {
             Logger::Info("Migration version {} rolled back successfully", version);
         }
         return success;
 
-    } catch (const std::exception& e) {
-        Logger::Error("Rollback error: {}", e.what());
+    } catch (const std::exception& err) {
+        Logger::Error("Rollback error: {}", err.what());
         return false;
     }
 }
@@ -743,7 +669,6 @@ bool DbManager::RollbackMigration(int version) {
 BackendType DbManager::ParseBackendType(const std::string& backendStr) const {
     std::string lowerType = backendStr;
     std::transform(lowerType.begin(), lowerType.end(), lowerType.begin(), ::tolower);
-
     if (lowerType == "sqlite") {
         return SQLITE;
     } else if (lowerType == "postgresql" || lowerType == "postgres") {
@@ -751,7 +676,6 @@ BackendType DbManager::ParseBackendType(const std::string& backendStr) const {
     } else if (lowerType == "citus") {
         return CITUS;
     }
-
     return INVALID;
 }
 
@@ -792,8 +716,8 @@ bool DbManager::TableExists(const std::string& tableName) {
             }
             return false;
         }
-    } catch (const std::exception& e) {
-        Logger::Error("Failed to check existence of table {}: {}", tableName, e.what());
+    } catch (const std::exception& err) {
+        Logger::Error("Failed to check existence of table {}: {}", tableName, err.what());
         return false;
     }
 }
@@ -803,18 +727,16 @@ bool DbManager::ExecuteCreateTable(const std::string& tableName, const std::stri
         Logger::Debug("Table '{}' already exists, skipping creation.", tableName);
         return true;
     }
-
     Logger::Info("Creating table '{}'...", tableName);
     try {
         backend_->Execute(createSql);
         Logger::Info("Table '{}' created successfully.", tableName);
         return true;
-    } catch (const std::exception& e) {
-        Logger::Error("Failed to create table '{}': {}", tableName, e.what());
+    } catch (const std::exception& err) {
+        Logger::Error("Failed to create table '{}': {}", tableName, err.what());
         return false;
     }
 }
-
 
 bool DbManager::CreateDefaultTablesIfNotExist() {
     if (!IsConnected() && !Connect()) return false;
@@ -830,7 +752,6 @@ bool DbManager::CreateDefaultTablesIfNotExist() {
         "create_table_loot_tables",
         "create_table_schema_migrations"
     };
-
     for (const auto& key : tableQueries) {
         std::string sql = sqlProvider_.GetQuery(key);
         if (sql.empty()) {
@@ -843,8 +764,7 @@ bool DbManager::CreateDefaultTablesIfNotExist() {
             success = false;
         }
     }
-
-    #ifdef USE_CITUS
+#ifdef USE_CITUS
     if (currentType_ == CITUS) {
         std::vector<std::string> distQueries = {
             "create_distributed_table_players",
@@ -857,12 +777,11 @@ bool DbManager::CreateDefaultTablesIfNotExist() {
         for (const auto& key : distQueries) {
             std::string sql = sqlProvider_.GetQuery(key);
             if (!sql.empty()) {
-                backend_->Execute(sql);  // ignore failure if table already distributed
+                backend_->Execute(sql);
             }
         }
     }
-    #endif
-
+#endif
     return success;
 }
 

@@ -105,7 +105,7 @@ int ConfigManager::GetTotalWorkerCount() const {
 int ConfigManager::GetTotalThreadCount() const {
     int total = 0;
     for (const auto& g : GetWorkerGroups())
-        total += g.threads * g.count; // each worker in group has its own threads
+        total += g.threads * g.count;
     return total;
 }
 
@@ -189,14 +189,58 @@ bool ConfigManager::ValidateConfig(const nlohmann::json& config) const {
         Logger::Info("Configuration validation passed");
         return true;
 
-    } catch (const std::exception& e) {
-        Logger::Critical("Configuration validation failed: {}", e.what());
+    } catch (const std::exception& err) {
+        Logger::Critical("Configuration validation failed: {}", err.what());
         return false;
     }
 }
 
+std::pair<std::string, std::optional<size_t>> ConfigManager::ParseSegment(const std::string& seg) const {
+    auto bracketPos = seg.find('[');
+    if (bracketPos == std::string::npos) {
+        return {seg, std::nullopt};
+    }
+    std::string field = seg.substr(0, bracketPos);
+    auto closePos = seg.find(']', bracketPos);
+    if (closePos == std::string::npos || closePos <= bracketPos + 1) {
+        throw std::invalid_argument("Invalid path segment (missing or empty index): " + seg);
+    }
+    std::string indexStr = seg.substr(bracketPos + 1, closePos - bracketPos - 1);
+    size_t index;
+    try {
+        index = std::stoull(indexStr);
+    } catch (...) {
+        throw std::invalid_argument("Invalid array index in segment: " + seg);
+    }
+    return {field, index};
+}
+
+std::vector<std::string> ConfigManager::SplitPath(const std::string& path) const {
+    std::vector<std::string> segments;
+    std::string current;
+    bool escape = false;
+    for (char c : path) {
+        if (escape) {
+            current += c;      // the escaped character (e.g., '.', '\' itself, or any char)
+            escape = false;
+        } else if (c == '\\') {
+            escape = true;     // next char is literal
+        } else if (c == '.') {
+            segments.push_back(current);
+            current.clear();
+        } else {
+            current += c;
+        }
+    }
+    if (!current.empty() || !segments.empty() || path.empty()) {
+        segments.push_back(current);
+    }
+    return segments;
+}
+
+
 // --------------------------------------------------------------------------
-// Setters (unchanged)
+// Setters
 // --------------------------------------------------------------------------
 void ConfigManager::SetBool(const std::string& key, bool value) {
     std::lock_guard<std::mutex> lock(configMutex_);
@@ -239,7 +283,7 @@ void ConfigManager::SetJson(const std::string& key, const nlohmann::json& value)
 }
 
 // --------------------------------------------------------------------------
-// Database configuration getters (unchanged)
+// Database configuration getters
 // --------------------------------------------------------------------------
 std::string ConfigManager::GetDatabaseHost() const {
     std::lock_guard<std::mutex> lock(configMutex_);
@@ -298,7 +342,7 @@ std::string ConfigManager::GetDatabaseBackend() const {
 int ConfigManager::GetDatabasePoolSize() const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
-        return config_.at("database").at("pool_size").get<int>();
+        return config_.at("database").at("pool").at("size").get<int>();
     } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
         return 10;
     }
@@ -329,7 +373,7 @@ int ConfigManager::GetShardCount(int default_value) const {
 }
 
 // --------------------------------------------------------------------------
-// Game configuration getters (unchanged)
+// Game configuration getters
 // --------------------------------------------------------------------------
 int ConfigManager::GetMaxPlayersPerSession() const {
     std::lock_guard<std::mutex> lock(configMutex_);
@@ -359,7 +403,7 @@ int ConfigManager::GetSessionTimeout() const {
 }
 
 // --------------------------------------------------------------------------
-// World configuration getters (unchanged)
+// World configuration getters
 // --------------------------------------------------------------------------
 int ConfigManager::GetWorldSeed() const {
     std::lock_guard<std::mutex> lock(configMutex_);
@@ -443,7 +487,7 @@ int ConfigManager::GetWorldPreloadRadius() const {
 }
 
 // --------------------------------------------------------------------------
-// Logging configuration getters (unchanged)
+// Logging configuration getters
 // --------------------------------------------------------------------------
 std::string ConfigManager::GetLogLevel() const {
     std::lock_guard<std::mutex> lock(configMutex_);
@@ -492,8 +536,20 @@ bool ConfigManager::GetConsoleOutput() const {
     }
 }
 
+
+bool ConfigManager::HasKey(const std::string& key) const {
+    std::lock_guard<std::mutex> lock(configMutex_);
+    try {
+        std::string keyPath = key;
+        std::replace(keyPath.begin(), keyPath.end(), '.', '/');
+        return config_.contains(nlohmann::json::json_pointer("/" + keyPath));
+    } catch (const std::exception& err) {//Logger::Warn("missed: {}", err.what());
+    return false;
+    }
+}
+
 // --------------------------------------------------------------------------
-// Generic config accessors (unchanged)
+// Generic config accessors
 // --------------------------------------------------------------------------
 int ConfigManager::GetInt(const std::string& key, int defaultValue) const {
     std::lock_guard<std::mutex> lock(configMutex_);
@@ -558,24 +614,35 @@ std::vector<std::string> ConfigManager::GetStringArray(const std::string& key) c
     return result;
 }
 
-nlohmann::json ConfigManager::GetJson(const std::string& key) const {
+nlohmann::json ConfigManager::GetJson(const std::string& key,
+                                      const nlohmann::json& default_value) const {
     std::lock_guard<std::mutex> lock(configMutex_);
+    std::vector<std::string> segments;
     try {
-        std::string keyPath = key;
-        std::replace(keyPath.begin(), keyPath.end(), '.', '/');
-        return config_.at(nlohmann::json::json_pointer("/" + keyPath));
-    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
-        return nlohmann::json();
+        segments = SplitPath(key);
+    } catch (const std::exception& e) {
+        Logger::Warn("Invalid path '{}': {}", key, e.what());
+        return default_value;
     }
-}
-
-bool ConfigManager::HasKey(const std::string& key) const {
-    std::lock_guard<std::mutex> lock(configMutex_);
-    try {
-        std::string keyPath = key;
-        std::replace(keyPath.begin(), keyPath.end(), '.', '/');
-        return config_.contains(nlohmann::json::json_pointer("/" + keyPath));
-    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
-        return false;
+    const nlohmann::json* current = &config_;
+    for (const auto& seg : segments) {
+        auto [field, index] = ParseSegment(seg);
+        if (current->is_object()) {
+            if (!current->contains(field)) {
+                Logger::Warn("Missing key '{}' in path '{}'", field, key);
+                return default_value;
+            }
+            current = &current->at(field);
+        } else if (current->is_array() && index.has_value()) {
+            if (index.value() >= current->size()) {
+                Logger::Warn("Index out of bounds in path '{}'", key);
+                return default_value;
+            }
+            current = &current->at(index.value());
+        } else {
+            Logger::Warn("Path segment '{}' cannot navigate a {} node", seg, current->type_name());
+            return default_value;
+        }
     }
+    return *current;
 }

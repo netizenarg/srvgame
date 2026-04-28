@@ -33,7 +33,7 @@ void LogicCore::Initialize() {
     Logger::Info("Initializing LogicCore...");
     auto& config = ConfigManager::GetInstance();
     RegisterDefaultHandlers();
-    pythonEnabled_ = config.GetBool("python.enabled", false);
+    pythonEnabled_ = config.GetBool("scripting.python.enabled", false);
     running_ = true;
     gameLoopThread_ = RAIIThread([this]() { GameLoop(); });
     spawnerThread_ = RAIIThread([this]() { SpawnerLoop(); });

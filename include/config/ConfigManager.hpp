@@ -112,18 +112,21 @@ public:
     bool GetBool(const std::string& key, bool defaultValue = false) const;
     std::string GetString(const std::string& key, const std::string& defaultValue = "") const;
     std::vector<std::string> GetStringArray(const std::string& key) const;
-    nlohmann::json GetJson(const std::string& key) const;
+    nlohmann::json GetJson(const std::string& key, const nlohmann::json& default_value = nlohmann::json()) const;
     bool HasKey(const std::string& key) const;
 
 private:
-    ConfigManager() = default;
-    ConfigManager(const ConfigManager&) = delete;
-    ConfigManager& operator=(const ConfigManager&) = delete;
-    
-    bool HasProcessConfig() const;
-    bool ValidateConfig(const nlohmann::json& config) const;
-
     mutable std::mutex configMutex_;
     nlohmann::json config_;
     std::string configPath_;
+
+    std::pair<std::string, std::optional<size_t>> ParseSegment(const std::string& seg) const;
+    std::vector<std::string> SplitPath(const std::string& path) const;
+
+    ConfigManager() = default;
+    ConfigManager(const ConfigManager&) = delete;
+    ConfigManager& operator=(const ConfigManager&) = delete;
+
+    bool HasProcessConfig() const;
+    bool ValidateConfig(const nlohmann::json& config) const;
 };
