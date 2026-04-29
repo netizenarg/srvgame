@@ -323,7 +323,7 @@ void BinarySession::HandleBinaryMessage(const BinaryProtocol::BinaryMessage& mes
         case BinaryProtocol::MESSAGE_TYPE_PROTOCOL_NEGOTIATION:
             HandleProtocolNegotiation(message.data);
             return;
-        case BinaryProtocol::MESSAGE_TYPE_CHUNK_REQUEST: {
+        case BinaryProtocol::MESSAGE_TYPE_CHUNK_DATA: {
             BinaryProtocol::BinaryReader reader(message.data.data(), message.data.size());
             ChunkData req;
             req.x = reader.ReadInt32();
@@ -333,7 +333,7 @@ void BinarySession::HandleBinaryMessage(const BinaryProtocol::BinaryMessage& mes
             req.player_y = reader.ReadFloat();
             req.player_z = reader.ReadFloat();
             req.session_id = sessionId_;
-            GameLogic::GetInstance().OnChunkRequest(req);
+            GameLogic::GetInstance().OnChunkData(req);
             break;
         }
         case BinaryProtocol::MESSAGE_TYPE_ERROR:

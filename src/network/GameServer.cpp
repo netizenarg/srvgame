@@ -170,7 +170,14 @@ void GameServer::InitSessionFactory(int workerId, ProcessPool* processPool, Game
                         game_logic.OnAuthentication(authData);
                         break;
                     }
-                    case BinaryProtocol::MESSAGE_TYPE_CHUNK_REQUEST: {
+                    case BinaryProtocol::MESSAGE_TYPE_CHUNK_PARAMS: {
+                        BinaryProtocol::BinaryReader reader(data.data(), data.size());
+                        ChunkParams req;
+                        req.session_id = session->GetSessionId();
+                        game_logic.OnChunkParams(req);
+                        break;
+                    }
+                    case BinaryProtocol::MESSAGE_TYPE_CHUNK_DATA: {
                         BinaryProtocol::BinaryReader reader(data.data(), data.size());
                         ChunkData req;
                         req.x = reader.ReadInt32();
@@ -180,7 +187,7 @@ void GameServer::InitSessionFactory(int workerId, ProcessPool* processPool, Game
                         req.player_y = reader.ReadFloat();
                         req.player_z = reader.ReadFloat();
                         req.session_id = session->GetSessionId();
-                        game_logic.OnChunkRequest(req);
+                        game_logic.OnChunkData(req);
                         break;
                     }
                     case BinaryProtocol::MESSAGE_TYPE_COLLISION_CHECK: {
@@ -302,6 +309,11 @@ void GameServer::InitSessionFactory(int workerId, ProcessPool* processPool, Game
                     authData.session_id = session->GetSessionId();
                     game_logic.OnAuthentication(authData);
                 }
+                else if (msgType == "chunk_params") {
+                    ChunkParams req;
+                    req.session_id = session->GetSessionId();
+                    game_logic.OnChunkParams(req);
+                }
                 else if (msgType == "get_chunk") {
                     ChunkData req;
                     req.x = msg.value("x", 0);
@@ -311,7 +323,7 @@ void GameServer::InitSessionFactory(int workerId, ProcessPool* processPool, Game
                     req.player_y = msg.value("player_y", 0.0f);
                     req.player_z = msg.value("player_z", 0.0f);
                     req.session_id = session->GetSessionId();
-                    game_logic.OnChunkRequest(req);
+                    game_logic.OnChunkData(req);
                 }
                 else if (msgType == "collision") {
                     CollisionData req;
@@ -507,11 +519,21 @@ void GameServer::RegisterCallbacks(const std::string& protocol, GameLogic& game_
                 session->Send(BinaryProtocol::MESSAGE_TYPE_AUTHENTICATION, writer.GetBuffer());
             }
         });
+        game_logic.SetSendChunkParamsCallback([&](uint64_t session_id, const ChunkParams& data) {
+            BinaryProtocol::BinaryWriter writer;
+            writer.WriteUInt32(static_cast<uint32_t>(data.size));
+            writer.WriteFloat(data.spacing);
+            auto session = ConnectionManager::GetInstance().GetSession(session_id);
+            if (session) {
+                session->Send(BinaryProtocol::MESSAGE_TYPE_CHUNK_PARAMS, writer.GetBuffer());
+            }
+        });
         game_logic.SetSendChunkCallback([&](uint64_t session_id, const ChunkData& data) {
             BinaryProtocol::BinaryWriter writer;
             writer.WriteInt32(data.x);
             writer.WriteInt32(data.z);
             writer.WriteInt32(data.size);
+            writer.WriteFloat(data.spacing);
             uint32_t vertexDataSize = static_cast<uint32_t>(data.vertices.size() * sizeof(float));
             writer.WriteUInt32(vertexDataSize);
             writer.WriteBytes(reinterpret_cast<const uint8_t*>(data.vertices.data()), vertexDataSize);
@@ -669,6 +691,18 @@ void GameServer::RegisterCallbacks(const std::string& protocol, GameLogic& game_
             auto session = ConnectionManager::GetInstance().GetSession(session_id);
             if (session) {
                 session->SendJson(response);
+            }
+        });
+        game_logic.SetSendChunkParamsCallback([&](uint64_t session_id, const ChunkParams& data) {
+            nlohmann::json msg = {
+                {"msg", "chunk_params"},
+                {"size", data.size},
+                {"spacing", data.spacing},
+                {"timestamp", data.timestamp}
+            };
+            auto session = ConnectionManager::GetInstance().GetSession(session_id);
+            if (session) {
+                session->SendJson(msg);
             }
         });
         game_logic.SetSendChunkCallback([&](uint64_t session_id, const ChunkData& data) {

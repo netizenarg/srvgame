@@ -79,17 +79,21 @@ std::unique_ptr<WorldChunk> WorldGenerator::GenerateChunk(int chunkX, int chunkZ
     return chunk;
 }
 
+// float WorldGenerator::GetTerrainHeight(float x, float z) {
+//     float baseHeight = FractalNoise(x / config_.terrainScale, z / config_.terrainScale);
+//     float detail = Noise(x / (config_.terrainScale * 0.5f), z / (config_.terrainScale * 0.5f)) * 0.2f;
+//     float normalizedHeight = (baseHeight + detail + 1.0f) * 0.5f;
+//     normalizedHeight = std::pow(normalizedHeight, 1.5f);
+//     float result = normalizedHeight * config_.terrainHeight;
+//     return result;
+// }
+
+//TODO: replace all constants to parameters from config and also send to client with MESSAGE_TYPE_CHUNK_PARAMS
 float WorldGenerator::GetTerrainHeight(float x, float z) {
-    float baseHeight = FractalNoise(x / config_.terrainScale, z / config_.terrainScale);
-    float detail = Noise(x / (config_.terrainScale * 0.5f), z / (config_.terrainScale * 0.5f)) * 0.2f;
-    float normalizedHeight = (baseHeight + detail + 1.0f) * 0.5f;
-    normalizedHeight = std::pow(normalizedHeight, 1.5f);
-    float result = normalizedHeight * config_.terrainHeight;
-    // if (std::abs(x) < 1.0f && std::abs(z) < 1.0f) {
-    //     Logger::Trace("GetTerrainHeight({:.2f}, {:.2f}) = {:.4f} (base={:.4f}, norm={:.4f})",
-    //                  x, z, result, baseHeight, normalizedHeight);
-    // }
-    return result;
+    return (sin(x * 0.1) * cos(z * 0.1) +
+    0.3f * sin(x * 0.3f + 1.2f) +
+    0.3f * cos(z * 0.3f + 2.4f) +
+    0.2f * sin((x * 0.6f + z * 0.4f) * 0.8f)) * 2.0f + 0.5f;
 }
 
 BiomeType WorldGenerator::GetBiomeAt(float x, float z) {

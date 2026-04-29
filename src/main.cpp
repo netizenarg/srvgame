@@ -69,9 +69,9 @@ void worker(int workerId, const WorkerGroupConfig& groupConfig, ProcessPool* pro
         dbConfig["user"] = config.GetDatabaseUser();
         dbConfig["password"] = config.GetDatabasePassword();
 
-        dbConfig["max_connections"] = config.GetInt("database.connection_pool.max_connections", 20);
-        dbConfig["min_connections"] = config.GetInt("database.connection_pool.min_connections", 5);
-        dbConfig["connection_timeout_ms"] = config.GetInt("database.connection_pool.connection_timeout_ms", 5000);
+        dbConfig["max_connections"] = config.GetInt("database.pool.max_connections", 20);
+        dbConfig["min_connections"] = config.GetInt("database.pool.min_connections", 5);
+        dbConfig["connection_timeout_ms"] = config.GetInt("database.pool.connection_timeout_ms", 5000);
 
         if (!dbManager.Initialize(path_config)) {
             Logger::Error("Worker {} failed to initialize database", workerId);
@@ -107,7 +107,7 @@ void worker(int workerId, const WorkerGroupConfig& groupConfig, ProcessPool* pro
         gameLogic.SetConnectionManager(ConnectionManager::GetInstancePtr());
         gameLogic.Initialize();
 
-        DatabaseService dbService(server.GetIoContext(), config.GetInt("database.pool_threads", 2));
+        DatabaseService dbService(server.GetIoContext(), config.GetInt("database.pool.threads", 2));
         gameLogic.SetDatabaseService(&dbService);
 
         if (config.ShouldPreloadWorld()) {
@@ -283,6 +283,7 @@ int main(int argc, char* argv[]) {
 
     Logger::Info("Starting {} worker processes", processPool.GetTotalWorkerCount());
     processPool.Run();
+    processPool.WaitForWorkers();
 
     // Master messaging thread – reduced frequency to avoid pipe overload
     std::thread masterMessagingThread([&processPool]() {
@@ -293,8 +294,8 @@ int main(int argc, char* argv[]) {
         int totalWorkers = processPool.GetTotalWorkerCount();
         for (int i = 0; i < totalWorkers; i++) {
             if (!processPool.IsWorkerAlive(i)) {
-                Logger::Warn("Master skipping welcome message to dead worker {}", i);
-                continue;
+                if (processPool.IsWorkersReady())
+                    Logger::Warn("Master skipping welcome message to dead worker {}", i);
             }
 
             nlohmann::json testMsg;

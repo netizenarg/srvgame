@@ -66,6 +66,7 @@ public:
     void SendAuthenticationFailure(uint64_t sessionId, const std::string& message);
 
     void SetSendAuthenticationResponseCallback(std::function<void(uint64_t sessionId, const std::string& message, uint64_t playerId)> cb);
+    void SetSendChunkParamsCallback(std::function<void(uint64_t sessionId, const ChunkParams&)> cb);
     void SetSendChunkCallback(std::function<void(uint64_t sessionId, const ChunkData&)> cb);
     void SetSendCollisionResponseCallback(std::function<void(uint64_t session_id, const CollisionResult& result)> cb);
 
@@ -81,7 +82,8 @@ public:
     void SetSendInventoryResponseCallback(std::function<void(uint64_t session_id, const InventoryData& response)> cb);
 
     void OnAuthentication(const AuthenticationData& data);
-    void OnChunkRequest(const ChunkData& data);
+    void OnChunkParams(const ChunkParams& req);
+    void OnChunkData(const ChunkData& data);
     void OnCollisionCheck(const CollisionData& data);
     void OnPlayerPosition(const PlayerPositionData& data);
     void OnPlayerState(const PlayerStateData& data);
@@ -131,6 +133,7 @@ private:
     DatabaseService* dbService_ = nullptr;
 
     std::function<void(uint64_t, const std::string&, uint64_t)> sendAuthResponseCb_;
+    std::function<void(uint64_t, const ChunkParams&)> sendChunkParamsCb_;
     std::function<void(uint64_t, const ChunkData&)> sendChunkCb_;
     std::function<void(uint64_t, const CollisionResult&)> sendCollisionResponseCb_;
 
