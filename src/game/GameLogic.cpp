@@ -424,6 +424,10 @@ void GameLogic::SetSendAuthenticationResponseCallback(std::function<void(uint64_
     sendAuthResponseCb_ = std::move(cb);
 }
 
+void GameLogic::SetSendChunkParamsCallback(std::function<void(uint64_t, const ChunkParams&)> cb) {
+    sendChunkParamsCb_ = std::move(cb);
+}
+
 void GameLogic::SetSendChunkCallback(std::function<void(uint64_t, const ChunkData&)> cb) {
     sendChunkCb_ = std::move(cb);
 }
@@ -505,7 +509,19 @@ void GameLogic::OnAuthentication(const AuthenticationData& data) {
     }
 }
 
-void GameLogic::OnChunkRequest(const ChunkData& req) {
+void GameLogic::OnChunkParams(const ChunkParams& req) {
+    ChunkParams resp;
+    resp.size = WorldChunk::DEFAULT_SIZE;
+    resp.spacing = WorldChunk::DEFAULT_SPACING;
+    resp.timestamp = GetCurrentTimestamp();
+    if (sendChunkParamsCb_) {
+        sendChunkParamsCb_(req.session_id, resp);
+    } else {
+        Logger::Error("No sendChunkParamsCb_ set in GameLogic");
+    }
+}
+
+void GameLogic::OnChunkData(const ChunkData& req) {
     auto chunk = GetOrCreateChunk(req.x, req.z);
     if (!chunk) {
         Logger::Error("Failed to get chunk ({},{}) for session {}", req.x, req.z, req.session_id);
