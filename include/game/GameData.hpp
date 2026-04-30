@@ -158,8 +158,6 @@ struct ChunkData {
     int x;
     int z;
     uint8_t lod;
-    int size;
-    float spacing;
     float player_x;
     float player_y;
     float player_z;
