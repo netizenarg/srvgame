@@ -531,8 +531,6 @@ void GameLogic::OnChunkData(const ChunkData& req) {
     resp.x = req.x;
     resp.z = req.z;
     resp.lod = req.lod;
-    resp.size = WorldChunk::DEFAULT_SIZE;
-    resp.spacing = WorldChunk::DEFAULT_SPACING;
     resp.timestamp = GetCurrentTimestamp();
     const auto& verts = chunk->GetVertices();
     resp.vertices.reserve(verts.size() * 6);

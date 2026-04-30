@@ -532,8 +532,6 @@ void GameServer::RegisterCallbacks(const std::string& protocol, GameLogic& game_
             BinaryProtocol::BinaryWriter writer;
             writer.WriteInt32(data.x);
             writer.WriteInt32(data.z);
-            writer.WriteInt32(data.size);
-            writer.WriteFloat(data.spacing);
             uint32_t vertexDataSize = static_cast<uint32_t>(data.vertices.size() * sizeof(float));
             writer.WriteUInt32(vertexDataSize);
             writer.WriteBytes(reinterpret_cast<const uint8_t*>(data.vertices.data()), vertexDataSize);
@@ -711,8 +709,6 @@ void GameServer::RegisterCallbacks(const std::string& protocol, GameLogic& game_
                 {"x", data.x},
                 {"z", data.z},
                 {"lod", data.lod},
-                {"size", data.size},
-                {"spacing", data.spacing},
                 {"vertices", data.vertices},
                 {"indices", data.indices},
                 {"timestamp", data.timestamp}
