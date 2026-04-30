@@ -26,10 +26,9 @@ namespace BinaryProtocol {
         MESSAGE_TYPE_COLLISION_CHECK = 50,
 
         // World messages
-        MESSAGE_TYPE_CHUNK_DATA = 100,
-        MESSAGE_TYPE_CHUNK_REQUEST = 101,
-        MESSAGE_TYPE_TERRAIN_HEIGHT = 102,
-        MESSAGE_TYPE_BIOME_DATA = 103,
+        MESSAGE_TYPE_CHUNK_PARAMS = 100,
+        MESSAGE_TYPE_CHUNK_DATA = 101,
+        MESSAGE_TYPE_BIOME_DATA = 102,
 
         // Player messages
         MESSAGE_TYPE_PLAYER_POSITION = 200,

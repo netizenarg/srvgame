@@ -27,7 +27,7 @@ bool PythonScripting::Initialize() {
 
     // Get configuration
     auto& config = ConfigManager::GetInstance();
-    std::string pythonHome = config.GetString("python.home", "");
+    std::string pythonHome = config.GetString("scripting.python.directory", "");
 
     if (!pythonHome.empty()) {
         pythonHome_ = pythonHome;
@@ -35,7 +35,7 @@ bool PythonScripting::Initialize() {
 
     // Initialize Python
     if (!InitializePython()) {
-        Logger::Error("Failed to initialize Python interpreter");
+        Logger::Warn("Failed to initialize Python interpreter");
         return false;
     }
 
@@ -52,7 +52,7 @@ bool PythonScripting::Initialize() {
     }
 
     // Add additional paths from config
-    auto pythonPaths = config.GetStringArray("python.paths");
+    auto pythonPaths = config.GetStringArray("scripting.python.paths");
     for (const auto& path : pythonPaths) {
         AddPythonPath(path);
     }
@@ -61,7 +61,7 @@ bool PythonScripting::Initialize() {
     PythonAPI::Initialize();
 
     // Load default modules
-    std::string scriptDir = config.GetString("python.script_dir", "./scripts");
+    std::string scriptDir = config.GetString("scripting.python.directory", "./scripts");
     if (fs::exists(scriptDir)) {
         for (const auto& entry : fs::directory_iterator(scriptDir)) {
             if (entry.path().extension() == ".py") {
@@ -127,7 +127,7 @@ bool PythonScripting::InitializePython() {
         PyConfig_Clear(&config);
 
         if (!Py_IsInitialized()) {
-            Logger::Error("Failed to initialize Python interpreter");
+            Logger::Warn("Failed to initialize Python interpreter");
             return false;
         }
 

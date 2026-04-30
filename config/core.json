@@ -53,64 +53,64 @@
   },
 
   "npcs": {
-    "initialNPCCount": 50,
-    "maxNPCsPerChunk": 5,
-    "spawnInterval": 5.0,
-    "despawnDistance": 150.0
+    "initial_count": 50,
+    "max_per_chunk": 5,
+    "spawn_interval": 5.0,
+    "despawn_distance": 150.0
   },
 
   "mobs": {
     "enabled": true,
-    "spawnZones": [
+    "spawn_zones": [
       {
         "name": "goblin_forest",
         "center": [100.0, 10.0, 100.0],
         "radius": 50.0,
-        "mobType": 0,
-        "minLevel": 1,
-        "maxLevel": 5,
-        "maxMobs": 15,
-        "respawnTime": 30.0
+        "type": 0,
+        "max": 15,
+        "min_level": 1,
+        "max_level": 5,
+        "respawn_time": 30.0
       },
       {
         "name": "orc_camp",
         "center": [500.0, 15.0, 500.0],
         "radius": 75.0,
-        "mobType": 1,
-        "minLevel": 5,
-        "maxLevel": 15,
-        "maxMobs": 10,
-        "respawnTime": 45.0
+        "type": 1,
+        "max": 10,
+        "min_level": 5,
+        "max_level": 15,
+        "respawn_time": 45.0
       },
       {
         "name": "dragon_lair",
         "center": [1000.0, 30.0, 1000.0],
         "radius": 100.0,
-        "mobType": 2,
-        "minLevel": 20,
-        "maxLevel": 30,
-        "maxMobs": 3,
-        "respawnTime": 300.0
+        "type": 2,
+        "max": 3,
+        "min_level": 20,
+        "max_level": 30,
+        "respawn_time": 300.0
       },
       {
         "name": "slime_swamp",
         "center": [-200.0, 5.0, -200.0],
         "radius": 60.0,
-        "mobType": 3,
-        "minLevel": 1,
-        "maxLevel": 10,
-        "maxMobs": 20,
-        "respawnTime": 20.0
+        "type": 3,
+        "max": 20,
+        "min_level": 1,
+        "max_level": 10,
+        "respawn_time": 20.0
       }
     ],
-    "experienceMultiplier": 1.0,
-    "lootDropChance": 1.0
+    "experience_multiplier": 1.0,
+    "loot_drop_chance": 1.0
   },
 
   "collision": {
     "enabled": true,
-    "gridCellSize": 10.0,
-    "maxCollisionChecks": 1000
+    "cell_size": 10.0,
+    "max_checks": 1000
   },
 
   "database": {
@@ -120,10 +120,10 @@
     "name": "data/game.db",
     "user": "gameuser",
     "password": "password",
-    "connection_pool":{
+    "pool":{
       "enabled": false,
-      "pool_size": 10,
-      "pool_threads": 2,
+      "size": 10,
+      "threads": 2,
       "reconnect_attempts": 3,
       "min_connections": 5,
       "max_connections": 20,
@@ -144,10 +144,12 @@
     "console_output": true
   },
 
-  "pythonScripting": {
-    "enabled": true,
-    "scriptDirectory": "scripts",
-    "hotReload": true
+  "scripting": {
+    "python": {
+        "enabled": true,
+        "directory": "scripts",
+        "hot_reload": true
+    }
   },
 
   "game": {

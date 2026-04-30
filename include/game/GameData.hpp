@@ -145,14 +145,19 @@ struct PortalData {
     bool active = false;
 };
 
+struct ChunkParams {
+    uint64_t timestamp;
+    uint64_t session_id;
+    int size;
+    float spacing;
+};
+
 struct ChunkData {
     uint64_t timestamp;
     uint64_t session_id;
     int x;
     int z;
     uint8_t lod;
-    int size;
-    float spacing;
     float player_x;
     float player_y;
     float player_z;

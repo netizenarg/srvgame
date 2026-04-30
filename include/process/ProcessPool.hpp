@@ -57,6 +57,8 @@ public:
     bool SendToWorker(int workerId, const std::string& message);
     std::string ReceiveFromMaster();
 
+    bool IsWorkersReady() const;
+    void WaitForWorkers();
     bool IsWorkerAlive(int workerId) const;
     void RestartWorker(int workerId);
 
@@ -69,24 +71,6 @@ public:
     void UnblockSignals(const sigset_t* oldset);
 
 private:
-    struct WorkerInfo {
-        pid_t pid;
-        int groupIdx;
-        int localWorkerId;
-        WorkerGroupConfig config;
-    };
-
-    void MasterProcess();
-    void WorkerProcess(int globalWorkerId, const WorkerGroupConfig& config);
-    void SetupSignalHandlers();
-    void CleanupDeadWorkers();
-    void CloseAllPipes();
-    void CreateWorkerPipe(int globalWorkerId);
-
-    bool WriteAll(int fd, const void* buffer, size_t count);
-    bool ReadAll(int fd, void* buffer, size_t count, bool nonBlocking = false);
-    bool DrainPipe(int fd, size_t bytesToDrain);
-
     std::vector<WorkerGroupConfig> groups_;
     int totalWorkers_;
 
@@ -99,6 +83,13 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<bool> shutdownRequested_{false};
 
+    struct WorkerInfo {
+        pid_t pid;
+        int groupIdx;
+        int localWorkerId;
+        WorkerGroupConfig config;
+    };
+
     std::vector<WorkerInfo> workers_;
     std::vector<int> workerPipes_;
 
@@ -109,4 +100,17 @@ private:
 
     uint32_t maxMessageSize_{1024 * 1024};
     uint32_t receiveTimeoutMs_{1000};
+
+    std::atomic<bool> workersReady_{false};
+
+    void MasterProcess();
+    void WorkerProcess(int globalWorkerId, const WorkerGroupConfig& config);
+    void SetupSignalHandlers();
+    void CleanupDeadWorkers();
+    void CloseAllPipes();
+    void CreateWorkerPipe(int globalWorkerId);
+
+    bool WriteAll(int fd, const void* buffer, size_t count);
+    bool ReadAll(int fd, void* buffer, size_t count, bool nonBlocking = false);
+    bool DrainPipe(int fd, size_t bytesToDrain);
 };
