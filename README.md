@@ -125,11 +125,11 @@ Client ↔ Server Communication\
 **World Messages (100-199):**
 - Chunk data, terrain height, biome information, world updates
 
-**Entity Messages (200-299):**
-- Entity spawn/update/despawn, batch updates, state synchronization
-
-**Player Messages (300-399):**
+**Player Messages (200-299):**
 - Position, velocity, rotation, state, server corrections
+
+**Entity Messages (300-399):**
+- Entity spawn/update/despawn, batch updates, state synchronization
 
 **NPC Messages (400-499):**
 - NPC spawn/update/despawn, interactions, AI commands
