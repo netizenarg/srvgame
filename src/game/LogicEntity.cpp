@@ -111,6 +111,7 @@ void LogicEntity::DespawnNPC(uint64_t npcId) {
 
 void LogicEntity::UpdateNPCs(float deltaTime) {
     std::lock_guard<std::mutex> lock(npcMutex_);
+    if (!npcManager_) return;
     npcManager_->Update(deltaTime);
     for (auto& [npcId, npc] : npcManager_->GetAllNPCs()) {
         if (npc && collisionSystem_) {

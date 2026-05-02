@@ -377,7 +377,7 @@ bool EntityManager::InitializePython() {
 
     Py_Initialize();
     if (!Py_IsInitialized()) {
-        Logger::Warn("Failed to initialize Python interpreter");
+        Logger::Warn("EntityManager::InitializePython failed to initialize interpreter");
         return false;
     }
 

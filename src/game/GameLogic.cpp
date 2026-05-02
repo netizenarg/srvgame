@@ -12,8 +12,9 @@ GameLogic& GameLogic::GetInstance() {
    return *instance_;
 }
 
-GameLogic::GameLogic() {
-    Logger::Debug("GameLogic created");
+GameLogic::GameLogic()
+{
+    Logger::Trace("GameLogic created without ProcessPool");
 }
 
 GameLogic::~GameLogic() {
@@ -22,13 +23,17 @@ GameLogic::~GameLogic() {
     }
 }
 
+void GameLogic::SetProcessPool(ProcessPool* process_pool)
+{ processPool_ = process_pool; }
+
+ProcessPool* GameLogic::GetProcessPool() const
+{ return processPool_; }
+
 void GameLogic::Initialize() {
     if (initialized_) {
         Logger::Warn("GameLogic already initialized");
         return;
     }
-    initialized_ = true;
-    LogicCore::Initialize();
     Logger::Info("Initializing GameLogic with world system...");
     auto& config = ConfigManager::GetInstance();
     WorldConfig worldConfig;
@@ -68,11 +73,13 @@ void GameLogic::Initialize() {
                     g_hotReloader->Start();
                 }
             } else {
-                Logger::Warn("Failed to initialize Python scripting");
+                Logger::Warn("GameLogic::Initialize failed to initialize Python scripting");
                 pythonEnabled_ = false;
             }
         }
     }
+    LogicCore::Initialize();
+    initialized_ = true;
     Logger::Info("GameLogic world system initialized successfully");
 }
 
@@ -89,9 +96,9 @@ void GameLogic::Shutdown() {
     if (pythonEnabled_) {
         PythonScripting::GetInstance().Shutdown();
     }
+    LogicCore::Shutdown();
     LogicEntity::GetInstance().Shutdown();
     LogicWorld::GetInstance().Shutdown();
-    LogicCore::Shutdown();
     initialized_ = false;
 }
 
@@ -188,13 +195,155 @@ void GameLogic::SendPositionCorrection(uint64_t session_id, const glm::vec3& pos
     }
 }
 
+std::vector<std::shared_ptr<IConnection>> GameLogic::GetSessionsInRadius(glm::vec3 position) {
+    std::vector<std::shared_ptr<IConnection>> result;
+    auto& pm = PlayerManager::GetInstance();
+    auto nearbyPlayers = pm.GetPlayersInRadius(position,
+                                               ConfigManager::GetInstance().GetFloat("world.interest_radius", 100.0f));
+    for (auto& player : nearbyPlayers) {
+        uint64_t session_id = pm.GetSessionIdByPlayerId(player->GetId());
+        if (session_id != 0) {
+            auto session = ConnectionManager::GetInstance().GetSession(session_id);
+            if (session && session->IsConnected()) {
+                result.push_back(session);
+            }
+        }
+    }
+    return result;
+}
+
+void GameLogic::BroadcastRemotePlayerSpawn(const PlayerSpawnData& data) {
+    auto sessions = GetSessionsInRadius(data.position);
+    for (auto& session : sessions) {
+        if (sendPlayerSpawnCb_)
+            sendPlayerSpawnCb_(session->GetSessionId(), data);
+    }
+    std::lock_guard<std::mutex> lock(remotePlayersMutex_);
+    remotePlayers_[data.player_id] = data;
+}
+
+void GameLogic::BroadcastRemotePlayerDespawn(uint64_t player_id) {
+    PlayerSpawnData cached;
+    {
+        std::lock_guard<std::mutex> lock(remotePlayersMutex_);
+        auto it = remotePlayers_.find(player_id);
+        if (it != remotePlayers_.end()) {
+            cached = it->second;
+            remotePlayers_.erase(it);
+        } else {
+            return;
+        }
+    }
+    auto sessions = GetSessionsInRadius(cached.position);
+    for (auto& session : sessions) {
+        PlayerDespawnData desp;
+        desp.timestamp = GetCurrentTimestamp();
+        desp.player_id = player_id;
+        if (sendPlayerDespawnCb_)
+            sendPlayerDespawnCb_(session->GetSessionId(), desp);
+    }
+}
+
+void GameLogic::BroadcastPlayerSpawn(uint64_t session_id, uint64_t player_id)
+{
+    auto player = GetPlayer(player_id);
+    if (!player) return;
+    PlayerSpawnData data;
+    data.timestamp = GetCurrentTimestamp();
+    data.player_id = player_id;
+    data.name = player->GetUsername();
+    data.position = player->GetPosition();
+    data.yaw = player->GetRotation().y;
+    data.health = player->GetHealth();
+    data.max_health = player->GetMaxHealth();
+    auto sessions = GetSessionsInRadius(data.position);
+    for (auto& session : sessions)
+    {
+        if (session->GetSessionId() != session_id)
+        {
+            if (sendPlayerSpawnCb_)
+                sendPlayerSpawnCb_(session->GetSessionId(), data);
+        }
+    }
+}
+
+void GameLogic::BroadcastPlayerDespawn(uint64_t session_id, uint64_t player_id)
+{
+    auto player = GetPlayer(player_id);
+    if (!player) return;
+    PlayerDespawnData data;
+    data.timestamp = GetCurrentTimestamp();
+    data.player_id = player_id;
+    auto sessions = GetSessionsInRadius(player->GetPosition());
+    for (auto& session : sessions)
+    {
+        if (session->GetSessionId() != session_id)
+        {
+            if (sendPlayerDespawnCb_)
+                sendPlayerDespawnCb_(session->GetSessionId(), data);
+        }
+    }
+}
+
 void GameLogic::OnPlayerConnected(uint64_t session_id, uint64_t player_id) {
-    Logger::Info("GameLogic: Player {} connected with session {}", player_id, session_id);
+    Logger::Trace("GameLogic: player ID {} connected with session ID {}", player_id, session_id);
+    auto player = GetPlayer(player_id);
+    if (!player) {
+        Logger::Error("GameLogic: player ID {} OnPlayerConnected can't create Player instance with session ID {}", player_id, session_id);
+        return;
+    }
     FirePythonEvent("player_connected", {
         {"session_id", session_id},
         {"player_id", player_id}
     });
     LogicCore::OnPlayerConnected(session_id, player_id);
+    // TODO: now send spawn broadcast to all,
+    // but it must be moved to own new method separated from player account logic
+    BroadcastPlayerSpawn(session_id, player_id);
+    auto& pm = PlayerManager::GetInstance();
+    if (player) {
+        float interestRadius = ConfigManager::GetInstance().GetFloat("world.interest_radius", 100.0f);
+        auto allPlayers = pm.GetAllPlayers();
+        for (auto& other : allPlayers) {
+            if (other->GetId() == player_id) continue;
+            if (glm::distance(other->GetPosition(), player->GetPosition()) > interestRadius) continue;
+            PlayerSpawnData data;
+            data.timestamp = GetCurrentTimestamp();
+            data.player_id = other->GetId();
+            data.name = other->GetUsername();
+            data.position = other->GetPosition();
+            data.yaw = other->GetRotation().y;
+            data.health = other->GetHealth();
+            data.max_health = other->GetMaxHealth();
+            if (sendPlayerSpawnCb_)
+                sendPlayerSpawnCb_(session_id, data);
+        }
+    }
+    if (processPool_) {
+        PlayerSpawnData data;
+        data.timestamp = GetCurrentTimestamp();
+        data.player_id = player_id;
+        data.name = player->GetUsername();
+        data.position = player->GetPosition();
+        data.yaw = player->GetRotation().y;
+        data.health = player->GetHealth();
+        data.max_health = player->GetMaxHealth();
+        nlohmann::json relay = {
+            {"msg", "player_spawn_relay"},
+            {"data", {
+                {"player_id", data.player_id},
+                {"name", data.name},
+                {"x", data.position.x},
+                {"y", data.position.y},
+                {"z", data.position.z},
+                {"yaw", data.yaw},
+                {"health", data.health},
+                {"max_health", data.max_health},
+                {"timestamp", data.timestamp}
+            }}
+        };
+        processPool_->BroadcastToAllWorkers(relay);
+    }
 }
 
 void GameLogic::OnPlayerDisconnected(uint64_t session_id) {
@@ -203,7 +352,15 @@ void GameLogic::OnPlayerDisconnected(uint64_t session_id) {
         std::lock_guard<std::mutex> lock(predictionMutex_);
         playerPrediction_.erase(player_id);
     }
-    Logger::Info("GameLogic: Player {} disconnected from session {}", player_id, session_id);
+    Logger::Trace("GameLogic: Player {} disconnected from session {}", player_id, session_id);
+    BroadcastPlayerDespawn(session_id, player_id);
+    if (processPool_) {
+        nlohmann::json relay = {
+            {"msg", "player_despawn_relay"},
+            {"data", {{"player_id", player_id}}}
+        };
+        processPool_->BroadcastToAllWorkers(relay);
+    }
     FirePythonEvent("player_disconnected", {
         {"session_id", session_id},
         {"player_id", player_id}
@@ -448,6 +605,14 @@ void GameLogic::SetSendPlayersUpdateCallback(std::function<void(uint64_t, const 
     sendPlayersUpdateCb_ = std::move(cb);
 }
 
+void GameLogic::SetSendPlayerSpawnCallback(std::function<void(uint64_t, const PlayerSpawnData&)> cb) {
+    sendPlayerSpawnCb_ = std::move(cb);
+}
+
+void GameLogic::SetSendPlayerDespawnCallback(std::function<void(uint64_t, const PlayerDespawnData&)> cb) {
+    sendPlayerDespawnCb_ = std::move(cb);
+}
+
 void GameLogic::SetSendNPCInteractionResponseCallback(std::function<void(uint64_t, const NpcData&)> cb) {
     sendNPCInteractionResponseCb_ = std::move(cb);
 }
@@ -501,6 +666,7 @@ void GameLogic::OnAuthentication(const AuthenticationData& data) {
             session->SetPlayerId(player_id);
             session->Authenticate(data.password);
         }
+        OnPlayerConnected(data.session_id, player_id);
     }
     if (sendAuthResponseCb_) {
         sendAuthResponseCb_(data.session_id, message, player_id);
@@ -511,9 +677,9 @@ void GameLogic::OnAuthentication(const AuthenticationData& data) {
 
 void GameLogic::OnChunkParams(const ChunkParams& req) {
     ChunkParams resp;
+    resp.timestamp = GetCurrentTimestamp();
     resp.size = WorldChunk::DEFAULT_SIZE;
     resp.spacing = WorldChunk::DEFAULT_SPACING;
-    resp.timestamp = GetCurrentTimestamp();
     if (sendChunkParamsCb_) {
         sendChunkParamsCb_(req.session_id, resp);
     } else {
@@ -528,10 +694,10 @@ void GameLogic::OnChunkData(const ChunkData& req) {
         return;
     }
     ChunkData resp;
+    resp.timestamp = GetCurrentTimestamp();
     resp.x = req.x;
     resp.z = req.z;
     resp.lod = req.lod;
-    resp.timestamp = GetCurrentTimestamp();
     const auto& verts = chunk->GetVertices();
     resp.vertices.reserve(verts.size() * 6);
     for (const auto& v : verts) {
@@ -605,22 +771,43 @@ void GameLogic::OnPlayerState(const PlayerStateData& data) {
         Logger::Error("No playerStateCb_ set in GameLogic");
     }
 
-    // ATTENTION: useless and duplicate piece of code needs to be removed
-    // Send self player update for rendering
-    // PlayerUpdateData update;
-    // update.session_id = data.session_id;
-    // update.player_id = data.player_id;
-    // update.position = authState.position;
-    // update.yaw = authState.rotation.y;
-    // update.health = player->GetHealth();
-    // update.max_health = player->GetMaxHealth();
-    // update.name = player->GetName();
-    // OnPlayerUpdate(update);
+    if (processPool_) {
+        nlohmann::json posRelay = {
+            {"msg", "player_position_relay"},
+            {"data", {
+                {"player_id", player_id},
+                {"x", player->GetPosition().x},
+                {"y", player->GetPosition().y},
+                {"z", player->GetPosition().z},
+                {"vx", player->GetVelocity().x},
+                {"vy", player->GetVelocity().y},
+                {"vz", player->GetVelocity().z}
+            }}
+        };
+        processPool_->BroadcastToAllWorkers(posRelay);
+    }
 
     // correction
     static float correctionThreshold = 0.5f;
     if (glm::distance(authState.position, player->GetPosition()) > correctionThreshold) {
         SendPositionCorrection(data.session_id, authState.position, authState.velocity);
+    }
+}
+
+void GameLogic::OnRemotePlayerPosition(const PlayerPositionData& data) {
+    {
+        std::lock_guard<std::mutex> lock(remotePlayersMutex_);
+        auto it = remotePlayers_.find(data.player_id);
+        if (it != remotePlayers_.end()) {
+            it->second.position = data.position;
+        }
+    }
+    if (broadcastPlayerPositionCb_) {
+        float interestRadius = ConfigManager::GetInstance().GetFloat(
+            "world.interest_radius", 100.0f);
+        broadcastPlayerPositionCb_(data, interestRadius);
+    } else {
+        Logger::Warn("broadcastPlayerPositionCb_ not set – remote player position not broadcast");
     }
 }
 
@@ -634,24 +821,16 @@ void GameLogic::OnPlayerPosition(const PlayerPositionData& data) {
         finalPos += collision.resolution;
     }
     player->SetPosition(finalPos);
-    GenerateWorldAroundPlayer(data.player_id, finalPos);
+    {
+        std::lock_guard<std::mutex> lock(world_generation_mutex_);
+        pendingWorldGeneration_.emplace(data.player_id, finalPos);
+    }
+    //GenerateWorldAroundPlayer(data.player_id, finalPos);
     if (broadcastPlayerPositionCb_) {
         PlayerPositionData broadcastData = data;
         broadcastData.position = finalPos;
         broadcastPlayerPositionCb_(broadcastData, 100.0f);
     }
-
-    // ATTENTION: useless and duplicate piece of code needs to be removed
-    // PlayerUpdateData update;
-    // update.session_id = data.session_id;
-    // update.player_id = data.player_id;
-    // update.position = finalPos;
-    // update.yaw = player->GetRotation().y;
-    // update.health = player->GetHealth();
-    // update.max_health = player->GetMaxHealth();
-    // update.name = player->GetName();
-    // OnPlayerUpdate(update);
-
     FirePythonEvent("player_move_3d", {
         {"player_id", data.player_id},
         {"x", finalPos.x}, {"y", finalPos.y}, {"z", finalPos.z},
@@ -1138,7 +1317,8 @@ void GameLogic::HandleQuest(uint64_t session_id, const nlohmann::json& data) {
 void GameLogic::GameLoop() {
     Logger::Info("Game loop started");
     auto lastUpdate = std::chrono::steady_clock::now();
-    while (!instanceMutex_.try_lock()) {
+    //while (!instanceMutex_.try_lock()) {
+    while (running_) {
         try {
             auto startTime = std::chrono::steady_clock::now();
             auto now = std::chrono::steady_clock::now();
@@ -1147,13 +1327,13 @@ void GameLogic::GameLoop() {
             lastUpdate = now;
             UpdateWorld(deltaTime);
             auto dirtyPlayers = PlayerManager::GetInstance().GetDirtyPlayersAndClear();
-            for (uint64_t playerId : dirtyPlayers) {
-                auto player = GetPlayer(playerId);
+            for (uint64_t player_id : dirtyPlayers) {
+                auto player = GetPlayer(player_id);
                 if (!player || !player->IsOnline()) continue;
                 PlayerUpdateData update;
                 update.timestamp = GetCurrentTimestamp();
                 update.session_id = player->GetSessionId();
-                update.player_id = playerId;
+                update.player_id = player_id;
                 update.position = player->GetPosition();
                 update.yaw = player->GetRotation().y;
                 update.health = player->GetHealth();
@@ -1166,6 +1346,16 @@ void GameLogic::GameLoop() {
                     sendPlayersUpdateCb_(player->GetSessionId(), update);
                 }
             }
+            std::unique_lock<std::mutex> lk(world_generation_mutex_, std::defer_lock);
+            if (lk.try_lock()){
+                while (!pendingWorldGeneration_.empty()) {
+                    auto [pid, pos] = pendingWorldGeneration_.front();
+                    pendingWorldGeneration_.pop();
+                    lk.unlock();
+                    GenerateWorldAroundPlayer(pid, pos);
+                    if (!lk.try_lock()) break;
+                }
+            }
             LogicEntity::GetInstance().UpdateNPCs(deltaTime);
             LogicEntity::GetInstance().UpdateCollisions(deltaTime);
             ProcessGameTick(deltaTime);
@@ -1176,7 +1366,7 @@ void GameLogic::GameLoop() {
                 std::unique_lock<std::mutex> lock(gameLoopMutex_);
                 gameLoopCV_.wait_for(lock,
                     gameLoopInterval_ - std::chrono::milliseconds(processingTime),
-                    [this] { return !instance_; });
+                    [this] { return !running_; });
             } else {
                 Logger::Warn("Game loop lagging: {}ms", processingTime);
             }
@@ -1184,7 +1374,7 @@ void GameLogic::GameLoop() {
             Logger::Error("Error in game loop: {}", e.what());
         }
     }
-    instanceMutex_.unlock();
+    //instanceMutex_.unlock();
     Logger::Info("Game loop stopped");
 }
 

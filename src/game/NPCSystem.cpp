@@ -5,6 +5,17 @@
 NPCManager::NPCManager() : nextNPCId_(1000), nextSquadId_(1) {
 }
 
+NPCManager& NPCManager::GetInstance() {
+    static NPCManager instance;
+    return instance;
+}
+
+const std::unordered_map<uint64_t, std::unique_ptr<NPCEntity>>& NPCManager::GetNPCs() const { return npcs_; }
+
+const std::unordered_map<uint64_t, std::unique_ptr<NPCEntity>>& NPCManager::GetAllNPCs() const { return npcs_; }
+
+size_t NPCManager::GetNPCCount() const { return npcs_.size(); }
+
 uint64_t NPCManager::SpawnNPC(NPCType type, const glm::vec3& position, uint64_t ownerId) {
     std::lock_guard<std::mutex> lock(mutex_);
 

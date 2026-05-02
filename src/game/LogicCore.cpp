@@ -48,6 +48,7 @@ void LogicCore::Shutdown() {
     gameLoopCV_.notify_all();
     spawnerCV_.notify_all();
     saveCV_.notify_all();
+    //gameLoopThread_.detach();
     gameLoopThread_.Stop();
     spawnerThread_.Stop();
     saveThread_.Stop();

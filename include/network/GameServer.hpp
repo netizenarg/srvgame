@@ -26,7 +26,7 @@
 
 class GameServer {
 public:
-    GameServer(const WorkerGroupConfig& groupConfig, const ConfigManager& globalConfig);
+    GameServer(const WorkerGroupConfig& groupConfig, const ConfigManager& config);
     ~GameServer();
 
     bool Initialize();
@@ -44,7 +44,7 @@ private:
     asio::ip::tcp::acceptor acceptor_;
 
     WorkerGroupConfig groupConfig_;
-    const ConfigManager& globalConfig_;
+    const ConfigManager& config_;
 
     std::string host_;
     uint16_t port_;

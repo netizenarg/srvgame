@@ -105,6 +105,21 @@ struct PlayerStateData {
     bool sprinting;
 };
 
+struct PlayerSpawnData {
+    uint64_t timestamp;
+    uint64_t player_id;
+    std::string name;
+    glm::vec3 position;
+    float yaw;
+    float health;
+    float max_health;
+};
+
+struct PlayerDespawnData {
+    uint64_t timestamp;
+    uint64_t player_id;
+};
+
 struct PlayerPositionData {
     uint64_t timestamp;
     uint64_t session_id;

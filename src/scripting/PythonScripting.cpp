@@ -35,7 +35,7 @@ bool PythonScripting::Initialize() {
 
     // Initialize Python
     if (!InitializePython()) {
-        Logger::Warn("Failed to initialize Python interpreter");
+        Logger::Warn("PythonScripting::Initialize failed to initialize interpreter");
         return false;
     }
 
@@ -127,7 +127,7 @@ bool PythonScripting::InitializePython() {
         PyConfig_Clear(&config);
 
         if (!Py_IsInitialized()) {
-            Logger::Warn("Failed to initialize Python interpreter");
+            Logger::Warn("PythonScripting::InitializePython failed to initialize interpreter");
             return false;
         }
 

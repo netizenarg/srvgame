@@ -567,6 +567,18 @@ void WebSocketConnection::HandleFrame(const WebSocketFrame& frame) {
         return;
     }
     ProcessMessageData(frame);
+    if (frame.fin) {
+        try {
+            CompleteCurrentMessage();
+        } catch (const std::exception& err) {
+            Logger::Error("WebSocketConnection {} message handler exception: {}",
+                          connection_id_, err.what());
+            Close(1011, "Internal error processing message");
+        } catch (...) {
+            Logger::Error("WebSocketConnection {} unknown exception in message handler",
+                          connection_id_);
+        }
+    }
 }
 
 void WebSocketConnection::ProcessMessageData(const WebSocketFrame& frame) {
@@ -587,12 +599,36 @@ void WebSocketConnection::ProcessMessageData(const WebSocketFrame& frame) {
 
 void WebSocketConnection::CompleteCurrentMessage() {
     if (message_handler_) {
-        message_handler_(current_message_);
+        try {
+            message_handler_(current_message_);
+        } catch (const std::exception& err) {
+            Logger::Error("WebSocketConnection {} message_handler exception: {}",
+                          connection_id_, err.what());
+        } catch (...) {
+            Logger::Error("WebSocketConnection {} unknown exception in message_handler",
+                          connection_id_);
+        }
     }
     if (current_message_.opcode == OP_TEXT && text_handler_) {
-        text_handler_(current_message_.GetText());
+        try {
+            text_handler_(current_message_.GetText());
+        } catch (const std::exception& err) {
+            Logger::Error("WebSocketConnection {} text_handler exception: {}",
+                          connection_id_, err.what());
+        } catch (...) {
+            Logger::Error("WebSocketConnection {} unknown exception in text_handler",
+                          connection_id_);
+        }
     } else if (current_message_.opcode == OP_BINARY && binary_handler_) {
-        binary_handler_(current_message_.data);
+        try {
+            binary_handler_(current_message_.data);
+        } catch (const std::exception& err) {
+            Logger::Error("WebSocketConnection {} binary_handler exception: {}",
+                          connection_id_, err.what());
+        } catch (...) {
+            Logger::Error("WebSocketConnection {} unknown exception in binary_handler",
+                          connection_id_);
+        }
     }
     current_message_ = WebSocketMessage();
 }
@@ -625,9 +661,14 @@ void WebSocketConnection::SendFrameAsync(const WebSocketFrame& frame) {
 }
 
 void WebSocketConnection::DoWrite() {
-    std::lock_guard<std::recursive_mutex> lock(write_mutex_);
-    if (write_buffer_.empty() || state_ != State::OPEN)
+    if (write_in_progress_.exchange(true)) {
         return;
+    }
+    std::lock_guard<std::recursive_mutex> lock(write_mutex_);
+    if (write_buffer_.empty() || state_ != State::OPEN) {
+        write_in_progress_ = false;
+        return;
+    }
     auto self = shared_from_this();
     Logger::Trace("WebSocketConnection {} DoWrite: starting async_write", connection_id_);
     asio::async_write(socket_, asio::buffer(write_buffer_),
@@ -635,6 +676,7 @@ void WebSocketConnection::DoWrite() {
         Logger::Trace("WebSocketConnection::DoWrite asio::async_write {}", bytes);
         if (ec) {
             self->HandleError(ec);
+            self->write_in_progress_ = false;
             return;
         }
         {
@@ -642,10 +684,15 @@ void WebSocketConnection::DoWrite() {
             self->write_buffer_.erase(self->write_buffer_.begin(), self->write_buffer_.begin() + bytes);
             self->stats_.bytes_sent += bytes;
         }
-        if (!self->write_buffer_.empty()) {
-            asio::post(self->socket_.get_executor(), [self]() {
-                self->DoWrite();
-            });
+        bool more = false;
+        {
+            std::lock_guard<std::recursive_mutex> lock(self->write_mutex_);
+            more = !self->write_buffer_.empty();
+        }
+        if (more) {
+            self->DoWrite();
+        } else {
+            self->write_in_progress_ = false;
         }
     });
 }

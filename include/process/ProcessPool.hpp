@@ -1,116 +1,68 @@
 #pragma once
 
-#include <vector>
-#include <memory>
 #include <atomic>
 #include <functional>
+#include <memory>
 #include <mutex>
-#include <unordered_map>
 #include <string>
-#include <unistd.h>
-#include <cstdint>
-#include <thread>
-#include <fcntl.h>
-#include <cstring>
-#include <csignal>
-#include <cerrno>
-#include <chrono>
-#include <array>
-#include <arpa/inet.h>
-#include <sys/ioctl.h>
-#include <sys/types.h>
+#include <vector>
 #include <sys/wait.h>
 #include <sys/prctl.h>
-#include <sys/socket.h>
-#include <signal.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+#include <asio.hpp>
+#include <nlohmann/json.hpp>
 
 #include "logging/Logger.hpp"
 #include "config/ConfigManager.hpp"
 
-class ProcessPool {
+class ProcessWorker : public std::enable_shared_from_this<ProcessWorker> {
 public:
-    enum class ProcessRole {
-        MASTER,
-        WORKER
-    };
-
-    ProcessPool(const std::vector<WorkerGroupConfig>& groups);
-    ~ProcessPool();
-
-    ProcessPool(const ProcessPool&) = delete;
-    ProcessPool& operator=(const ProcessPool&) = delete;
-
-    bool Initialize();
-    void Run();
+    ProcessWorker(asio::io_context& io, int globalId, const WorkerGroupConfig& cfg);
+    ~ProcessWorker();
+    void Start();
+    void Send(const std::string& message);
     void Shutdown();
-    void Stop();
-
-    ProcessRole GetRole() const { return role_; }
-    int GetWorkerId() const { return workerId_; }
-    const WorkerGroupConfig& GetWorkerGroupConfig() const { return groupConfig_; }
-    pid_t GetMasterPid() const { return masterPid_; }
-    int GetTotalWorkerCount() const { return totalWorkers_; }
-
-    using WorkerMainFunc = std::function<void(int workerId, const WorkerGroupConfig& config)>;
-    void SetWorkerMain(WorkerMainFunc workerMainFunc);
-
-    bool SendToWorker(int workerId, const std::string& message);
-    std::string ReceiveFromMaster();
-
-    bool IsWorkersReady() const;
-    void WaitForWorkers();
-    bool IsWorkerAlive(int workerId) const;
-    void RestartWorker(int workerId);
-
-    void SetMaxMessageSize(uint32_t maxSize) { maxMessageSize_ = maxSize; }
-    uint32_t GetMaxMessageSize() const { return maxMessageSize_; }
-    void SetReceiveTimeout(uint32_t timeoutMs) { receiveTimeoutMs_ = timeoutMs; }
-    uint32_t GetReceiveTimeout() const { return receiveTimeoutMs_; }
-
-    void BlockSignals(sigset_t* oldset);
-    void UnblockSignals(const sigset_t* oldset);
+    int GetId() const;
+    pid_t GetPid() const;
+    int GetMasterReadFd() const;
 
 private:
+    int workerId_;
+    WorkerGroupConfig config_;
+    asio::io_context& io_;
+    pid_t pid_;
+    int masterReadFd_;
+    int masterWriteFd_;
+    asio::posix::stream_descriptor writeStream_;
+    std::mutex writeMutex_;
+};
+
+class ProcessPool : public std::enable_shared_from_this<ProcessPool> {
+public:
+    ProcessPool(asio::io_context& io, const std::vector<WorkerGroupConfig>& groups);
+    void Initialize();
+    void Run();
+    void Shutdown();
+    void SetWorkerMain(std::function<void(int, const WorkerGroupConfig&, int)> func);
+    bool SendToWorker(int workerId, const std::string& message);
+    void BroadcastToOtherWorkers(const nlohmann::json& msg, int senderId);
+    void BroadcastToAllWorkers(const nlohmann::json& msg);
+    size_t GetTotalWorkerCount() const;
+    bool IsWorkerAlive(int workerId) const;
+    bool IsWorkersReady() const;
+    void WaitForWorkers();
+
+private:
+    asio::io_context& io_;
     std::vector<WorkerGroupConfig> groups_;
-    int totalWorkers_;
-
-    ProcessRole role_{ProcessRole::MASTER};
-    int workerId_{-1};
-    WorkerGroupConfig groupConfig_;
-    pid_t masterPid_{-1};
-
-    std::thread masterThread_;
-    std::atomic<bool> running_{false};
-    std::atomic<bool> shutdownRequested_{false};
-
-    struct WorkerInfo {
-        pid_t pid;
-        int groupIdx;
-        int localWorkerId;
-        WorkerGroupConfig config;
-    };
-
-    std::vector<WorkerInfo> workers_;
-    std::vector<int> workerPipes_;
-
-    WorkerMainFunc workerMainFunc_;
-
-    mutable std::mutex healthMutex_;
-    std::unordered_map<int, std::pair<pid_t, time_t>> workerHealth_;
-
-    uint32_t maxMessageSize_{1024 * 1024};
-    uint32_t receiveTimeoutMs_{1000};
-
-    std::atomic<bool> workersReady_{false};
-
-    void MasterProcess();
-    void WorkerProcess(int globalWorkerId, const WorkerGroupConfig& config);
-    void SetupSignalHandlers();
-    void CleanupDeadWorkers();
-    void CloseAllPipes();
-    void CreateWorkerPipe(int globalWorkerId);
-
-    bool WriteAll(int fd, const void* buffer, size_t count);
-    bool ReadAll(int fd, void* buffer, size_t count, bool nonBlocking = false);
-    bool DrainPipe(int fd, size_t bytesToDrain);
+    std::vector<std::shared_ptr<ProcessWorker>> workers_;
+    std::function<void(int, const WorkerGroupConfig&, int)> workerMain_;
+    asio::signal_set signals_;
+    int workerId_ = -1;
+    bool running_ = false;
+    std::atomic<bool> ready_{false};
+    void doSpawnWorkers();
+    void handleSignal(const asio::error_code& ec, int signo);
 };
