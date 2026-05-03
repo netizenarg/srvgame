@@ -1,21 +1,40 @@
 #include "database/DbService.hpp"
 
+std::vector<DatabaseService*> DatabaseService::instances_;
+std::mutex DatabaseService::instancesMutex_;
+
 DatabaseService::DatabaseService(asio::io_context& main_io, size_t num_threads)
     : main_io_(main_io), db_pool_(num_threads)
 {
+    std::lock_guard<std::mutex> lock(instancesMutex_);
     work_guard_ = std::make_unique<asio::executor_work_guard<asio::thread_pool::executor_type>>(
         asio::make_work_guard(db_pool_));
-    Logger::Info("DatabaseService started with {} threads", num_threads);
+    instances_.push_back(this);
+    Logger::Info("DatabaseService started with threads count {}", num_threads);
 }
 
 DatabaseService::~DatabaseService() {
+    {
+        std::lock_guard<std::mutex> lock(instancesMutex_);
+        auto it = std::find(instances_.begin(), instances_.end(), this);
+        if (it != instances_.end()) instances_.erase(it);
+    }
     shutdown();
+    Logger::Warn("DatabaseService destroyed");
 }
 
 void DatabaseService::shutdown() {
-    work_guard_.reset();  // Allow pool to run out of work
-    db_pool_.join();      // Wait for all tasks to complete
-    Logger::Info("DatabaseService shut down");
+    work_guard_.reset(); // Allow pool to run out of work
+    db_pool_.join(); // Wait for all tasks to complete
+    Logger::Info("DatabaseService::shutdown");
+}
+
+void DatabaseService::ShutdownAll() {
+    std::lock_guard<std::mutex> lock(instancesMutex_);
+    for (auto* db : instances_) {
+        db->shutdown();
+    }
+    instances_.clear();
 }
 
 void DatabaseService::asyncGetPlayer(uint64_t playerId,

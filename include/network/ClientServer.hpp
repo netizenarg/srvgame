@@ -6,40 +6,50 @@
 #include <vector>
 #include <thread>
 #include <atomic>
+#include <unordered_map>
 
 #include <asio.hpp>
 #include <asio/ssl.hpp>
 
 #include "logging/Logger.hpp"
 #include "config/ConfigManager.hpp"
-#include "process/ProcessPool.hpp"
-
 #include "network/IConnection.hpp"
 #include "network/ConnectionManager.hpp"
 #include "network/BinarySession.hpp"
 #include "network/WebSocketProtocol.hpp"
 #include "network/WebSocketSession.hpp"
-
+#include "network/BinaryProtocol.hpp"
 #include "game/GameData.hpp"
 
-#include "game/GameLogic.hpp"
-
-class GameServer {
+class ClientServer {
 public:
-    GameServer(const WorkerGroupConfig& groupConfig, const ConfigManager& config);
-    ~GameServer();
+    ClientServer(const WorkerGroupConfig& groupConfig, const ConfigManager& config);
+    ~ClientServer();
 
     bool Initialize();
     void Run();
     void Shutdown();
 
-    asio::io_context& GetIoContext();
-    void HandleIPCMessage(const nlohmann::json& data, GameLogic& game_logic);
+    void SetMasterSender(std::function<void(const std::vector<uint8_t>&)> sender);
+    void OnMasterReply(uint32_t correlationId, const std::vector<uint8_t>& reply);
 
-    void InitSessionFactory(int workerId, ProcessPool* processPool, GameLogic& game_logic);
-    void RegisterCallbacks(const std::string& protocol, GameLogic& game_logic);
+    asio::io_context& GetIoContext();
+
+    static std::vector<uint8_t> PackIPCEnvelope(uint32_t correlationId, uint64_t sessionId,
+                                                uint16_t messageType, const std::vector<uint8_t>& body);
+
+    void InitSessionFactory(int workerId);
 
 private:
+    struct PendingEntry {
+        uint64_t sessionId;
+        uint16_t messageType;
+    };
+
+    std::function<void(const std::vector<uint8_t>&)> sendToMaster_;
+    std::unordered_map<uint32_t, PendingEntry> pendingReplies_;
+    std::atomic<uint32_t> nextCorrelationId_{1};
+
     asio::io_context ioContext_;
     asio::ip::tcp::acceptor acceptor_;
 
@@ -63,6 +73,7 @@ private:
 
     void DoAccept();
     void StartWorkerThreads();
-    std::vector<std::shared_ptr<IConnection>> GetSessionsInRadius(const glm::vec3& position, float radius);
 
+    static uint16_t JsonMsgStringToType(const std::string& msg);
+    static nlohmann::json BinaryToJson(uint16_t type, const std::vector<uint8_t>& body);
 };

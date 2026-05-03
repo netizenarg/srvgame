@@ -135,8 +135,8 @@ private:
     RAIIThread cleanupThread_;
 
     std::atomic<bool> running_{true};
-    std::chrono::minutes saveInterval_{5};
-    std::chrono::minutes cleanupInterval_{10};
+    std::chrono::seconds saveInterval_{10};
+    std::chrono::seconds cleanupInterval_{10};
 
     std::condition_variable saveCV_;
     std::condition_variable cleanupCV_;

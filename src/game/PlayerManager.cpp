@@ -9,8 +9,8 @@ PlayerManager::PlayerManager()
     : dbManager_(DbManager::GetInstance()),
       lastCleanup_(std::chrono::system_clock::now()),
       running_(true),
-      saveInterval_(std::chrono::minutes(5)),
-      cleanupInterval_(std::chrono::minutes(10)) {
+      saveInterval_(std::chrono::seconds(10)),
+      cleanupInterval_(std::chrono::seconds(10)) {
 
     Logger::Info("PlayerManager initialized");
 
@@ -257,7 +257,7 @@ std::vector<std::shared_ptr<Player>> PlayerManager::GetPlayersInRadius(const glm
 }
 
 void PlayerManager::SaveAllPlayers() {
-    Logger::Info("Saving all players to database...");
+    Logger::Info("PlayerManager::SaveAllPlayers to database...");
     std::vector<std::shared_ptr<Player>> toSave;
     {
         std::shared_lock<std::shared_mutex> lock(playersMutex_);
@@ -271,7 +271,7 @@ void PlayerManager::SaveAllPlayers() {
         else
             failed++;
     }
-    Logger::Info("Saved {} players ({} failed)", saved, failed);
+    Logger::Info("PlayerManager::SaveAllPlayers: saved {} players ({} failed)", saved, failed);
 }
 
 std::shared_ptr<Player> PlayerManager::LoadPlayer(int64_t playerId) {
@@ -322,14 +322,14 @@ std::shared_ptr<Player> PlayerManager::LoadPlayerByUsername(const std::string& u
 }
 
 void PlayerManager::SaveLoop() {
-    Logger::Info("Player save loop started");
+    Logger::Trace("PlayerManager::SaveLoop started");
     while (running_) {
         std::unique_lock<std::mutex> lock(saveMutex_);
         saveCV_.wait_for(lock, saveInterval_, [this] { return !running_; });
         if (!running_) break;
         SaveAllPlayers();
     }
-    Logger::Info("Player save loop stopped");
+    Logger::Trace("PlayerManager::SaveLoop stopped");
 }
 
 void PlayerManager::CleanupLoop() {
@@ -345,7 +345,7 @@ void PlayerManager::CleanupLoop() {
 
 void PlayerManager::CleanupInactivePlayers() {
     auto now = std::chrono::system_clock::now();
-    if (std::chrono::duration_cast<std::chrono::minutes>(now - lastCleanup_).count() < 10)
+    if (std::chrono::duration_cast<std::chrono::seconds>(now - lastCleanup_).count() < 10)
         return;
     lastCleanup_ = now;
 

@@ -17,66 +17,72 @@ namespace BinaryProtocol {
     enum MessageType : uint16_t {
         MESSAGE_TYPE_INVALID = 0,
 
+        MESSAGE_TYPE_IPC_CLIENT_FORWARD = 1, // worker -> master
+        MESSAGE_TYPE_IPC_MASTER_REPLY   = 2, // master -> worker
+        MESSAGE_TYPE_IPC_WORKER_READY   = 3, // worker startup
+        MESSAGE_TYPE_IPC_SHUTDOWN       = 4,  // master -> worker
+
         // System messages
-        MESSAGE_TYPE_HEARTBEAT = 1,
-        MESSAGE_TYPE_PROTOCOL_NEGOTIATION = 2,
-        MESSAGE_TYPE_AUTHENTICATION = 3,
-        MESSAGE_TYPE_ERROR = 4,
-        MESSAGE_TYPE_SUCCESS = 5,
-        MESSAGE_TYPE_COLLISION_CHECK = 50,
+        MESSAGE_TYPE_HEARTBEAT = 100,
+        MESSAGE_TYPE_PROTOCOL_NEGOTIATION = 102,
+        MESSAGE_TYPE_AUTHENTICATION = 103,
+        MESSAGE_TYPE_ERROR = 104,
+        MESSAGE_TYPE_SUCCESS = 105,
+        MESSAGE_TYPE_COLLISION_CHECK = 150,
 
         // World messages
-        MESSAGE_TYPE_CHUNK_PARAMS = 100,
-        MESSAGE_TYPE_CHUNK_DATA = 101,
-        MESSAGE_TYPE_BIOME_DATA = 102,
+        MESSAGE_TYPE_CHUNK_PARAMS = 200,
+        MESSAGE_TYPE_CHUNK_DATA = 201,
+        MESSAGE_TYPE_BIOME_DATA = 202,
 
         // Player messages
-        MESSAGE_TYPE_PLAYER_STATE = 200,
-        MESSAGE_TYPE_PLAYER_SPAWN   = 201,
-        MESSAGE_TYPE_PLAYER_DESPAWN = 202,
-        MESSAGE_TYPE_PLAYER_UPDATE = 203,
-        MESSAGE_TYPE_PLAYER_VELOCITY = 204,
-        MESSAGE_TYPE_PLAYER_ROTATION = 205,
-        MESSAGE_TYPE_PLAYER_POSITION = 206,
-        MESSAGE_TYPE_PLAYER_POSITION_CORRECTION = 207,
+        MESSAGE_TYPE_PLAYER_CONNECT = 300,
+        MESSAGE_TYPE_PLAYER_DISCONNECT = 301,
+        MESSAGE_TYPE_PLAYER_STATE = 302,
+        MESSAGE_TYPE_PLAYER_SPAWN   = 303,
+        MESSAGE_TYPE_PLAYER_DESPAWN = 304,
+        MESSAGE_TYPE_PLAYER_UPDATE = 305,
+        MESSAGE_TYPE_PLAYER_VELOCITY = 306,
+        MESSAGE_TYPE_PLAYER_ROTATION = 307,
+        MESSAGE_TYPE_PLAYER_POSITION = 308,
+        MESSAGE_TYPE_PLAYER_POSITION_CORRECTION = 309,
         // Players messages
-        MESSAGE_TYPE_PLAYERS_UPDATE = 250,
+        MESSAGE_TYPE_PLAYERS_UPDATE = 350,
 
         // Entity messages
-        MESSAGE_TYPE_ENTITY_SPAWN = 300,
-        MESSAGE_TYPE_ENTITY_UPDATE = 301,
-        MESSAGE_TYPE_ENTITY_DESPAWN = 302,
-        MESSAGE_TYPE_ENTITY_BATCH_UPDATE = 303,
+        MESSAGE_TYPE_ENTITY_SPAWN = 400,
+        MESSAGE_TYPE_ENTITY_UPDATE = 401,
+        MESSAGE_TYPE_ENTITY_DESPAWN = 402,
+        MESSAGE_TYPE_ENTITY_BATCH_UPDATE = 403,
 
         // NPC messages
-        MESSAGE_TYPE_NPC_SPAWN = 400,
-        MESSAGE_TYPE_NPC_UPDATE = 401,
-        MESSAGE_TYPE_NPC_DESPAWN = 402,
-        MESSAGE_TYPE_NPC_INTERACTION = 403,
+        MESSAGE_TYPE_NPC_SPAWN = 500,
+        MESSAGE_TYPE_NPC_UPDATE = 501,
+        MESSAGE_TYPE_NPC_DESPAWN = 502,
+        MESSAGE_TYPE_NPC_INTERACTION = 503,
 
         // Combat messages
-        MESSAGE_TYPE_COMBAT_EVENT = 500,
-        MESSAGE_TYPE_DAMAGE_EVENT = 501,
-        MESSAGE_TYPE_HEALTH_UPDATE = 502,
+        MESSAGE_TYPE_COMBAT_EVENT = 600,
+        MESSAGE_TYPE_DAMAGE_EVENT = 601,
+        MESSAGE_TYPE_HEALTH_UPDATE = 602,
 
         // Inventory messages
-        MESSAGE_TYPE_LOOT_SPAWN = 600,
-        MESSAGE_TYPE_LOOT_PICKUP = 601,
-        MESSAGE_TYPE_INVENTORY_UPDATE = 602,
-        MESSAGE_TYPE_INVENTORY_MOVE = 603,
+        MESSAGE_TYPE_LOOT_SPAWN = 700,
+        MESSAGE_TYPE_LOOT_PICKUP = 701,
+        MESSAGE_TYPE_INVENTORY_UPDATE = 702,
+        MESSAGE_TYPE_INVENTORY_MOVE = 703,
 
         // Chat messages
-        MESSAGE_TYPE_CHAT_MESSAGE = 700,
-        MESSAGE_TYPE_SYSTEM_MESSAGE = 701,
+        MESSAGE_TYPE_CHAT_MESSAGE = 800,
+        MESSAGE_TYPE_SYSTEM_MESSAGE = 801,
 
         // Familiar
-        MESSAGE_TYPE_FAMILIAR_COMMAND = 800,
+        MESSAGE_TYPE_FAMILIAR_COMMAND = 900,
 
         // Custom messages
         MESSAGE_TYPE_CUSTOM_EVENT = 1000
     };
 
-    // Protocol flags
     enum ProtocolFlags : uint8_t {
         FLAG_COMPRESSED = 0x01,
         FLAG_ENCRYPTED = 0x02,
@@ -86,43 +92,36 @@ namespace BinaryProtocol {
         FLAG_PRIORITY_LOW = 0x20
     };
 
-    // Network header
     struct NetworkHeader {
-        uint8_t version;           // Protocol version
-        uint8_t flags;             // Protocol flags
-        uint16_t message_type;     // Message type
-        uint32_t sequence;         // Sequence number
-        uint32_t timestamp;        // Timestamp in ms
-        uint32_t length;           // Payload length
-        uint32_t checksum;         // CRC32 checksum
+        uint8_t version;
+        uint8_t flags;
+        uint16_t message_type;
+        uint32_t sequence;
+        uint32_t timestamp;
+        uint32_t length;
+        uint32_t checksum;
 
-        // Constructor for easy initialization
         NetworkHeader(uint16_t type = 0, uint32_t seq = 0, uint8_t ver = 1, uint8_t flgs = 0)
             : version(ver), flags(flgs), message_type(type),
               sequence(seq), timestamp(0), length(0), checksum(0) {}
     };
 
-    // Message structure
     struct BinaryMessage {
         NetworkHeader header;
         std::vector<uint8_t> data;
 
-        // Serialization
         std::vector<uint8_t> Serialize() const;
         static BinaryMessage Deserialize(const uint8_t* buffer, size_t length);
 
-        // Helper methods
         bool IsCompressed() const { return (header.flags & FLAG_COMPRESSED) != 0; }
         bool IsEncrypted() const { return (header.flags & FLAG_ENCRYPTED) != 0; }
         bool IsReliable() const { return (header.flags & FLAG_RELIABLE) != 0; }
     };
 
-    // Serialization helpers for common types
     class BinaryWriter {
     public:
         BinaryWriter();
 
-        // Write methods
         void WriteUInt8(uint8_t value);
         void WriteUInt16(uint16_t value);
         void WriteUInt32(uint32_t value);
@@ -137,11 +136,9 @@ namespace BinaryProtocol {
         void WriteQuaternion(const glm::quat& quaternion);
         void WriteJson(const nlohmann::json& json);
 
-        // Get the buffer
         const std::vector<uint8_t>& GetBuffer() const { return buffer_; }
         size_t GetSize() const { return buffer_.size(); }
 
-        // Clear the buffer
         void Clear();
 
     private:
@@ -152,7 +149,6 @@ namespace BinaryProtocol {
     public:
         BinaryReader(const uint8_t* data, size_t length);
 
-        // Read methods
         uint8_t ReadUInt8();
         uint16_t ReadUInt16();
         uint32_t ReadUInt32();
@@ -167,11 +163,9 @@ namespace BinaryProtocol {
         glm::quat ReadQuaternion();
         nlohmann::json ReadJson();
 
-        // Check remaining data
         size_t Remaining() const { return length_ - position_; }
         bool CanRead(size_t size) const { return position_ + size <= length_; }
 
-        // Get current position
         size_t GetPosition() const { return position_; }
 
     private:
@@ -182,16 +176,13 @@ namespace BinaryProtocol {
         void CheckBounds(size_t size) const;
     };
 
-    // Utility functions
     uint32_t CalculateCRC32(const void* data, size_t length);
     std::vector<uint8_t> CompressData(const std::vector<uint8_t>& data, int level = 6);
     std::vector<uint8_t> DecompressData(const std::vector<uint8_t>& compressed);
 
-    // Protocol version management
     constexpr uint8_t CURRENT_PROTOCOL_VERSION = 1;
-    constexpr uint32_t MAX_MESSAGE_SIZE = 10 * 1024 * 1024; // 10 MB
+    constexpr uint32_t MAX_MESSAGE_SIZE = 10 * 1024 * 1024;
 
-    // Protocol negotiation
     struct ProtocolCapabilities {
         uint8_t version;
         bool supports_compression;

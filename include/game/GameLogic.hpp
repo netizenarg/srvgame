@@ -3,18 +3,15 @@
 #include <memory>
 #include <shared_mutex>
 #include <unordered_map>
+#include <vector>
+#include <functional>
 
 #include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
 
-#include "process/ProcessPool.hpp"
 #include "database/DbService.hpp"
-
 #include "network/PredictionSystem.hpp"
-#include "network/IConnection.hpp"
-
 #include "scripting/PythonScripting.hpp"
-
 #include "game/LogicCore.hpp"
 #include "game/PlayerManager.hpp"
 #include "game/InventorySystem.hpp"
@@ -33,9 +30,6 @@ public:
 
     void Initialize() override;
     void Shutdown() override;
-
-    void SetProcessPool(ProcessPool* process_pool);
-    ProcessPool* GetProcessPool() const;
 
     struct WorldConfig : public LogicWorld::WorldConfig {};
     void SetWorldConfig(const WorldConfig& config);
@@ -60,7 +54,10 @@ public:
 
     void CreateLootEntity(const glm::vec3& position, std::shared_ptr<LootItem> item, int quantity);
 
-    std::vector<std::shared_ptr<IConnection>> GetSessionsInRadius(glm::vec3 position);
+    std::vector<uint64_t> GetSessionsInRadius(glm::vec3 position);
+
+    void SendAuthentication(uint64_t session_id, const std::string& message, uint64_t player_id);
+    void SendAuthenticationFailure(uint64_t session_id, const std::string& message);
 
     void BroadcastRemotePlayerSpawn(const PlayerSpawnData& data);
     void BroadcastRemotePlayerDespawn(uint64_t player_id);
@@ -70,17 +67,17 @@ public:
     void OnPlayerDisconnected(uint64_t session_id) override;
 
     void SyncNearbyEntitiesToPlayer(uint64_t session_id, const glm::vec3& position);
-    void BroadcastToAllPlayers(const nlohmann::json& message);
     void SendPositionCorrection(uint64_t session_id, const glm::vec3& position, const glm::vec3& velocity);
-    void SendAuthentication(uint64_t session_id, const std::string& message, uint64_t player_id);
-    void SendAuthenticationFailure(uint64_t session_id, const std::string& message);
+
+    void SetSendReplyCallback(std::function<void(uint64_t sessionId, const std::vector<uint8_t>& data)> cb);
+    void SetGetSessionIdsInRadiusCallback(std::function<std::vector<uint64_t>(const glm::vec3&, float)> cb);
 
     void SetSendAuthenticationResponseCallback(std::function<void(uint64_t session_id, const std::string& message, uint64_t player_id)> cb);
     void SetSendChunkParamsCallback(std::function<void(uint64_t session_id, const ChunkParams&)> cb);
     void SetSendChunkCallback(std::function<void(uint64_t session_id, const ChunkData&)> cb);
     void SetSendCollisionResponseCallback(std::function<void(uint64_t session_id, const CollisionResult& result)> cb);
 
-    void SetPlayerStateCallback(std::function<void(const PlayerStateData&)> cb); // now it also used for update
+    void SetPlayerStateCallback(std::function<void(const PlayerStateData&)> cb);
     void SetBroadcastPlayerPositionCallback(std::function<void(const PlayerPositionData&, float radius)> cb);
     void SetSendPlayerUpdateCallback(std::function<void(uint64_t session_id, const PlayerUpdateData& data)> cb);
     void SetSendPlayersUpdateCallback(std::function<void(uint64_t session_id, const PlayerUpdateData& data)> cb);
@@ -108,7 +105,6 @@ public:
     void OnLootPickup(const LootPickupData& data);
     void OnInventory(const InventoryData& data);
 
-    // scripting
     void RegisterPythonEventHandlers() override;
     void FirePythonEvent(const std::string& eventName, const nlohmann::json& data) override;
     nlohmann::json CallPythonFunction(const std::string& moduleName, const std::string& functionName,
@@ -121,13 +117,8 @@ public:
     void RespawnNPCs() override;
     void SpawnResources() override;
     void SaveLoop() override;
-    void HandleLogin(uint64_t sessionId, const nlohmann::json& data) override;
-    void HandleChat(uint64_t sessionId, const nlohmann::json& data) override;
-    void HandleCombat(uint64_t sessionId, const nlohmann::json& data) override;
-    void HandleQuest(uint64_t sessionId, const nlohmann::json& data) override;
 
     void SetDatabaseService(DatabaseService* dbService);
-    void SetConnectionManager(std::shared_ptr<ConnectionManager> connMgr);
     void SetDatabaseBackend(std::unique_ptr<DatabaseBackend> backend);
     DatabaseBackend* GetDatabaseBackend() const;
 
@@ -139,15 +130,15 @@ private:
     static std::mutex instanceMutex_;
     static GameLogic* instance_;
 
-    ProcessPool* processPool_ = nullptr;
-
     std::unique_ptr<DatabaseBackend> databaseBackend_;
-    std::shared_ptr<ConnectionManager> connectionManager_;
     std::unordered_map<uint64_t, PredictionSystem> playerPrediction_;
     std::mutex predictionMutex_;
     DatabaseService* dbService_ = nullptr;
     std::queue<std::pair<uint64_t, glm::vec3>> pendingWorldGeneration_;
     std::mutex world_generation_mutex_;
+
+    std::function<void(uint64_t, const std::vector<uint8_t>&)> sendReplyCb_;
+    std::function<std::vector<uint64_t>(const glm::vec3&, float)> getSessionIdsInRadiusCb_;
 
     std::function<void(uint64_t, const std::string&, uint64_t)> sendAuthResponseCb_;
     std::function<void(uint64_t, const ChunkParams&)> sendChunkParamsCb_;
@@ -175,16 +166,6 @@ private:
     void GameLoop() override;
     void SpawnerLoop() override;
     void UpdateWorld(float deltaTime);
-
     bool LoadGameData();
     void SaveChunkData();
-
-    nlohmann::json PlayerUpdateToJson(uint64_t player_id, const glm::vec3& pos, float yaw,
-                                      float health, float maxHealth, const std::string& name);
-    nlohmann::json PlayerPositionToJson(const std::vector<uint8_t>& data);
-    nlohmann::json PlayerUpdateToJson(const std::vector<uint8_t>& data);
-    nlohmann::json EntitySpawnToJson(const std::vector<uint8_t>& data);
-    nlohmann::json EntityUpdateToJson(const std::vector<uint8_t>& data);
-    nlohmann::json EntityDespawnToJson(const std::vector<uint8_t>& data);
-    nlohmann::json ChunkDataToJson(const std::vector<uint8_t>& data);
 };

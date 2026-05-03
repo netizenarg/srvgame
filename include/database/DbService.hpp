@@ -2,11 +2,12 @@
 
 #include <functional>
 #include <memory>
+
 #include <asio.hpp>
 #include <nlohmann/json.hpp>
 
-//#include "logging/Logger.hpp"
-//#include "database/DbManager.hpp"
+#include "logging/Logger.hpp"
+#include "database/DbManager.hpp"
 
 #include "game/Player.hpp"
 #include "game/PlayerManager.hpp"
@@ -36,9 +37,12 @@ public:
                             std::function<void(nlohmann::json)> callback);
 
     void shutdown();
+    static void ShutdownAll();
 
 private:
     asio::io_context& main_io_;
     asio::thread_pool db_pool_;
     std::unique_ptr<asio::executor_work_guard<asio::thread_pool::executor_type>> work_guard_;
+    static std::vector<DatabaseService*> instances_;
+    static std::mutex instancesMutex_;
 };

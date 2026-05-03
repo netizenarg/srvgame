@@ -22,6 +22,7 @@
 #include <openssl/evp.h>
 
 #include "logging/Logger.hpp"
+#include "network/BinaryProtocol.hpp"
 
 namespace WebSocketProtocol {
 

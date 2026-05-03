@@ -254,14 +254,14 @@ void LogicCore::ProcessEvents() {
         eventQueue_.pop();
         try {
             event();
-        } catch (const std::exception& e) {
-            Logger::Error("Error processing event: {}", e.what());
+        } catch (const std::exception& err) {
+            Logger::Error("Error processing event: {}", err.what());
         }
     }
 }
 
 void LogicCore::GameLoop() {
-    Logger::Info("Game loop started");
+    Logger::Info("LogicCore::GameLoop started");
     auto lastUpdate = std::chrono::steady_clock::now();
     while (running_) {
         try {
@@ -280,30 +280,30 @@ void LogicCore::GameLoop() {
                     gameLoopInterval_ - std::chrono::milliseconds(processingTime),
                     [this] { return !running_; });
             } else {
-                Logger::Warn("Game loop lagging: {}ms", processingTime);
+                Logger::Warn("LogicCore::GameLoop lagging: {}ms", processingTime);
             }
-        } catch (const std::exception& e) {
-            Logger::Error("Error in game loop: {}", e.what());
+        } catch (const std::exception& err) {
+            Logger::Error("Error in game loop: {}", err.what());
         }
     }
-    Logger::Info("Game loop stopped");
+    Logger::Info("LogicCore::GameLoop stopped");
 }
 
 void LogicCore::SpawnerLoop() {
-    Logger::Info("Spawner loop started");
+    Logger::Info("LogicCore::SpawnerLoop started");
     while (running_) {
         try {
             SpawnEnemies();
             RespawnNPCs();
             SpawnResources();
             std::unique_lock<std::mutex> lock(spawnerMutex_);
-            spawnerCV_.wait_for(lock, std::chrono::seconds(30),
+            spawnerCV_.wait_for(lock, std::chrono::seconds(1),
                                 [this] { return !running_; });
-        } catch (const std::exception& e) {
-            Logger::Error("Error in spawner loop: {}", e.what());
+        } catch (const std::exception& err) {
+            Logger::Error("Error in spawner loop: {}", err.what());
         }
     }
-    Logger::Info("Spawner loop stopped");
+    Logger::Info("LogicCore::SpawnerLoop stopped");
 }
 
 void LogicCore::SaveLoop() {
@@ -313,7 +313,7 @@ void LogicCore::SaveLoop() {
             SaveGameState();
             CleanupOldData();
             std::unique_lock<std::mutex> lock(saveMutex_);
-            saveCV_.wait_for(lock, std::chrono::minutes(5),
+            saveCV_.wait_for(lock, std::chrono::seconds(1),
                             [this] { return !running_; });
         } catch (const std::exception& e) {
             Logger::Error("Error in save loop: {}", e.what());
