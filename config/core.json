@@ -146,7 +146,8 @@
 
   "scripting": {
     "python": {
-        "enabled": true,
+        "enabled": false,
+        "isolated": true,
         "directory": "scripts",
         "hot_reload": true
     }

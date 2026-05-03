@@ -17,9 +17,7 @@
 #include "scripting/PythonAPI.hpp"
 #include "scripting/PythonModule.hpp"
 
-
-// Python object wrapper for RAII
-class PyObjectRef {
+class PyObjectRef {// Python object wrapper for RAII
 public:
     PyObjectRef(PyObject* obj = nullptr) : obj_(obj) {}
     ~PyObjectRef() { if (obj_) Py_DECREF(obj_); }
@@ -33,7 +31,6 @@ private:
     PyObject* obj_;
 };
 
-// Event types that can be handled by Python
 enum class EventType {
     PLAYER_LOGIN,
     PLAYER_LOGOUT,
@@ -65,7 +62,6 @@ enum class EventType {
     CUSTOM_EVENT
 };
 
-// Event data structure
 struct GameEvent {
     EventType type;
     std::string name;
@@ -94,24 +90,21 @@ struct GameEvent {
     }
 };
 
-// Callback from Python to C++
 using PyCallback = std::function<void(const nlohmann::json&)>;
 
 
-// Main Python scripting engine
 class PythonScripting {
 public:
     static PythonScripting& GetInstance();
 
-    bool Initialize();
+    void Initialize();
     void Shutdown();
+    bool IsInitialized() const;
 
-    // Module management
     bool LoadModule(const std::string& name, const std::string& path);
     bool UnloadModule(const std::string& name);
     bool ReloadModule(const std::string& name);
 
-    // Event handling
     void RegisterEventHandler(const std::string& eventName,
                                 const std::string& moduleName,
                                 const std::string& functionName);
@@ -121,7 +114,6 @@ public:
     bool FireEvent(const GameEvent& event);
     bool FireEvent(const std::string& eventName, const nlohmann::json& data = {});
 
-    // Direct function calls
     bool CallFunction(const std::string& moduleName,
                         const std::string& functionName,
                         const nlohmann::json& args = {});
@@ -130,47 +122,33 @@ public:
                                             const std::string& functionName,
                                             const nlohmann::json& args = {});
 
-    // Callback registration (Python -> C++)
     void RegisterCallback(const std::string& callbackName, PyCallback callback);
     void UnregisterCallback(const std::string& callbackName);
     bool HasCallback(const std::string& callbackName) const;
 
-    // Utility methods
     std::vector<std::string> GetLoadedModules() const;
     std::vector<std::string> GetRegisteredEvents() const;
     std::vector<std::string> GetRegisteredCallbacks() const;
 
-    bool IsInitialized() const { return initialized_; }
-
 private:
-    PythonScripting();
-    ~PythonScripting();
-
-    bool InitializePython();
-    void ShutdownPython();
-    bool AddPythonPath(const std::string& path);
-    bool ExecuteString(const std::string& code);
-
-    // Thread-safe containers
     mutable std::shared_mutex modulesMutex_;
     std::unordered_map<std::string, std::unique_ptr<PythonModule>> modules_;
-
     mutable std::shared_mutex eventHandlersMutex_;
     std::unordered_map<std::string, std::vector<std::pair<std::string, std::string>>> eventHandlers_;
-
     mutable std::shared_mutex callbacksMutex_;
     std::unordered_map<std::string, PyCallback> callbacks_;
-
     bool initialized_;
-    std::string pythonHome_;
     std::vector<std::string> pythonPaths_;
 
-    // Singleton
+    PythonScripting();
+    ~PythonScripting();
+    void Exception(PyConfig config, PyStatus status);
+    void InitializePython();
+    void ShutdownPython();
     PythonScripting(const PythonScripting&) = delete;
     PythonScripting& operator=(const PythonScripting&) = delete;
 };
 
-// Helper class for Python script hot-reloading
 class ScriptHotReloader {
 public:
     ScriptHotReloader(const std::string& scriptDir, int checkIntervalMs = 1000);

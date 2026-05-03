@@ -1,10 +1,8 @@
 #include "database/DbManager.hpp"
 
-// =============== Static Members ===============
 std::mutex DbManager::instanceMutex_;
 DbManager* DbManager::instance_ = nullptr;
 
-// =============== DbManager Implementation ===============
 DbManager& DbManager::GetInstance() {
     std::lock_guard<std::mutex> lock(instanceMutex_);
     if (!instance_) {
@@ -31,7 +29,7 @@ bool DbManager::IsInitialized() const { return initialized_; }
 const SQLProvider& DbManager::GetSQLProvider() const { return sqlProvider_; }
 
 bool DbManager::LoadSQLForBackend() {
-    std::string sqlPath = "dbschema/";  // configurable base path
+    std::string sqlPath = "dbschema/";
     switch (currentType_) {
         case SQLITE:
             sqlPath += "sqlite.sql";
@@ -40,7 +38,6 @@ bool DbManager::LoadSQLForBackend() {
             sqlPath += "postgres.sql";
             break;
         case CITUS:
-            // Load base PostgreSQL first, then Citus extensions
             if (!sqlProvider_.LoadFromFile(sqlPath + "postgres.sql")) {
                 return false;
             }
@@ -55,7 +52,6 @@ bool DbManager::LoadSQLForBackend() {
             return false;
         }
     } else {
-        // Load Citus-specific file
         if (!sqlProvider_.LoadFromFile(sqlPath)) {
             Logger::Warn("Citus SQL file not loaded, some features may be unavailable");
         }
@@ -68,31 +64,28 @@ bool DbManager::EnsureDatabaseExists(const std::string& configPath) {
         Logger::Error("Failed to initialize DbManager");
         return false;
     }
-
     std::string targetDb = config_["name"].get<std::string>(); // For SQLite this is a file path
-
-    if (currentType_ == SQLITE) { // --- SQLite handling ---
+    if (currentType_ == SQLITE) {
         std::filesystem::path path(targetDb);
         std::filesystem::path dir = path.parent_path();
         if (!dir.empty() &&
             !std::filesystem::exists(dir)) { // Ensure directory for db file exists
             std::filesystem::create_directories(dir);
         }
-        if (!backend_->Connect()) { // Connect – this will create the file if it doesn't exist
+        if (!backend_->Connect()) {
             Logger::Error("Failed to connect to SQLite database at '{}'", targetDb);
             return false;
         }
-        if (!CreateDefaultTablesIfNotExist()) { // Create default tables
+        if (!CreateDefaultTablesIfNotExist()) {
             Logger::Critical("Failed to create default tables for SQLite.");
             backend_->Disconnect();
             return false;
         }
-        backend_->Disconnect();
+        //backend_->Disconnect();
         Logger::Info("SQLite database file ready and tables created: {}", targetDb);
         return true;
     }
-
-    if (!backend_->ConnectToDatabase("postgres")) { // --- PostgreSQL / Citus handling ---
+    if (!backend_->ConnectToDatabase("postgres")) { // PostgreSQL / Citus
         Logger::Error("Failed to switch to admin database 'postgres'");
         return false;
     }
@@ -100,11 +93,9 @@ bool DbManager::EnsureDatabaseExists(const std::string& configPath) {
         Logger::Error("Failed to connect to admin database 'postgres'");
         return false;
     }
-
     std::string checkQuery = "SELECT 1 FROM pg_database WHERE datname = '" + targetDb + "'";
     auto result = backend_->Query(checkQuery);
     bool exists = (!result.empty() && !result[0].empty());
-
     if (!exists) {
         Logger::Info("Database '{}' does not exist. Creating it...", targetDb);
         std::string createSql = "CREATE DATABASE " + targetDb;
@@ -112,7 +103,6 @@ bool DbManager::EnsureDatabaseExists(const std::string& configPath) {
             createSql += " OWNER " + config_["user"].get<std::string>();
         }
         if (!backend_->Execute(createSql)) {
-            // Re-check in case another process created it concurrently
             result = backend_->Query(checkQuery);
             exists = (!result.empty() && !result[0].empty());
             if (!exists) {
@@ -127,8 +117,6 @@ bool DbManager::EnsureDatabaseExists(const std::string& configPath) {
     } else {
         Logger::Info("Database '{}' already exists.", targetDb);
     }
-
-    // Switch to the target database
     if (!backend_->ConnectToDatabase(targetDb)) {
         Logger::Error("Failed to switch to target database '{}'", targetDb);
         return false;
@@ -137,12 +125,10 @@ bool DbManager::EnsureDatabaseExists(const std::string& configPath) {
         Logger::Error("Failed to connect to target database '{}'", targetDb);
         return false;
     }
-
     if (!CreateDefaultTablesIfNotExist()) {
         Logger::Critical("Failed to create default tables.");
         return false;
     }
-
     Logger::Info("Default SQL tables verified/created successfully.");
     return true;
 }

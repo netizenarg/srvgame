@@ -1,6 +1,6 @@
-#include "network/ClientServer.hpp"
+#include "network/ClientListener.hpp"
 
-ClientServer::ClientServer(const WorkerGroupConfig& groupConfig, const ConfigManager& config)
+ClientListener::ClientListener(const WorkerGroupConfig& groupConfig, const ConfigManager& config)
     : ioContext_(groupConfig.threads),
       acceptor_(ioContext_),
       groupConfig_(groupConfig),
@@ -20,11 +20,11 @@ ClientServer::ClientServer(const WorkerGroupConfig& groupConfig, const ConfigMan
     }
 }
 
-ClientServer::~ClientServer() = default;
+ClientListener::~ClientListener() = default;
 
-asio::io_context& ClientServer::GetIoContext() { return ioContext_; }
+asio::io_context& ClientListener::GetIoContext() { return ioContext_; }
 
-bool ClientServer::Initialize() {
+bool ClientListener::Initialize() {
     try {
         asio::ip::tcp::endpoint endpoint(asio::ip::make_address(host_), port_);
         acceptor_.open(endpoint.protocol());
@@ -37,20 +37,20 @@ bool ClientServer::Initialize() {
         }
         acceptor_.bind(endpoint);
         acceptor_.listen(groupConfig_.max_connections);
-        Logger::Info("ClientServer initialized for protocol '{}' on {}:{}", groupConfig_.protocol, host_, port_);
+        Logger::Info("ClientListener initialized for protocol '{}' on {}:{}", groupConfig_.protocol, host_, port_);
         return true;
     } catch (const std::exception& err) {
-        Logger::Critical("Failed to initialize ClientServer for protocol '{}': {}", groupConfig_.protocol, err.what());
+        Logger::Critical("Failed to initialize ClientListener for protocol '{}': {}", groupConfig_.protocol, err.what());
         return false;
     }
 }
 
-void ClientServer::Run() {
+void ClientListener::Run() {
     running_ = true;
     DoAccept();
     StartWorkerThreads();
     work_guard_.emplace(asio::make_work_guard(ioContext_));
-    Logger::Info("ClientServer started with {} IO threads for protocol '{}'", ioThreads_, groupConfig_.protocol);
+    Logger::Info("ClientListener started with {} IO threads for protocol '{}'", ioThreads_, groupConfig_.protocol);
     try {
         ioContext_.run();
     } catch (const std::exception& err) {
@@ -59,14 +59,14 @@ void ClientServer::Run() {
     for (auto& thread : workerThreads_) {
         if (thread.joinable()) thread.join();
     }
-    Logger::Info("ClientServer run finished for protocol '{}'", groupConfig_.protocol);
+    Logger::Info("ClientListener run finished for protocol '{}'", groupConfig_.protocol);
 }
 
-void ClientServer::SetMasterSender(std::function<void(const std::vector<uint8_t>&)> sender) {
+void ClientListener::SetMasterSender(std::function<void(const std::vector<uint8_t>&)> sender) {
     sendToMaster_ = std::move(sender);
 }
 
-std::vector<uint8_t> ClientServer::PackIPCEnvelope(uint32_t correlationId, uint64_t sessionId,
+std::vector<uint8_t> ClientListener::PackIPCEnvelope(uint32_t correlationId, uint64_t sessionId,
                                                  uint16_t messageType, const std::vector<uint8_t>& body) {
     BinaryProtocol::BinaryWriter writer;
     writer.WriteUInt32(correlationId);
@@ -77,7 +77,7 @@ std::vector<uint8_t> ClientServer::PackIPCEnvelope(uint32_t correlationId, uint6
     return writer.GetBuffer();
 }
 
-void ClientServer::OnMasterReply(uint32_t correlationId, const std::vector<uint8_t>& reply) {
+void ClientListener::OnMasterReply(uint32_t correlationId, const std::vector<uint8_t>& reply) {
     auto it = pendingReplies_.find(correlationId);
     if (it == pendingReplies_.end()) return;
     PendingEntry entry = it->second;
@@ -113,7 +113,7 @@ void ClientServer::OnMasterReply(uint32_t correlationId, const std::vector<uint8
     }
 }
 
-uint16_t ClientServer::JsonMsgStringToType(const std::string& msg) {
+uint16_t ClientListener::JsonMsgStringToType(const std::string& msg) {
     static const std::unordered_map<std::string, uint16_t> map = {
         {"authentication", BinaryProtocol::MESSAGE_TYPE_AUTHENTICATION},
         {"chunk_params", BinaryProtocol::MESSAGE_TYPE_CHUNK_PARAMS},
@@ -131,7 +131,7 @@ uint16_t ClientServer::JsonMsgStringToType(const std::string& msg) {
     return (it != map.end()) ? it->second : 0xFFFF;
 }
 
-nlohmann::json ClientServer::BinaryToJson(uint16_t type, const std::vector<uint8_t>& body) {
+nlohmann::json ClientListener::BinaryToJson(uint16_t type, const std::vector<uint8_t>& body) {
     BinaryProtocol::BinaryReader r(body.data(), body.size());
     switch (type) {
         case BinaryProtocol::MESSAGE_TYPE_AUTHENTICATION: {
@@ -248,7 +248,7 @@ nlohmann::json ClientServer::BinaryToJson(uint16_t type, const std::vector<uint8
     }
 }
 
-void ClientServer::InitSessionFactory(int workerId) {
+void ClientListener::InitSessionFactory(int workerId) {
     if (groupConfig_.protocol == "binary") {
         sessionFactory_ = [this, workerId](asio::ip::tcp::socket socket, std::shared_ptr<asio::ssl::context> sslCtx) mutable {
             auto session = std::make_shared<BinarySession>(std::move(socket), sslCtx);
@@ -386,7 +386,7 @@ void ClientServer::InitSessionFactory(int workerId) {
     }
 }
 
-void ClientServer::DoAccept() {
+void ClientListener::DoAccept() {
     acceptor_.async_accept([this](std::error_code ec, asio::ip::tcp::socket socket) {
         if (!ec) {
             if (groupConfig_.tcp_nodelay) {
@@ -421,13 +421,13 @@ void ClientServer::DoAccept() {
     });
 }
 
-void ClientServer::StartWorkerThreads() {
+void ClientListener::StartWorkerThreads() {
     for (int i = 0; i < ioThreads_ - 1; ++i) {
         workerThreads_.emplace_back([this]() { ioContext_.run(); });
     }
 }
 
-void ClientServer::Shutdown() {
+void ClientListener::Shutdown() {
     if (!running_) return;
     running_ = false;
     acceptor_.close();

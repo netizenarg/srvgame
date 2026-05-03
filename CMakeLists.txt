@@ -97,7 +97,7 @@ set(SCRIPTING_SOURCES
 set(NETWORK_SOURCES
     src/network/BinaryProtocol.cpp
     src/network/ConnectionManager.cpp
-    src/network/ClientServer.cpp
+    src/network/ClientListener.cpp
     src/network/MasterServer.cpp
     src/network/BinarySession.cpp
     src/network/NetworkQualityMonitor.cpp

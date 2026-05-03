@@ -223,8 +223,8 @@ void MasterServer::WorkerClient(int workerId, const WorkerGroupConfig& groupConf
             Logger::Critical("Worker {} failed to load configuration", workerId);
             return;
         }
-        ClientServer server(groupConfig, config);
-        server.SetMasterSender([masterReadFd](const std::vector<uint8_t>& data) {
+        ClientListener client_listener(groupConfig, config);
+        client_listener.SetMasterSender([masterReadFd](const std::vector<uint8_t>& data) {
             uint32_t len = htonl(static_cast<uint32_t>(data.size()));
             std::vector<uint8_t> frame(sizeof(len) + data.size());
             std::memcpy(frame.data(), &len, sizeof(len));
@@ -246,20 +246,20 @@ void MasterServer::WorkerClient(int workerId, const WorkerGroupConfig& groupConf
                         BinaryProtocol::BinaryReader reader(payload->data(), payload->size());
                         uint32_t corrId = reader.ReadUInt32();
                         std::vector<uint8_t> replyData = reader.ReadBytes(payload->size() - sizeof(corrId));
-                        server.OnMasterReply(corrId, replyData);
+                        client_listener.OnMasterReply(corrId, replyData);
                     }
                     start_read();
                 });
             });
         };
         asio::post(ipc_io, start_read);
-        server.InitSessionFactory(workerId);
-        if (server.Initialize()) {
-            Logger::Info("Worker {} game server initialized on {}:{} (protocol: {})",
+        client_listener.InitSessionFactory(workerId);
+        if (client_listener.Initialize()) {
+            Logger::Info("Worker {} client listener initialized on {}:{} (protocol: {})",
                          workerId, groupConfig.host, groupConfig.port, groupConfig.protocol);
-            std::thread shutdown_trigger([&server]() {
+            std::thread shutdown_trigger([&client_listener]() {
                 while (!g_shutdown.load()) std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                server.Shutdown();
+                client_listener.Shutdown();
             });
             shutdown_trigger.detach();
             std::thread watchdog([workerId]() {
@@ -269,11 +269,11 @@ void MasterServer::WorkerClient(int workerId, const WorkerGroupConfig& groupConf
                 _exit(1);
             });
             watchdog.detach();
-            Logger::Info("Worker {} entering server.Run()", workerId);
-            server.Run();
+            Logger::Info("Worker {} entering ClientListener.Run()", workerId);
+            client_listener.Run();
             if (shutdown_trigger.joinable()) shutdown_trigger.join();
         } else {
-            Logger::Critical("Worker {} failed to initialize server", workerId);
+            Logger::Critical("Worker {} failed to initialize client listener", workerId);
         }
         ipc_io.stop();
         if (ipc_thread.joinable()) ipc_thread.join();

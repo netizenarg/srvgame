@@ -21,10 +21,10 @@
 #include "network/BinaryProtocol.hpp"
 #include "game/GameData.hpp"
 
-class ClientServer {
+class ClientListener {
 public:
-    ClientServer(const WorkerGroupConfig& groupConfig, const ConfigManager& config);
-    ~ClientServer();
+    ClientListener(const WorkerGroupConfig& groupConfig, const ConfigManager& config);
+    ~ClientListener();
 
     bool Initialize();
     void Run();

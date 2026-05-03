@@ -16,7 +16,7 @@
 #include "database/DbService.hpp"
 #include "process/ProcessPool.hpp"
 #include "network/BinaryProtocol.hpp"
-#include "network/ClientServer.hpp"
+#include "network/ClientListener.hpp"
 #include "game/GameLogic.hpp"
 
 class DatabaseService;

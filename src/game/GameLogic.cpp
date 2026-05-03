@@ -57,7 +57,8 @@ void GameLogic::Initialize() {
         pythonEnabled_ = json_py_conf.value("enabled", false);
         if (pythonEnabled_) {
             auto& pythonScripting = PythonScripting::GetInstance();
-            if (pythonScripting.Initialize()) {
+            pythonScripting.Initialize();
+            if (pythonScripting.IsInitialized()) {
                 Logger::Info("Python scripting initialized");
                 RegisterPythonEventHandlers();
                 bool hotReloadEnabled = json_py_conf.value("hot_reload", true);

@@ -2,8 +2,6 @@
 
 namespace fs = std::filesystem;
 
-// =============== PythonScripting Implementation ===============
-
 PythonScripting& PythonScripting::GetInstance() {
     static PythonScripting instance;
     return instance;
@@ -17,202 +15,82 @@ PythonScripting::~PythonScripting() {
     Shutdown();
 }
 
-bool PythonScripting::Initialize() {
-    if (initialized_) {
-        Logger::Warn("PythonScripting already initialized");
-        return true;
+void PythonScripting::Exception(PyConfig config, PyStatus status)
+{
+    PyConfig_Clear(&config);
+    if (PyStatus_IsExit(status))
+    {
+        Logger::Error("status.exitcode = {} ({})", status.exitcode, status.err_msg ? status.err_msg : "unknown error");
+        initialized_ = false;
     }
-
-    Logger::Info("Initializing Python scripting engine...");
-
-    // Get configuration
-    auto& config = ConfigManager::GetInstance();
-    std::string pythonHome = config.GetString("scripting.python.directory", "");
-
-    if (!pythonHome.empty()) {
-        pythonHome_ = pythonHome;
-    }
-
-    // Initialize Python
-    if (!InitializePython()) {
-        Logger::Warn("PythonScripting::Initialize failed to initialize interpreter");
-        return false;
-    }
-
-    // Set Python paths
-    std::vector<std::string> paths = {
-        "./scripts",
-        "./python",
-        "./lib/python",
-        "."
-    };
-
-    for (const auto& path : paths) {
-        AddPythonPath(path);
-    }
-
-    // Add additional paths from config
-    auto pythonPaths = config.GetStringArray("scripting.python.paths");
-    for (const auto& path : pythonPaths) {
-        AddPythonPath(path);
-    }
-
-    // Initialize Python API
-    PythonAPI::Initialize();
-
-    // Load default modules
-    std::string scriptDir = config.GetString("scripting.python.directory", "./scripts");
-    if (fs::exists(scriptDir)) {
-        for (const auto& entry : fs::directory_iterator(scriptDir)) {
-            if (entry.path().extension() == ".py") {
-                std::string moduleName = entry.path().stem().string();
-                std::string filePath = entry.path().string();
-
-                if (LoadModule(moduleName, filePath)) {
-                    Logger::Info("Loaded Python module: {}", moduleName);
-                } else {
-                    Logger::Warn("Failed to load Python module: {}", moduleName);
-                }
-            }
-        }
-    }
-
-    initialized_ = true;
-    Logger::Info("Python scripting engine initialized successfully");
-    return true;
+    // if (PyStatus_Exception(status)) {
+    //     initialized_ = false;
+    //     Py_ExitStatusException(status);
+    //     Logger::Error("Py_ExitStatusException = {} ({})", status.exitcode, status.err_msg ? status.err_msg : "unknown error");
+    // }
 }
+
+void PythonScripting::Initialize() {
+    auto& config = ConfigManager::GetInstance();
+    std::string directory = config.GetString("scripting.python.directory", "./scripts");
+    std::string pyPrefix = config.GetString("scripting.python.prefix", "");
+    PyStatus status;
+    PyConfig pyConfig;
+    PyConfig_InitPythonConfig(&pyConfig);
+    if (config.GetBool("scripting.python.isolated", false)) {
+        pyConfig.isolated = 1;
+        //pyConfig.site_import = 0;
+        //pyConfig.user_site_directory = 0;
+    }
+    if (!pyPrefix.empty()) {
+        status = PyConfig_SetBytesString(&pyConfig, &pyConfig.prefix, pyPrefix.c_str());
+        if (PyStatus_Exception(status)) {Exception(pyConfig, status);}
+        status = PyConfig_SetBytesString(&pyConfig, &pyConfig.exec_prefix, pyPrefix.c_str());
+        if (PyStatus_Exception(status)) {Exception(pyConfig, status);}
+    }
+    if (!directory.empty()) {
+        status = PyConfig_SetBytesString(&pyConfig, &pyConfig.home, directory.c_str());
+        if (PyStatus_Exception(status)) {Exception(pyConfig, status);}
+        //pyConfig.module_search_paths_set = 1;
+        // status = PyWideStringList_Append(&pyConfig.module_search_paths, pyConfig.home);
+        // if (PyStatus_Exception(status)) {Exception(pyConfig, status);}
+    }
+    status = Py_InitializeFromConfig(&pyConfig);
+    if (PyStatus_Exception(status)) {Exception(pyConfig, status);}
+    Logger::Info("Python interpreter ready (version: {})", Py_GetVersion());
+    initialized_ = true;
+}
+
+bool PythonScripting::IsInitialized() const { return initialized_; }
 
 void PythonScripting::Shutdown() {
     if (!initialized_) {
         return;
     }
-
     Logger::Info("Shutting down Python scripting engine...");
-
     {
         std::unique_lock<std::shared_mutex> lock(modulesMutex_);
         modules_.clear();
     }
-
     {
         std::unique_lock<std::shared_mutex> lock(eventHandlersMutex_);
         eventHandlers_.clear();
     }
-
     {
         std::unique_lock<std::shared_mutex> lock(callbacksMutex_);
         callbacks_.clear();
     }
-
     ShutdownPython();
-
     initialized_ = false;
     Logger::Info("Python scripting engine shutdown complete");
 }
 
-bool PythonScripting::InitializePython() {
-    try {
-        PyConfig config;
-        PyConfig_InitPythonConfig(&config);
-
-        // Set Python home if specified
-        if (!pythonHome_.empty()) {
-            //Py_SetPythonHome(Py_DecodeLocale(pythonHome_.c_str(), nullptr));
-            config.home = Py_DecodeLocale(pythonHome_.c_str(), nullptr);
-        }
-
-        // Initialize Python
-        //Py_Initialize();
-        Py_InitializeFromConfig(&config);
-        PyConfig_Clear(&config);
-
-        if (!Py_IsInitialized()) {
-            Logger::Warn("PythonScripting::InitializePython failed to initialize interpreter");
-            return false;
-        }
-
-        // Initialize threads
-        //PyEval_InitThreads(); //Py_DEPRECATED(3.9) PyAPI_FUNC(void)
-
-        // Release GIL - we'll acquire it when needed
-        PyThreadState* mainThread = PyEval_SaveThread();
-        if (!mainThread) {
-            Logger::Error("Failed to save Python thread state");
-            return false;
-        }
-
-        // Import essential modules
-        PyGILGuard gil;
-
-        PyRun_SimpleString("import sys");
-        PyRun_SimpleString("import os");
-        PyRun_SimpleString("import json");
-        PyRun_SimpleString("import math");
-        PyRun_SimpleString("import random");
-        PyRun_SimpleString("import time");
-
-        Logger::Debug("Python interpreter initialized (version: {})", Py_GetVersion());
-        return true;
-
-    } catch (const std::exception& e) {
-        Logger::Error("Exception initializing Python: {}", e.what());
-        return false;
-    }
-}
-
 void PythonScripting::ShutdownPython() {
     try {
-        PyGILGuard gil;
         Py_FinalizeEx();
         Logger::Debug("Python interpreter finalized");
-    } catch (const std::exception& e) {
-        Logger::Error("Exception finalizing Python: {}", e.what());
-    }
-}
-
-bool PythonScripting::AddPythonPath(const std::string& path) {
-    if (!initialized_) {
-        Logger::Error("Python not initialized");
-        return false;
-    }
-
-    PyGILGuard gil;
-
-    try {
-        std::string code = "import sys\n";
-        code += "if '" + path + "' not in sys.path:\n";
-        code += "    sys.path.insert(0, '" + path + "')\n";
-
-        PyRun_SimpleString(code.c_str());
-
-        pythonPaths_.push_back(path);
-        Logger::Debug("Added Python path: {}", path);
-        return true;
-
-    } catch (const std::exception& e) {
-        Logger::Error("Failed to add Python path {}: {}", path, e.what());
-        return false;
-    }
-}
-
-bool PythonScripting::ExecuteString(const std::string& code) {
-    if (!initialized_) {
-        Logger::Error("Python not initialized");
-        return false;
-    }
-
-    PyGILGuard gil;
-
-    try {
-        int result = PyRun_SimpleString(code.c_str());
-        if (result != 0) {
-            Logger::Error("Python execution failed for code: {}", code);
-            return false;
-        }
-        return true;
-    } catch (const std::exception& e) {
-        Logger::Error("Exception executing Python code: {}", e.what());
-        return false;
+    } catch (const std::exception& err) {
+        Logger::Error("Exception finalizing Python: {}", err.what());
     }
 }
 

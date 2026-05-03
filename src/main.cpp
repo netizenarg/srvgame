@@ -35,8 +35,6 @@ int main(int argc, char* argv[]) {
         Logger::Critical("Failed to ensure database existence. Exiting.");
         return 1;
     }
-    dbManager.Disconnect();
-    dbManager.Shutdown();
 
     Logger::Info("Starting Game Server");
     Logger::Info("Database Backend: {}", config.GetDatabaseBackend());
@@ -55,6 +53,9 @@ int main(int argc, char* argv[]) {
 
     master.Initialize();
     master.Run();
+
+    dbManager.Disconnect();
+    dbManager.Shutdown();
 
     Logger::Info("Game Server shutdown complete");
     return 0;
