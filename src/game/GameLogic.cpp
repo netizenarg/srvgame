@@ -24,7 +24,7 @@ GameLogic::~GameLogic() {
 }
 
 void GameLogic::Initialize() {
-    if (initialized_) {
+    if (running_.load()) {
         Logger::Warn("GameLogic already initialized");
         return;
     }
@@ -53,18 +53,17 @@ void GameLogic::Initialize() {
     }
     if (config.HasKey("scripting.python"))
     {
-        nlohmann::json json_py_conf = config.GetJson("scripting.python");
+        nlohmann::json json_py_conf = config.GetJson("scripting.python", {}, true);
         pythonEnabled_ = json_py_conf.value("enabled", false);
         if (pythonEnabled_) {
             auto& pythonScripting = PythonScripting::GetInstance();
-            pythonScripting.Initialize();
-            if (pythonScripting.IsInitialized()) {
+            if (pythonScripting.Initialize()) {
                 Logger::Info("Python scripting initialized");
                 RegisterPythonEventHandlers();
                 bool hotReloadEnabled = json_py_conf.value("hot_reload", true);
                 if (hotReloadEnabled) {
-                    std::string scriptDir = json_py_conf.value("directory", "./scripts");
-                    g_hotReloader = std::make_unique<ScriptHotReloader>(scriptDir, 2000);
+                    std::string home = json_py_conf.value("home", "scripts/python");
+                    g_hotReloader = std::make_unique<ScriptHotReloader>(home, 2000);
                     g_hotReloader->Start();
                 }
             } else {
@@ -74,12 +73,12 @@ void GameLogic::Initialize() {
         }
     }
     LogicCore::Initialize();
-    initialized_ = true;
+    running_.store(true);
     Logger::Info("GameLogic world system initialized successfully");
 }
 
 void GameLogic::Shutdown() {
-    if (!initialized_) {
+    if (!running_.exchange(false)){//return previous value and setup current value
         Logger::Warn("GameLogic already shutdown");
         return;
     }
@@ -94,7 +93,6 @@ void GameLogic::Shutdown() {
     LogicCore::Shutdown();
     LogicEntity::GetInstance().Shutdown();
     LogicWorld::GetInstance().Shutdown();
-    initialized_ = false;
 }
 
 void GameLogic::SetWorldConfig(const WorldConfig& config) {
@@ -992,29 +990,6 @@ void GameLogic::RegisterPythonEventHandlers() {
     Logger::Info("Python event handlers registered");
 }
 
-void GameLogic::SaveGameState() {
-    try {
-        nlohmann::json gameState = {
-            {"server_time", GetCurrentTimestamp()},
-            {"world_seed", GetWorldConfig().seed},
-            {"active_chunks", LogicWorld::GetInstance().GetActiveChunkCount()},
-            {"active_npcs", 0},
-            {"world_config", {
-                {"view_distance", GetWorldConfig().viewDistance},
-                {"chunk_size", GetWorldConfig().chunkSize},
-                {"terrain_scale", GetWorldConfig().terrainScale}
-            }}
-        };
-        if (!DbManager::GetInstance().SaveGameState("current_game", gameState)) {
-            Logger::Error("GameLogic::SaveGameState failed: DbManager returned false");
-        } else {
-            Logger::Trace("GameLogic::SaveGameState saved");
-        }
-    } catch (const std::exception& err) {
-        Logger::Error("GameLogic::SaveGameState failed: {}", err.what());
-    }
-}
-
 void GameLogic::CleanupOldData() {
 }
 
@@ -1034,17 +1009,42 @@ void GameLogic::RespawnNPCs() {
 void GameLogic::SpawnResources() {
 }
 
+void GameLogic::SaveGameState() {
+    // try {
+    //     nlohmann::json gameState = {
+    //         {"server_time", GetCurrentTimestamp()},
+    //         {"world_seed", GetWorldConfig().seed},
+    //         {"active_chunks", LogicWorld::GetInstance().GetActiveChunkCount()},
+    //         {"active_npcs", 0},
+    //         {"world_config", {
+    //             {"view_distance", GetWorldConfig().viewDistance},
+    //             {"chunk_size", GetWorldConfig().chunkSize},
+    //             {"terrain_scale", GetWorldConfig().terrainScale}
+    //         }}
+    //     };
+    //     if (!DbManager::GetInstance().SaveGameState("current_game", gameState)) {
+    //         Logger::Error("GameLogic::SaveGameState failed: DbManager returned false");
+    //     }
+    // } catch (const std::exception& err) {
+    //     Logger::Error("GameLogic::SaveGameState failed: {}", err.what());
+    // }
+    //Logger::Trace("GameLogic::SaveGameState saved");
+    Logger::Trace("GameLogic::SaveGameState: I see flag running_ is = {}", running_.load());
+    Logger::Trace("GameLogic::SaveGameState: I do nothing but I'm still alive :)");
+}
+
 void GameLogic::SaveLoop() {
-    Logger::Info("GameLogic::SaveLoop started");
-    while (running_) {
+    Logger::Trace("GameLogic::SaveLoop started");
+    while (running_.load()) {
         std::unique_lock<std::mutex> lock(saveMutex_);
-        saveCV_.wait_for(lock, std::chrono::seconds(10), [this] { return !running_; });
-        if (!running_) break;
-        //PlayerManager::GetInstance().SaveAllPlayers();
+        saveCV_.wait_for(lock, std::chrono::seconds(1), [this]
+        { return !running_.load(); });
+        if (!running_.load()) break;
         SaveGameState();
+        if (!running_.load()) break;
         CleanupOldData();
     }
-    Logger::Info("GameLogic::SaveLoop stopped");
+    Logger::Trace("GameLogic::SaveLoop stopped");
 }
 
 // void GameLogic::HandleLogin(uint64_t session_id, const nlohmann::json& data) {
@@ -1219,7 +1219,7 @@ void GameLogic::GameLoop() {
     Logger::Info("Game loop started");
     auto lastUpdate = std::chrono::steady_clock::now();
     //while (!instanceMutex_.try_lock()) {
-    while (running_) {
+    while (running_.load()) {
         try {
             auto startTime = std::chrono::steady_clock::now();
             auto now = std::chrono::steady_clock::now();
@@ -1267,7 +1267,7 @@ void GameLogic::GameLoop() {
                 std::unique_lock<std::mutex> lock(gameLoopMutex_);
                 gameLoopCV_.wait_for(lock,
                     gameLoopInterval_ - std::chrono::milliseconds(processingTime),
-                    [this] { return !running_; });
+                    [this] { return !running_.load(); });
             } else {
                 Logger::Warn("Game loop lagging: {}ms", processingTime);
             }

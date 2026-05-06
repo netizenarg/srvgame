@@ -63,6 +63,7 @@ private:
     LogicWorld();
     ~LogicWorld();
 
+    std::atomic<bool> running_;
     static std::mutex instanceMutex_;
     static LogicWorld* instance_;
 

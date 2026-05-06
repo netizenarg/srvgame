@@ -17,10 +17,11 @@ namespace BinaryProtocol {
     enum MessageType : uint16_t {
         MESSAGE_TYPE_INVALID = 0,
 
-        MESSAGE_TYPE_IPC_CLIENT_FORWARD = 1, // worker -> master
-        MESSAGE_TYPE_IPC_MASTER_REPLY   = 2, // master -> worker
-        MESSAGE_TYPE_IPC_WORKER_READY   = 3, // worker startup
-        MESSAGE_TYPE_IPC_SHUTDOWN       = 4,  // master -> worker
+        MESSAGE_TYPE_LOG = 1,
+        MESSAGE_TYPE_IPC_CLIENT_FORWARD = 2, // worker -> master
+        MESSAGE_TYPE_IPC_MASTER_REPLY   = 3, // master -> worker
+        MESSAGE_TYPE_IPC_WORKER_READY   = 4, // worker startup
+        MESSAGE_TYPE_IPC_SHUTDOWN       = 5,  // master -> worker
 
         // System messages
         MESSAGE_TYPE_HEARTBEAT = 100,

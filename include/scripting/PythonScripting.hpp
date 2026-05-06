@@ -14,6 +14,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "utils/WArray.hpp"
 #include "scripting/PythonAPI.hpp"
 #include "scripting/PythonModule.hpp"
 
@@ -97,7 +98,7 @@ class PythonScripting {
 public:
     static PythonScripting& GetInstance();
 
-    void Initialize();
+    bool Initialize();
     void Shutdown();
     bool IsInitialized() const;
 
@@ -142,11 +143,13 @@ private:
 
     PythonScripting();
     ~PythonScripting();
-    void Exception(PyConfig config, PyStatus status);
-    void InitializePython();
+    std::string GetCurrentDirectory();
+
     void ShutdownPython();
     PythonScripting(const PythonScripting&) = delete;
     PythonScripting& operator=(const PythonScripting&) = delete;
+    bool CheckStatus(PyStatus status);
+    void CheckStatusConf(PyStatus status, PyConfig pyconf);
 };
 
 class ScriptHotReloader {

@@ -45,6 +45,7 @@ public:
         const std::vector<uint8_t>& body
     )>;
     asio::posix::stream_descriptor& GetMasterStream();
+    void SendAsync(const std::vector<uint8_t>& binaryData);
 
 private:
     int workerId_;
@@ -56,6 +57,10 @@ private:
     int masterFd_;
     asio::posix::stream_descriptor masterStream_;
     std::mutex writeMutex_;
+    std::deque<std::vector<uint8_t>> sendQueue_;
+    std::mutex sendMutex_;
+    bool writing_ = false;
+    void doWrite();
 };
 
 class ProcessPool : public std::enable_shared_from_this<ProcessPool> {
@@ -80,12 +85,10 @@ private:
     std::vector<WorkerGroupConfig> groups_;
     std::vector<std::shared_ptr<ProcessWorker>> workers_;
     std::function<void(int, const WorkerGroupConfig&, int)> worker_;
-    asio::signal_set signals_;
     int workerId_ = -1;
     bool running_ = false;
     std::atomic<bool> ready_{false};
     ProcessWorker::MasterMessageHandler masterHandler_;
     void doSpawnWorkers();
-    void handleSignal(const asio::error_code& ec, int signo);
     void StartReadingFromWorker(std::shared_ptr<ProcessWorker> worker);
 };

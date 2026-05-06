@@ -13,18 +13,18 @@ DbManager& DbManager::GetInstance() {
 
 DbManager::DbManager()
     : currentType_(INVALID),
-      initialized_(false),
+      running_(true),
       connected_(false) {
     stats_.startTime = std::chrono::steady_clock::now();
-    Logger::Debug("DbManager created");
+    Logger::Trace("DbManager created");
 }
 
 DbManager::~DbManager() {
     Shutdown();
-    Logger::Debug("DbManager destroyed");
+    Logger::Trace("DbManager destroyed");
 }
 
-bool DbManager::IsInitialized() const { return initialized_; }
+bool DbManager::IsInitialized() const { return connected_.load(); }
 
 const SQLProvider& DbManager::GetSQLProvider() const { return sqlProvider_; }
 
@@ -134,7 +134,7 @@ bool DbManager::EnsureDatabaseExists(const std::string& configPath) {
 }
 
 bool DbManager::Initialize(const std::string& configPath) {
-    if (initialized_) {
+    if (connected_.load()) {
         Logger::Warn("DbManager already initialized");
         return true;
     }
@@ -187,62 +187,48 @@ bool DbManager::Initialize(const std::string& configPath) {
             Logger::Error("Unsupported database backend");
             return false;
     }
-    initialized_ = true;
     Logger::Info("DbManager initialized with {} backend", BackendTypeToString(currentType_));
+    connected_.store(true);
     return true;
 }
 
 void DbManager::Shutdown() {
-    if (!initialized_) {
+    if (!running_.exchange(false)) {
         return;
     }
-
-    Logger::Info("Shutting down DbManager...");
-
+    Logger::Trace("DbManager::Shutdown running...");
     if (backend_) {
         backend_->Disconnect();
         backend_->ReleaseConnectionPool();
         backend_->ResetStats();
     }
-
-    initialized_ = false;
-    connected_ = false;
-
-    Logger::Info("DbManager shutdown complete");
+    connected_.store(false);
+    Logger::Trace("DbManager::Shutdown complete");
 }
 
 bool DbManager::LoadConfiguration(const std::string& configPath) {
     try {
         auto& config_mgr = ConfigManager::GetInstance();
-
-        // Try to load from file first
         std::string path = configPath.empty() ?
         config_mgr.GetString("database.config_path", "config/database.json") :
         configPath;
-
         if (!path.empty()) {
             std::ifstream configFile(path);
             if (configFile.is_open()) {
                 configFile >> config_;
                 configFile.close();
-                Logger::Debug("Database configuration loaded from: {}", path);
+                Logger::Trace("Database configuration loaded from: {}", path);
 
-                // If the loaded JSON has a "database" key, use that as the actual config
                 if (config_.contains("database") && config_["database"].is_object()) {
                     config_ = config_["database"];
                 }
             }
         }
-
-        // Fallback to ConfigManager if config_ is still empty
         if (config_.empty()) {
             config_ = config_mgr.GetJson("database");
-            Logger::Debug("Database configuration loaded from ConfigManager: {}", config_mgr.GetConfigPath());
+            Logger::Trace("Database configuration loaded from ConfigManager: {}", config_mgr.GetConfigPath());
         }
-
-        // Reconstruct with defaults (ensures all required fields exist)
         nlohmann::json poolConfig = config_.value("pool", nlohmann::json::object());
-
         config_ = {
             {"backend", config_.value("backend", "postgresql")},
             {"host", config_.value("host", "127.0.0.1")},
@@ -263,10 +249,8 @@ bool DbManager::LoadConfiguration(const std::string& configPath) {
             {"ssl", config_.value("ssl", false)},
             {"timeout", config_.value("timeout", 30)}
         };
-
-        Logger::Debug("Database configuration finalized");
+        Logger::Trace("Database configuration finalized");
         return true;
-
     } catch (const std::exception& err) {
         Logger::Error("Failed to load database configuration: {}", err.what());
         return false;
@@ -366,8 +350,8 @@ bool DbManager::SetBackend(BackendType backendType, const nlohmann::json& config
             Logger::Error("Unsupported database backend");
             return false;
     }
-    connected_ = false;
-    Logger::Info("Database backend changed to {}", BackendTypeToString(currentType_));
+    connected_.store(false);
+    Logger::Trace("Database backend changed to {}", BackendTypeToString(currentType_));
     return true;
 }
 
@@ -385,22 +369,18 @@ bool DbManager::SaveGameState(const std::string& key, const nlohmann::json& stat
 }
 
 bool DbManager::Connect() {
-    if (!initialized_) {
-        Logger::Error("DbManager not initialized");
-        return false;
-    }
     if (!backend_) {
-        Logger::Error("No database backend available");
+        Logger::Error("DbManager::Connect no database backend available");
         return false;
     }
-    if (connected_) {
-        Logger::Debug("Already connected to database");
+    if (connected_.load()) {
+        Logger::Trace("DbManager::Connect already connected to database");
         return true;
     }
     try {
         if (backend_->Connect()) {
-            connected_ = true;
-            Logger::Info("Connected to {} database", BackendTypeToString(currentType_));
+            connected_.store(true);
+            Logger::Trace("Connected to {} database", BackendTypeToString(currentType_));
             return true;
         } else {
             Logger::Error("Failed to connect to database");
@@ -413,16 +393,16 @@ bool DbManager::Connect() {
 }
 
 bool DbManager::Reconnect() {
-    if (!initialized_ || !backend_) {
+    if (!backend_) {
+        Logger::Error("DbManager::Reconnect backend is empty");
         return false;
     }
     Logger::Info("Attempting to reconnect to database...");
-    if (connected_) {
+    if (connected_.exchange(false)) {
         backend_->Disconnect();
-        connected_ = false;
     }
     if (backend_->Reconnect()) {
-        connected_ = true;
+        connected_.store(true);
         Logger::Info("Reconnected to database");
         return true;
     }
@@ -459,7 +439,7 @@ int DbManager::GetTotalShards() const {
 nlohmann::json DbManager::GetStatistics() const {
     nlohmann::json stats;
     stats["backend"] = BackendTypeToString(currentType_);
-    stats["initialized"] = initialized_.load();
+    stats["running"] = running_.load();
     stats["connected"] = connected_.load();
     if (backend_) {
         stats["connection_info"] = backend_->GetConnectionInfo();

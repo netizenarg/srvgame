@@ -1,6 +1,6 @@
 #include "process/ProcessPool.hpp"
 
-extern std::atomic<bool> g_shutdown;
+//extern std::atomic<bool> g_shutdown;
 
 ProcessWorker::ProcessWorker(asio::io_context& io, int globalId, const WorkerGroupConfig& cfg)
     : workerId_(globalId), config_(cfg), io_(io), pid_(-1),
@@ -46,10 +46,62 @@ void ProcessWorker::Send(const std::vector<uint8_t>& binaryData) {
     asio::write(masterStream_, buffers);
 }
 
+void ProcessWorker::SendAsync(const std::vector<uint8_t>& binaryData) {
+    uint32_t len = htonl(static_cast<uint32_t>(binaryData.size()));
+    std::vector<uint8_t> frame(sizeof(len) + binaryData.size());
+    memcpy(frame.data(), &len, sizeof(len));
+    memcpy(frame.data() + sizeof(len), binaryData.data(), binaryData.size());
+    bool startWriting = false;
+    {
+        std::lock_guard<std::mutex> lock(sendMutex_);
+        sendQueue_.push_back(std::move(frame));
+        if (!writing_) {
+            writing_ = true;
+            startWriting = true;
+        }
+    }
+    if (startWriting) {
+        doWrite();
+    }
+}
+
+void ProcessWorker::doWrite() {
+    auto self = shared_from_this();
+    std::vector<uint8_t> data;
+    {
+        std::lock_guard<std::mutex> lock(sendMutex_);
+        if (sendQueue_.empty()) {
+            writing_ = false;
+            return;
+        }
+        data = std::move(sendQueue_.front());
+        sendQueue_.pop_front();
+    }
+    asio::async_write(masterStream_, asio::buffer(data),
+    [self, data](std::error_code ec, size_t /*bytes*/) {
+        if (ec) {
+            Logger::Error("Master async_write to worker {} failed: {}",
+                            self->workerId_, ec.message());
+        }
+        self->doWrite();
+    });
+}
+
 void ProcessWorker::Shutdown() {
     if (pid_ > 0) {
         kill(pid_, SIGTERM);
-        waitpid(pid_, nullptr, 0);
+        int status = 0;
+        pid_t result = 0;
+        for (int i = 0; i < 40; ++i) {
+            result = waitpid(pid_, &status, WNOHANG);
+            if (result == pid_) break;
+            if (result < 0 && errno != EINTR) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        if (result != pid_) {
+            kill(pid_, SIGKILL);
+            waitpid(pid_, nullptr, 0);
+        }
     }
     if (masterReadFd_ != -1) close(masterReadFd_);
     if (masterWriteFd_ != -1) close(masterWriteFd_);
@@ -58,14 +110,9 @@ void ProcessWorker::Shutdown() {
 }
 
 ProcessPool::ProcessPool(asio::io_context& io, const std::vector<WorkerGroupConfig>& groups)
-    : io_(io), groups_(groups), signals_(io) {}
+    : io_(io), groups_(groups) {}
 
 void ProcessPool::Initialize() {
-    signals_.add(SIGINT);
-    signals_.add(SIGTERM);
-    signals_.async_wait([this](const asio::error_code& ec, int signo) {
-        handleSignal(ec, signo);
-    });
     doSpawnWorkers();
     for (auto& w : workers_) {
         StartReadingFromWorker(w);
@@ -79,7 +126,6 @@ void ProcessPool::Run() { io_.run(); }
 void ProcessPool::Shutdown() {
     if (!running_) return;
     running_ = false;
-    signals_.cancel();
     for (auto& w : workers_) w->Shutdown();
 }
 
@@ -122,7 +168,7 @@ void ProcessPool::StartReadingFromWorker(std::shared_ptr<ProcessWorker> worker) 
 
 bool ProcessPool::SendToWorker(int workerId, const std::vector<uint8_t>& message) {
     if (workerId >= 0 && workerId < static_cast<int>(workers_.size())) {
-        workers_[workerId]->Send(message);
+        workers_[workerId]->SendAsync(message);
         return true;
     }
     return false;
@@ -132,13 +178,13 @@ void ProcessPool::BroadcastToOtherWorkers(const nlohmann::json& msg, int senderI
     std::string serialized = msg.dump();
     std::vector<uint8_t> data(serialized.begin(), serialized.end());
     for (auto& w : workers_)
-        if (w->GetId() != senderId) w->Send(data);
+        if (w->GetId() != senderId) w->SendAsync(data);
 }
 
 void ProcessPool::BroadcastToAllWorkers(const nlohmann::json& msg) {
     std::string serialized = msg.dump();
     std::vector<uint8_t> data(serialized.begin(), serialized.end());
-    for (auto& w : workers_) w->Send(data);
+    for (auto& w : workers_) w->SendAsync(data);
 }
 
 void ProcessPool::doSpawnWorkers() {
@@ -149,25 +195,17 @@ void ProcessPool::doSpawnWorkers() {
             try {
                 worker->Start();
                 workers_.push_back(worker);
-            } catch (const std::exception& e) {
-                if (std::string(e.what()) == "worker_function") {
+            } catch (const std::exception& err) {
+                if (std::string(err.what()) == "worker_function") {
                     int fd = worker->GetMasterReadFd();
                     worker_(globalId, groups_[gi], fd);
                     _exit(0);
                 } else {
-                    Logger::Error("Worker start failed: {}", e.what());
+                    Logger::Error("Worker start failed: {}", err.what());
                 }
             }
         }
     }
-}
-
-void ProcessPool::handleSignal(const asio::error_code& ec, int signo) {
-    if (ec) return;
-    Logger::Info("Master received signal {}", signo);
-    g_shutdown.store(true);
-    Shutdown();
-    io_.stop();
 }
 
 size_t ProcessPool::GetTotalWorkerCount() const { return workers_.size(); }

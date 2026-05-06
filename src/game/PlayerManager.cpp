@@ -35,7 +35,6 @@ void PlayerManager::Shutdown() {
     saveThread_.Stop();
     cleanupThread_.Stop();
 
-    SaveAllPlayers();
     Logger::Info("PlayerManager shutdown complete");
 }
 
@@ -257,21 +256,26 @@ std::vector<std::shared_ptr<Player>> PlayerManager::GetPlayersInRadius(const glm
 }
 
 void PlayerManager::SaveAllPlayers() {
-    Logger::Info("PlayerManager::SaveAllPlayers to database...");
-    std::vector<std::shared_ptr<Player>> toSave;
+    if (players_.size() && running_)
     {
-        std::shared_lock<std::shared_mutex> lock(playersMutex_);
-        for (const auto& [id, player] : players_)
-            toSave.push_back(player);
+        Logger::Trace("PlayerManager::SaveAllPlayers to database...");
+        std::vector<std::shared_ptr<Player>> toSave;
+        {
+            std::shared_lock<std::shared_mutex> lock(playersMutex_);
+            for (const auto& [id, player] : players_)
+                toSave.push_back(player);
+        }
+        int saved = 0, failed = 0;
+        for (auto& player : toSave) {
+            if (!running_)
+                break;
+            if (player->SaveToDatabase())
+                saved++;
+            else
+                failed++;
+        }
+        Logger::Trace("PlayerManager::SaveAllPlayers: saved {} players ({} failed)", saved, failed);
     }
-    int saved = 0, failed = 0;
-    for (auto& player : toSave) {
-        if (player->SaveToDatabase())
-            saved++;
-        else
-            failed++;
-    }
-    Logger::Info("PlayerManager::SaveAllPlayers: saved {} players ({} failed)", saved, failed);
 }
 
 std::shared_ptr<Player> PlayerManager::LoadPlayer(int64_t playerId) {

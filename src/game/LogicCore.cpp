@@ -33,7 +33,7 @@ void LogicCore::Initialize() {
     Logger::Info("Initializing LogicCore...");
     auto& config = ConfigManager::GetInstance();
     RegisterDefaultHandlers();
-    pythonEnabled_ = config.GetBool("scripting.python.enabled", false);
+    pythonEnabled_ = config.GetBool("scripting.python.enabled", false, true);
     running_ = true;
     gameLoopThread_ = RAIIThread([this]() { GameLoop(); });
     spawnerThread_ = RAIIThread([this]() { SpawnerLoop(); });
@@ -42,9 +42,8 @@ void LogicCore::Initialize() {
 }
 
 void LogicCore::Shutdown() {
-    if (!running_) return;
-    Logger::Info("Shutting down LogicCore...");
-    running_ = false;
+    if (!running_.exchange(false)) return;
+    Logger::Info("LogicCore::Shutdown running...");
     gameLoopCV_.notify_all();
     spawnerCV_.notify_all();
     saveCV_.notify_all();
@@ -66,7 +65,7 @@ void LogicCore::Shutdown() {
         sessionToPlayerMap_.clear();
         playerToSessionMap_.clear();
     }
-    Logger::Info("LogicCore shutdown complete");
+    Logger::Info("LogicCore::Shutdown complete");
 }
 
 bool LogicCore::IsRunning() const {

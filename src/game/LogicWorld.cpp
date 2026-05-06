@@ -11,7 +11,7 @@ LogicWorld& LogicWorld::GetInstance() {
     return *instance_;
 }
 
-LogicWorld::LogicWorld() {
+LogicWorld::LogicWorld() :running_(true) {
     Logger::Info("LogicWorld created");
 }
 
@@ -33,11 +33,13 @@ void LogicWorld::Initialize(const WorldConfig& config) {
 }
 
 void LogicWorld::Shutdown() {
+    if (!running_.exchange(false)) return;
+    Logger::Trace("LogicWorld::Shutdown running...");
     std::lock_guard<std::mutex> lock(chunksMutex_);
     loadedChunks_.clear();
     activeChunkCount_ = 0;
     worldGenerator_.reset();
-    Logger::Info("LogicWorld shutdown");
+    Logger::Trace("LogicWorld::Shutdown complete");
 }
 
 std::string LogicWorld::GetChunkKey(int chunkX, int chunkZ) const {

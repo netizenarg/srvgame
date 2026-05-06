@@ -14,7 +14,7 @@ LogicEntity& LogicEntity::GetInstance() {
 }
 
 LogicEntity::LogicEntity()
-    : mobSystem_(MobSystem::GetInstance()),
+    : running_(true), mobSystem_(MobSystem::GetInstance()),
       entityManager_(EntityManager::GetInstance()) {
     Logger::Trace("LogicEntity created");
 }
@@ -35,11 +35,13 @@ void LogicEntity::Initialize() {
 }
 
 void LogicEntity::Shutdown() {
+    if (!running_.exchange(false)) return;
+    Logger::Trace("LogicEntity::Shutdown running...");
     npcManager_.reset();
     collisionSystem_.reset();
     //inventorySystem_.reset();
     lootTableManager_.reset();
-    Logger::Info("LogicEntity shutdown");
+    Logger::Trace("LogicEntity::Shutdown complete");
 }
 
 void LogicEntity::InitializeNPCSystem() {

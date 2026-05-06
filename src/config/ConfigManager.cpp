@@ -50,6 +50,8 @@ bool ConfigManager::ReloadConfig() {
     return LoadConfig(configPath_);
 }
 
+const std::string& ConfigManager::GetConfigPath() const { return configPath_; }
+
 bool ConfigManager::HasProcessConfig() const {
     //ATTENTION: RECURSIVELY CALL MUTEX LOCK, DO NOT USE LINE BELOW
     //std::lock_guard<std::mutex> lock(configMutex_);
@@ -530,7 +532,7 @@ int ConfigManager::GetMaxLogFiles() const {
 bool ConfigManager::GetConsoleOutput() const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
-        return config_.at("logging").at("console_output").get<bool>();
+        return config_.at("logging").at("console").get<bool>();
     } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
         return true;
     }
@@ -551,51 +553,59 @@ bool ConfigManager::HasKey(const std::string& key) const {
 // --------------------------------------------------------------------------
 // Generic config accessors
 // --------------------------------------------------------------------------
-int ConfigManager::GetInt(const std::string& key, int defaultValue) const {
+int ConfigManager::GetInt(const std::string& key, int defaultValue, bool required) const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
         std::string keyPath = key;
         std::replace(keyPath.begin(), keyPath.end(), '.', '/');
         return config_.at(nlohmann::json::json_pointer("/" + keyPath)).get<int>();
-    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
+    } catch (const std::exception& err) {
+        if (required)
+            Logger::Warn("missed: {}", err.what());
         return defaultValue;
     }
 }
 
-float ConfigManager::GetFloat(const std::string& key, float defaultValue) const {
+float ConfigManager::GetFloat(const std::string& key, float defaultValue, bool required) const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
         std::string keyPath = key;
         std::replace(keyPath.begin(), keyPath.end(), '.', '/');
         return config_.at(nlohmann::json::json_pointer("/" + keyPath)).get<float>();
-    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
+    } catch (const std::exception& err) {
+        if (required)
+            Logger::Warn("missed: {}", err.what());
         return defaultValue;
     }
 }
 
-bool ConfigManager::GetBool(const std::string& key, bool defaultValue) const {
+bool ConfigManager::GetBool(const std::string& key, bool defaultValue, bool required) const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
         std::string keyPath = key;
         std::replace(keyPath.begin(), keyPath.end(), '.', '/');
         return config_.at(nlohmann::json::json_pointer("/" + keyPath)).get<bool>();
-    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
+    } catch (const std::exception& err) {
+        if (required)
+            Logger::Warn("missed: {}", err.what());
         return defaultValue;
     }
 }
 
-std::string ConfigManager::GetString(const std::string& key, const std::string& defaultValue) const {
+std::string ConfigManager::GetString(const std::string& key, const std::string& defaultValue, bool required) const {
     std::lock_guard<std::mutex> lock(configMutex_);
     try {
         std::string keyPath = key;
         std::replace(keyPath.begin(), keyPath.end(), '.', '/');
         return config_.at(nlohmann::json::json_pointer("/" + keyPath)).get<std::string>();
-    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());
+    } catch (const std::exception& err) {
+        if (required)
+            Logger::Warn("missed: {}", err.what());
         return defaultValue;
     }
 }
 
-std::vector<std::string> ConfigManager::GetStringArray(const std::string& key) const {
+std::vector<std::string> ConfigManager::GetStringArray(const std::string& key, bool required) const {
     std::lock_guard<std::mutex> lock(configMutex_);
     std::vector<std::string> result;
     try {
@@ -610,18 +620,21 @@ std::vector<std::string> ConfigManager::GetStringArray(const std::string& key) c
                     result.push_back(item.dump());
             }
         }
-    } catch (const std::exception& err) {Logger::Warn("missed: {}", err.what());}
+    } catch (const std::exception& err) {
+        if (required)
+            Logger::Warn("missed: {}", err.what());}
     return result;
 }
 
 nlohmann::json ConfigManager::GetJson(const std::string& key,
-                                      const nlohmann::json& default_value) const {
+                                      const nlohmann::json& default_value, bool required) const {
     std::lock_guard<std::mutex> lock(configMutex_);
     std::vector<std::string> segments;
     try {
         segments = SplitPath(key);
-    } catch (const std::exception& e) {
-        Logger::Warn("Invalid path '{}': {}", key, e.what());
+    } catch (const std::exception& err) {
+        if (required)
+            Logger::Warn("Invalid path '{}': {}", key, err.what());
         return default_value;
     }
     const nlohmann::json* current = &config_;
@@ -629,18 +642,21 @@ nlohmann::json ConfigManager::GetJson(const std::string& key,
         auto [field, index] = ParseSegment(seg);
         if (current->is_object()) {
             if (!current->contains(field)) {
-                Logger::Warn("Missing key '{}' in path '{}'", field, key);
+                if (required)
+                    Logger::Warn("Missing key '{}' in path '{}'", field, key);
                 return default_value;
             }
             current = &current->at(field);
         } else if (current->is_array() && index.has_value()) {
             if (index.value() >= current->size()) {
-                Logger::Warn("Index out of bounds in path '{}'", key);
+                if (required)
+                    Logger::Warn("Index out of bounds in path '{}'", key);
                 return default_value;
             }
             current = &current->at(index.value());
         } else {
-            Logger::Warn("Path segment '{}' cannot navigate a {} node", seg, current->type_name());
+            if (required)
+                Logger::Warn("Path segment '{}' cannot navigate a {} node", seg, current->type_name());
             return default_value;
         }
     }

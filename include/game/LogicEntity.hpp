@@ -48,6 +48,7 @@ private:
     LogicEntity();
     ~LogicEntity();
 
+    std::atomic<bool> running_;
     static std::mutex instanceMutex_;
     static LogicEntity* instance_;
 

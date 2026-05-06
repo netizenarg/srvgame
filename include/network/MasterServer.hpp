@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <functional>
 #include <memory>
@@ -8,6 +9,8 @@
 #include <thread>
 #include <unordered_map>
 #include <vector>
+
+#include <fcntl.h>
 
 #include <asio.hpp>
 
@@ -38,6 +41,9 @@ public:
 
 private:
     asio::io_context& io_;
+    asio::posix::stream_descriptor signal_pipe_;
+    std::array<char, 16> signal_buffer_;
+
     GameLogic& gameLogic_;
     ProcessPool processPool_;
     const ConfigManager& config_;
@@ -48,7 +54,7 @@ private:
     std::function<uint64_t(uint64_t, int)> assignVirtualId_;
     std::atomic<uint32_t> nextPersistentId_{1};
 
+    void start_signal_read();
     void WireCallbacks();
     void SendResponse(uint64_t sessionId, const std::vector<uint8_t>& buffer);
-    void StartShutdownWatcher();
 };

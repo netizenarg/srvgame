@@ -22,6 +22,8 @@ ClientListener::ClientListener(const WorkerGroupConfig& groupConfig, const Confi
 
 ClientListener::~ClientListener() = default;
 
+std::function<void(const std::vector<uint8_t>&)> ClientListener::GetMasterSender() const { return sendToMaster_; }
+
 asio::io_context& ClientListener::GetIoContext() { return ioContext_; }
 
 bool ClientListener::Initialize() {

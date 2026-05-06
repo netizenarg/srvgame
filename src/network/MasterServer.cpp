@@ -2,14 +2,10 @@
 
 extern std::atomic<bool> g_shutdown;
 
-MasterServer::MasterServer(asio::io_context& io,
-                           const std::vector<WorkerGroupConfig>& workerGroups,
-                           const ConfigManager& config,
-                           GameLogic& gameLogic,
-                           DatabaseService& dbService,
-                           const std::string& configPath)
-: io_(io), gameLogic_(gameLogic), processPool_(io, workerGroups),
-config_(config), configPath_(configPath)
+MasterServer::MasterServer(asio::io_context& io, const std::vector<WorkerGroupConfig>& workerGroups,
+    const ConfigManager& config, GameLogic& gameLogic, DatabaseService& dbService, const std::string& configPath)
+    : io_(io), signal_pipe_(io),
+    gameLogic_(gameLogic), processPool_(io, workerGroups), config_(config), configPath_(configPath)
 {
     gameLogic_.SetDatabaseService(&dbService);
 }
@@ -185,7 +181,20 @@ void MasterServer::Initialize()
     });
     processPool_.Initialize();
     gameLogic_.Initialize();
-    StartShutdownWatcher();
+    extern int g_signal_pipe[2];
+    signal_pipe_.assign(g_signal_pipe[0]);
+    start_signal_read();
+}
+
+void MasterServer::start_signal_read() {
+    signal_pipe_.async_read_some(asio::buffer(signal_buffer_),
+        [this](std::error_code ec, size_t /*bytes*/) {
+            if (!ec) {
+                Logger::Trace("Master shutdown signal received");
+                Shutdown();
+            }
+            start_signal_read();
+        });
 }
 
 void MasterServer::Run()
@@ -193,46 +202,104 @@ void MasterServer::Run()
     io_.run();
 }
 
-void MasterServer::Shutdown()
-{
-    processPool_.Shutdown();
-    io_.stop();
+void MasterServer::Shutdown() {
+    static std::once_flag once;
+    std::call_once(once, [this]{
+        Logger::Info("Master shutdown initiated");
+        processPool_.Shutdown();
+        gameLogic_.Shutdown();
+        io_.stop();
+    });
 }
 
 void MasterServer::WorkerClient(int workerId, const WorkerGroupConfig& groupConfig,
-                              int masterReadFd, const std::string& configPath)
+                                int masterReadFd, const std::string& configPath)
 {
     try {
         asio::io_context ipc_io;
         asio::signal_set signals(ipc_io, SIGINT, SIGTERM);
-        signals.async_wait([&](const asio::error_code& ec, int signo) {
+        signals.async_wait([&](const std::error_code& ec, int signo) {
             if (!ec) {
-                Logger::Info("Worker {} received signal {}", workerId, signo);
+                Logger::Trace("Worker {} received signal {}", workerId, signo);
                 g_shutdown.store(true);
                 ipc_io.stop();
             }
+            else
+                Logger::Error("Worker {} received signal {} ({})", workerId, signo, ec.message());
         });
         asio::posix::stream_descriptor masterPipe(ipc_io);
         if (masterReadFd != -1) masterPipe.assign(masterReadFd);
         std::thread ipc_thread([&]() { ipc_io.run(); });
         auto& config = ConfigManager::GetInstance();
-        Logger::InitializeWithWorkerId(workerId);
+        // Logging setup
+        Logger::InitializeWithWorkerId(workerId, config.GetJson("logging"));
+        uint16_t logPort = config.GetInt("logging.log_port", 15555);
+        auto logSocket = std::make_shared<asio::ip::tcp::socket>(ipc_io);
+        logSocket->connect(asio::ip::tcp::endpoint(asio::ip::address_v4::loopback(), logPort));
+        auto logSink = std::make_shared<LogSink>(logSocket);
+        Logger::AddSink(logSink);
+        Logger::GetLogger()->set_pattern(
+            config.GetString("logging.pattern",
+            "[%Y-%m-%d %H:%M:%S.%e] [%P] [%l] [%n] %v"));
         Logger::Info("Worker {} starting for group: {} ({}:{})", workerId,
                      groupConfig.protocol, groupConfig.host, groupConfig.port);
         if (!config.LoadConfig(configPath)) {
             Logger::Critical("Worker {} failed to load configuration", workerId);
             return;
         }
+        // Async write queue (worker to master)
+        std::deque<std::vector<uint8_t>> sendQueue;
+        std::mutex sendMutex;
+        bool writing = false;
+        std::function<void(asio::posix::stream_descriptor&)> doWrite =
+        [&sendQueue, &sendMutex, &writing, &doWrite, workerId]
+        (asio::posix::stream_descriptor& pipe) {
+            if (sendQueue.empty()) {
+                writing = false;
+                return;
+            }
+            auto data = std::move(sendQueue.front());
+            sendQueue.pop_front();
+            ///////////////////////////////////////
+            int pipe_fd = pipe.native_handle();
+            int pipe_size = 0;
+            if (ioctl(pipe_fd, FIONREAD, &pipe_size) == -1) {
+                Logger::Error("Worker {} ioctl error: {}", workerId, strerror(errno));
+            }
+            if (pipe_size > 65536) {   // more than 64 KB unread by master
+                Logger::Warn("Worker {} pipe clogged: {} bytes pending", workerId, pipe_size);
+            }
+            ///////////////////////////////////////
+            asio::async_write(pipe, asio::buffer(data),
+            [&pipe, &doWrite, workerId](std::error_code ec, size_t) {
+                if (ec) {
+                    Logger::Error("Worker {} async_write to master failed: {}",
+                                    workerId, ec.message());
+                }
+                doWrite(pipe);
+            });
+        };
+        // ClientListener and IPC
         ClientListener client_listener(groupConfig, config);
-        client_listener.SetMasterSender([masterReadFd](const std::vector<uint8_t>& data) {
+        client_listener.SetMasterSender(
+        [&sendQueue, &sendMutex, &writing, &doWrite, &masterPipe, &ipc_io]
+        (const std::vector<uint8_t>& data)
+        {
             uint32_t len = htonl(static_cast<uint32_t>(data.size()));
             std::vector<uint8_t> frame(sizeof(len) + data.size());
-            std::memcpy(frame.data(), &len, sizeof(len));
-            std::memcpy(frame.data() + sizeof(len), data.data(), data.size());
-            ssize_t res = write(masterReadFd, frame.data(), frame.size());
-            (void)res;
+            memcpy(frame.data(), &len, sizeof(len));
+            memcpy(frame.data() + sizeof(len), data.data(), data.size());
+            {
+                std::lock_guard<std::mutex> lock(sendMutex);
+                sendQueue.push_back(std::move(frame));
+                if (!writing) {
+                    writing = true;
+                }
+            }
+            // Start writing on the IPC I/O context
+            asio::post(ipc_io, [&doWrite, &masterPipe]() { doWrite(masterPipe); });
         });
-        std::function<void()> start_read;
+        std::function<void()> start_read;// Start reading from the master
         auto read_buffer = std::make_shared<std::array<uint8_t, 4>>();
         start_read = [&, read_buffer]() {
             asio::async_read(masterPipe, asio::buffer(*read_buffer),
@@ -255,10 +322,13 @@ void MasterServer::WorkerClient(int workerId, const WorkerGroupConfig& groupConf
         asio::post(ipc_io, start_read);
         client_listener.InitSessionFactory(workerId);
         if (client_listener.Initialize()) {
-            Logger::Info("Worker {} client listener initialized on {}:{} (protocol: {})",
-                         workerId, groupConfig.host, groupConfig.port, groupConfig.protocol);
-            std::thread shutdown_trigger([&client_listener]() {
-                while (!g_shutdown.load()) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            Logger::Trace("Worker {} client listener initialized on {}:{} (protocol: {})",
+                          workerId, groupConfig.host, groupConfig.port, groupConfig.protocol);
+            std::thread shutdown_trigger([&client_listener, workerId]() {
+                while (!g_shutdown.load()) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+                    Logger::Trace("Worker={} g_shutdown={}", workerId, g_shutdown.load());
+                }
                 client_listener.Shutdown();
             });
             shutdown_trigger.detach();
@@ -456,15 +526,4 @@ void MasterServer::WireCallbacks()
 void MasterServer::SendResponse(uint64_t sessionId, const std::vector<uint8_t>& buffer)
 {
     sendReplyCb_(sessionId, buffer);
-}
-
-void MasterServer::StartShutdownWatcher()
-{
-    std::thread([this]() {
-        while (!g_shutdown.load()) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
-        }
-        Logger::Info("Master shutdown triggered");
-        Shutdown();
-    }).detach();
 }

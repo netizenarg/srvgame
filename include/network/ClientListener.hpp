@@ -26,18 +26,15 @@ public:
     ClientListener(const WorkerGroupConfig& groupConfig, const ConfigManager& config);
     ~ClientListener();
 
+    std::function<void(const std::vector<uint8_t>&)> GetMasterSender() const;
+    asio::io_context& GetIoContext();
     bool Initialize();
     void Run();
     void Shutdown();
-
     void SetMasterSender(std::function<void(const std::vector<uint8_t>&)> sender);
     void OnMasterReply(uint32_t correlationId, const std::vector<uint8_t>& reply);
-
-    asio::io_context& GetIoContext();
-
     static std::vector<uint8_t> PackIPCEnvelope(uint32_t correlationId, uint64_t sessionId,
                                                 uint16_t messageType, const std::vector<uint8_t>& body);
-
     void InitSessionFactory(int workerId);
 
 private:

@@ -126,7 +126,6 @@ private:
     GameLogic();
     ~GameLogic();
 
-    bool initialized_ = false;
     static std::mutex instanceMutex_;
     static GameLogic* instance_;
 
