@@ -326,8 +326,8 @@ void MasterServer::WorkerClient(int workerId, const WorkerGroupConfig& groupConf
                           workerId, groupConfig.host, groupConfig.port, groupConfig.protocol);
             std::thread shutdown_trigger([&client_listener, workerId]() {
                 while (!g_shutdown.load()) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-                    Logger::Trace("Worker={} g_shutdown={}", workerId, g_shutdown.load());
+                    std::this_thread::sleep_for(std::chrono::seconds(5));
+                    //Logger::Trace("Worker={} g_shutdown={}", workerId, g_shutdown.load());
                 }
                 client_listener.Shutdown();
             });

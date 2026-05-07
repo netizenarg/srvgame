@@ -13,6 +13,7 @@
 #include "network/PredictionSystem.hpp"
 #include "scripting/PythonScripting.hpp"
 #include "game/LogicCore.hpp"
+#include "game/LogicWorld.hpp"
 #include "game/PlayerManager.hpp"
 #include "game/InventorySystem.hpp"
 #include "game/LootTableManager.hpp"
@@ -31,7 +32,7 @@ public:
     void Initialize() override;
     void Shutdown() override;
 
-    struct WorldConfig : public LogicWorld::WorldConfig {};
+    //struct WorldConfig : public WorldConfig {};
     void SetWorldConfig(const WorldConfig& config);
     const WorldConfig& GetWorldConfig() const;
 

@@ -31,14 +31,15 @@ void GameLogic::Initialize() {
     Logger::Info("Initializing GameLogic with world system...");
     auto& config = ConfigManager::GetInstance();
     WorldConfig worldConfig;
+    worldConfig.save_interval = config.GetInt("world.save_interval", 30);//seconds
     worldConfig.seed = config.GetInt("world.seed", 12345);
-    worldConfig.viewDistance = config.GetInt("world.view_distance", 4);
-    worldConfig.chunkSize = config.GetFloat("world.chunk_size", 32.0f);
-    worldConfig.maxActiveChunks = config.GetInt("world.max_active_chunks", 100);
-    worldConfig.terrainScale = config.GetFloat("world.terrain_scale", 100.0f);
-    worldConfig.maxTerrainHeight = config.GetFloat("world.max_terrain_height", 50.0f);
-    worldConfig.waterLevel = config.GetFloat("world.water_level", 10.0f);
-    worldConfig.unloadDistance = config.GetFloat("world.unload_distance", 200.0f);
+    worldConfig.view_distance = config.GetInt("world.view_distance", 4);
+    worldConfig.chunk_size = config.GetFloat("world.chunk_size", 32.0f);
+    worldConfig.max_active_chunks = config.GetInt("world.max_active_chunks", 100);
+    worldConfig.terrain_scale = config.GetFloat("world.terrain_scale", 100.0f);
+    worldConfig.max_terrain_height = config.GetFloat("world.max_terrain_height", 50.0f);
+    worldConfig.water_level = config.GetFloat("world.water_level", 10.0f);
+    worldConfig.unload_distance = config.GetFloat("world.unload_distance", 200.0f);
     SetWorldConfig(worldConfig);
     LogicWorld::GetInstance().Initialize(worldConfig);
     int preloadRadius = 1;
@@ -99,7 +100,7 @@ void GameLogic::SetWorldConfig(const WorldConfig& config) {
     LogicWorld::GetInstance().SetConfig(config);
 }
 
-const GameLogic::WorldConfig& GameLogic::GetWorldConfig() const {
+const WorldConfig& GameLogic::GetWorldConfig() const {
     return static_cast<const WorldConfig&>(LogicWorld::GetInstance().GetConfig());
 }
 
@@ -108,7 +109,7 @@ std::shared_ptr<WorldChunk> GameLogic::GetOrCreateChunk(int chunk_x, int chunk_z
 }
 
 void GameLogic::GenerateWorldAroundPlayer(uint64_t player_id, const glm::vec3& position) {
-    LogicWorld::GetInstance().GenerateWorldAroundPlayer(position, GetWorldConfig().viewDistance);
+    LogicWorld::GetInstance().GenerateWorldAroundPlayer(position, GetWorldConfig().view_distance);
     SyncNearbyEntitiesToPlayer(GetSessionIdByPlayer(player_id), position);
 }
 
@@ -1010,34 +1011,32 @@ void GameLogic::SpawnResources() {
 }
 
 void GameLogic::SaveGameState() {
-    // try {
-    //     nlohmann::json gameState = {
-    //         {"server_time", GetCurrentTimestamp()},
-    //         {"world_seed", GetWorldConfig().seed},
-    //         {"active_chunks", LogicWorld::GetInstance().GetActiveChunkCount()},
-    //         {"active_npcs", 0},
-    //         {"world_config", {
-    //             {"view_distance", GetWorldConfig().viewDistance},
-    //             {"chunk_size", GetWorldConfig().chunkSize},
-    //             {"terrain_scale", GetWorldConfig().terrainScale}
-    //         }}
-    //     };
-    //     if (!DbManager::GetInstance().SaveGameState("current_game", gameState)) {
-    //         Logger::Error("GameLogic::SaveGameState failed: DbManager returned false");
-    //     }
-    // } catch (const std::exception& err) {
-    //     Logger::Error("GameLogic::SaveGameState failed: {}", err.what());
-    // }
+    try {
+        nlohmann::json gameState = {
+            {"server_time", GetCurrentTimestamp()},
+            {"world_seed", GetWorldConfig().seed},
+            {"active_chunks", LogicWorld::GetInstance().GetActiveChunkCount()},
+            {"active_npcs", 0},
+            {"world_config", {
+                {"view_distance", GetWorldConfig().view_distance},
+                {"chunk_size", GetWorldConfig().chunk_size},
+                {"terrain_scale", GetWorldConfig().terrain_scale}
+            }}
+        };
+        if (!DbManager::GetInstance().SaveGameState("current_game", gameState)) {
+            Logger::Error("GameLogic::SaveGameState failed: DbManager returned false");
+        }
+    } catch (const std::exception& err) {
+        Logger::Error("GameLogic::SaveGameState failed: {}", err.what());
+    }
     //Logger::Trace("GameLogic::SaveGameState saved");
-    Logger::Trace("GameLogic::SaveGameState: I see flag running_ is = {}", running_.load());
-    Logger::Trace("GameLogic::SaveGameState: I do nothing but I'm still alive :)");
 }
 
 void GameLogic::SaveLoop() {
     Logger::Trace("GameLogic::SaveLoop started");
     while (running_.load()) {
         std::unique_lock<std::mutex> lock(saveMutex_);
-        saveCV_.wait_for(lock, std::chrono::seconds(1), [this]
+        saveCV_.wait_for(lock, std::chrono::seconds(GetWorldConfig().save_interval), [this]
         { return !running_.load(); });
         if (!running_.load()) break;
         SaveGameState();
@@ -1305,9 +1304,9 @@ void GameLogic::UpdateWorld(float deltaTime) {
                 }
             }
         }
-        float unloadDistance = GetWorldConfig().unloadDistance;
+        float unload_distance = GetWorldConfig().unload_distance;
         for (const auto& pos : playerPositions) {
-            LogicWorld::GetInstance().UnloadDistantChunks(pos, unloadDistance);
+            LogicWorld::GetInstance().UnloadDistantChunks(pos, unload_distance);
         }
     }
     Logger::Trace("UpdateWorld processed with deltaTime = {} ms", deltaTime * 1000.0f);

@@ -24,9 +24,9 @@ void LogicWorld::Initialize(const WorldConfig& config) {
 
     GenerationConfig genConfig;
     genConfig.seed = worldConfig_.seed;
-    genConfig.terrainScale = worldConfig_.terrainScale;
-    genConfig.terrainHeight = worldConfig_.maxTerrainHeight;
-    genConfig.waterLevel = worldConfig_.waterLevel;
+    genConfig.terrain_scale = worldConfig_.terrain_scale;
+    genConfig.terrainHeight = worldConfig_.max_terrain_height;
+    genConfig.water_level = worldConfig_.water_level;
 
     worldGenerator_ = std::make_unique<WorldGenerator>(genConfig);
     Logger::Info("LogicWorld initialized with seed: {}", worldConfig_.seed);
@@ -59,9 +59,9 @@ std::shared_ptr<WorldChunk> LogicWorld::GetOrCreateChunk(int chunkX, int chunkZ)
         Logger::Error("World generator was null! Reinitializing...");
         GenerationConfig genConfig;
         genConfig.seed = worldConfig_.seed;
-        genConfig.terrainScale = worldConfig_.terrainScale;
-        genConfig.terrainHeight = worldConfig_.maxTerrainHeight;
-        genConfig.waterLevel = worldConfig_.waterLevel;
+        genConfig.terrain_scale = worldConfig_.terrain_scale;
+        genConfig.terrainHeight = worldConfig_.max_terrain_height;
+        genConfig.water_level = worldConfig_.water_level;
         worldGenerator_ = std::make_unique<WorldGenerator>(genConfig);
     }
 
@@ -70,7 +70,7 @@ std::shared_ptr<WorldChunk> LogicWorld::GetOrCreateChunk(int chunkX, int chunkZ)
     if (it != loadedChunks_.end()) {
         return it->second;
     }
-    if (activeChunkCount_ >= worldConfig_.maxActiveChunks) {
+    if (activeChunkCount_ >= worldConfig_.max_active_chunks) {
         if (!loadedChunks_.empty()) {
             auto first = loadedChunks_.begin();
             loadedChunks_.erase(first);
@@ -111,12 +111,12 @@ void LogicWorld::UnloadDistantChunks(const glm::vec3& centerPosition, float keep
     }
 }
 
-void LogicWorld::GenerateWorldAroundPlayer(const glm::vec3& position, int viewDistance) {
-    int playerChunkX = static_cast<int>(std::floor(position.x / worldConfig_.chunkSize));
-    int playerChunkZ = static_cast<int>(std::floor(position.z / worldConfig_.chunkSize));
+void LogicWorld::GenerateWorldAroundPlayer(const glm::vec3& position, int view_distance) {
+    int playerChunkX = static_cast<int>(std::floor(position.x / worldConfig_.chunk_size));
+    int playerChunkZ = static_cast<int>(std::floor(position.z / worldConfig_.chunk_size));
 
-    for (int dx = -viewDistance; dx <= viewDistance; ++dx) {
-        for (int dz = -viewDistance; dz <= viewDistance; ++dz) {
+    for (int dx = -view_distance; dx <= view_distance; ++dx) {
+        for (int dz = -view_distance; dz <= view_distance; ++dz) {
             int chunkX = playerChunkX + dx;
             int chunkZ = playerChunkZ + dz;
             GetOrCreateChunk(chunkX, chunkZ);
@@ -127,7 +127,7 @@ void LogicWorld::GenerateWorldAroundPlayer(const glm::vec3& position, int viewDi
 void LogicWorld::PreloadWorldData(float radius) {
     Logger::Info("Preloading world data within radius {}...", radius);
 
-    int chunksToLoad = static_cast<int>((radius / worldConfig_.chunkSize) * 2) + 1;
+    int chunksToLoad = static_cast<int>((radius / worldConfig_.chunk_size) * 2) + 1;
 
     for (int x = -chunksToLoad; x <= chunksToLoad; ++x) {
         for (int z = -chunksToLoad; z <= chunksToLoad; ++z) {
@@ -140,7 +140,7 @@ void LogicWorld::PreloadWorldData(float radius) {
 
 float LogicWorld::GetTerrainHeight(float x, float z) const {
     if (!worldGenerator_) {
-        return worldConfig_.waterLevel;
+        return worldConfig_.water_level;
     }
     return worldGenerator_->GetTerrainHeight(x, z);
 }

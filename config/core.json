@@ -39,6 +39,7 @@
   },
 
   "world": {
+    "save_interval": 30,
     "seed": 12345,
     "chunk_size": 32.0,
     "view_distance": 4,
