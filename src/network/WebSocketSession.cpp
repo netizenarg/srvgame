@@ -1,3 +1,4 @@
+#include "game/GameLogic.hpp"
 #include "network/WebSocketSession.hpp"
 
 std::atomic<uint64_t> WebSocketSession::nextSessionId_{1};
@@ -202,6 +203,10 @@ void WebSocketSession::OnMessage(const WebSocketProtocol::WebSocketMessage& msg)
         }
     }
     else if (msg.opcode == WebSocketProtocol::OP_BINARY) {
+        if (msg.data.empty()) {
+            Logger::Trace("WebSocketSession {} ignoring empty binary frame", sessionId_);
+            return;
+        }
         Logger::Trace("WebSocketSession {} received BINARY ({} bytes)", sessionId_, msg.data.size());
         try {
             auto binaryMsg = BinaryProtocol::BinaryMessage::Deserialize(msg.data.data(), msg.data.size());

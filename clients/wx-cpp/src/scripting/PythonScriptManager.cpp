@@ -17,7 +17,7 @@ bool PythonScriptManager::Initialize() {
     }
     
     if (!InitializePythonInterpreter()) {
-        std::cerr << "Failed to initialize Python interpreter" << std::endl;
+        std::cerr << "PythonScriptManager::Initialize failed to initialize interpreter" << std::endl;
         return false;
     }
     

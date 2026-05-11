@@ -39,6 +39,7 @@
   },
 
   "world": {
+    "save_interval": 30,
     "seed": 12345,
     "chunk_size": 32.0,
     "view_distance": 4,
@@ -137,18 +138,25 @@
   },
 
   "logging": {
+    "port": 15555,
     "level": "trace",
+    "console": true,
     "file": "logs/server.log",
     "max_file_size": 1048576,
     "max_files": 10,
-    "console_output": true
+    "pattern": "[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] [%P] [%n] %v"
   },
 
   "scripting": {
     "python": {
-        "enabled": true,
-        "directory": "scripts",
-        "hot_reload": true
+        "enabled": false,
+        "hot_reload": true,
+        "isolated": 1,
+        "home": "scripts/python",
+        "platlibdir": "lib",
+        "module_search_paths": "/usr/lib/python;/usr/local/lib/python;python/modules;python/modules/site-packages",
+        "site_import": 1,
+        "user_site_directory": 1
     }
   },
 

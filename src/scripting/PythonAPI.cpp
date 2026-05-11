@@ -235,7 +235,6 @@ static PyObject* py_set_player_position(PyObject* self, PyObject* args) {
         Py_RETURN_FALSE;
     }
     player->UpdatePosition(x, y, z);
-    // Update database through the backend
     auto& gameLogic = GameLogic::GetInstance();
     auto backend = gameLogic.GetDatabaseBackend();
     if (backend) {

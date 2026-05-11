@@ -6,36 +6,36 @@ WorldGenerator::WorldGenerator(const GenerationConfig& config)
 
 std::unique_ptr<WorldChunk> WorldGenerator::GenerateChunk(int chunkX, int chunkZ) {
     auto chunk = std::make_unique<WorldChunk>(chunkX, chunkZ);
-    const int chunkSize = WorldChunk::DEFAULT_SIZE;
+    const int chunk_size = WorldChunk::DEFAULT_SIZE;
     const float spacing = WorldChunk::DEFAULT_SPACING;
-    const float physWidth = (chunkSize - 1) * spacing;
-    const float physHeight = (chunkSize - 1) * spacing;
+    const float physWidth = (chunk_size - 1) * spacing;
+    const float physHeight = (chunk_size - 1) * spacing;
     const float worldOriginX = chunkX * physWidth;
     const float worldOriginZ = chunkZ * physHeight;
     BiomeType biome = GetBiomeAt(worldOriginX + physWidth / 2.0f, worldOriginZ + physHeight / 2.0f);
     chunk->SetBiome(biome);
     chunk->vertices_.clear();
     chunk->triangles_.clear();
-    chunk->heightmap_.resize(chunkSize * chunkSize);
-    for (int z = 0; z < chunkSize; ++z) {
-        for (int x = 0; x < chunkSize; ++x) {
+    chunk->heightmap_.resize(chunk_size * chunk_size);
+    for (int z = 0; z < chunk_size; ++z) {
+        for (int x = 0; x < chunk_size; ++x) {
             float wx = worldOriginX + x * spacing;
             float wz = worldOriginZ + z * spacing;
             float wy = GetTerrainHeight(wx, wz);
-            chunk->heightmap_[z * chunkSize + x] = wy;
+            chunk->heightmap_[z * chunk_size + x] = wy;
             glm::vec3 normal(0.0f, 1.0f, 0.0f);
             glm::vec3 color = chunk->GetBiomeColor(biome, wy / config_.terrainHeight);
             chunk->vertices_.emplace_back(glm::vec3(wx, wy, wz), normal, color, glm::vec2(0.0f, 0.0f));
         }
     }
     for (size_t i = 0; i < chunk->vertices_.size(); ++i) {
-        int x = i % chunkSize;
-        int z = i / chunkSize;
-        if (x > 0 && x < chunkSize - 1 && z > 0 && z < chunkSize - 1) {
-            float hx1 = chunk->vertices_[(z) * chunkSize + (x + 1)].position.y;
-            float hx2 = chunk->vertices_[(z) * chunkSize + (x - 1)].position.y;
-            float hz1 = chunk->vertices_[(z + 1) * chunkSize + x].position.y;
-            float hz2 = chunk->vertices_[(z - 1) * chunkSize + x].position.y;
+        int x = i % chunk_size;
+        int z = i / chunk_size;
+        if (x > 0 && x < chunk_size - 1 && z > 0 && z < chunk_size - 1) {
+            float hx1 = chunk->vertices_[(z) * chunk_size + (x + 1)].position.y;
+            float hx2 = chunk->vertices_[(z) * chunk_size + (x - 1)].position.y;
+            float hz1 = chunk->vertices_[(z + 1) * chunk_size + x].position.y;
+            float hz2 = chunk->vertices_[(z - 1) * chunk_size + x].position.y;
             float dx = hx1 - hx2;
             float dz = hz1 - hz2;
             glm::vec3 n(-dx, 2.0f * spacing, -dz);
@@ -46,11 +46,11 @@ std::unique_ptr<WorldChunk> WorldGenerator::GenerateChunk(int chunkX, int chunkZ
             chunk->vertices_[i].normal = n;
         }
     }
-    for (int z = 0; z < chunkSize - 1; ++z) {
-        for (int x = 0; x < chunkSize - 1; ++x) {
-            uint32_t i = z * chunkSize + x;
-            chunk->triangles_.emplace_back(i, i + 1, i + chunkSize);
-            chunk->triangles_.emplace_back(i + 1, i + chunkSize + 1, i + chunkSize);
+    for (int z = 0; z < chunk_size - 1; ++z) {
+        for (int x = 0; x < chunk_size - 1; ++x) {
+            uint32_t i = z * chunk_size + x;
+            chunk->triangles_.emplace_back(i, i + 1, i + chunk_size);
+            chunk->triangles_.emplace_back(i + 1, i + chunk_size + 1, i + chunk_size);
         }
     }
     int seed = (chunkX * 1000003) ^ (chunkZ * 1000033);
@@ -80,8 +80,8 @@ std::unique_ptr<WorldChunk> WorldGenerator::GenerateChunk(int chunkX, int chunkZ
 }
 
 // float WorldGenerator::GetTerrainHeight(float x, float z) {
-//     float baseHeight = FractalNoise(x / config_.terrainScale, z / config_.terrainScale);
-//     float detail = Noise(x / (config_.terrainScale * 0.5f), z / (config_.terrainScale * 0.5f)) * 0.2f;
+//     float baseHeight = FractalNoise(x / config_.terrain_scale, z / config_.terrain_scale);
+//     float detail = Noise(x / (config_.terrain_scale * 0.5f), z / (config_.terrain_scale * 0.5f)) * 0.2f;
 //     float normalizedHeight = (baseHeight + detail + 1.0f) * 0.5f;
 //     normalizedHeight = std::pow(normalizedHeight, 1.5f);
 //     float result = normalizedHeight * config_.terrainHeight;
@@ -102,7 +102,7 @@ BiomeType WorldGenerator::GetBiomeAt(float x, float z) {
     float temperature = FractalNoise(x / noiseValue * 8.0f, z / noiseValue * 8.0f);
     float humidity = FractalNoise(x / noiseValue * 7.0f, z / noiseValue * 7.0f);
     float height = GetTerrainHeight(x, z);
-    if (height < config_.waterLevel) {
+    if (height < config_.water_level) {
         if (humidity > 0.7f) return BiomeType::RIVER;
         return BiomeType::OCEAN;
     }

@@ -567,6 +567,18 @@ void WebSocketConnection::HandleFrame(const WebSocketFrame& frame) {
         return;
     }
     ProcessMessageData(frame);
+    if (frame.fin) {
+        try {
+            CompleteCurrentMessage();
+        } catch (const std::exception& err) {
+            Logger::Error("WebSocketConnection {} message handler exception: {}",
+                          connection_id_, err.what());
+            Close(1011, "Internal error processing message");
+        } catch (...) {
+            Logger::Error("WebSocketConnection {} unknown exception in message handler",
+                          connection_id_);
+        }
+    }
 }
 
 void WebSocketConnection::ProcessMessageData(const WebSocketFrame& frame) {
@@ -587,12 +599,36 @@ void WebSocketConnection::ProcessMessageData(const WebSocketFrame& frame) {
 
 void WebSocketConnection::CompleteCurrentMessage() {
     if (message_handler_) {
-        message_handler_(current_message_);
+        try {
+            message_handler_(current_message_);
+        } catch (const std::exception& err) {
+            Logger::Error("WebSocketConnection {} message_handler exception: {}",
+                          connection_id_, err.what());
+        } catch (...) {
+            Logger::Error("WebSocketConnection {} unknown exception in message_handler",
+                          connection_id_);
+        }
     }
     if (current_message_.opcode == OP_TEXT && text_handler_) {
-        text_handler_(current_message_.GetText());
+        try {
+            text_handler_(current_message_.GetText());
+        } catch (const std::exception& err) {
+            Logger::Error("WebSocketConnection {} text_handler exception: {}",
+                          connection_id_, err.what());
+        } catch (...) {
+            Logger::Error("WebSocketConnection {} unknown exception in text_handler",
+                          connection_id_);
+        }
     } else if (current_message_.opcode == OP_BINARY && binary_handler_) {
-        binary_handler_(current_message_.data);
+        try {
+            binary_handler_(current_message_.data);
+        } catch (const std::exception& err) {
+            Logger::Error("WebSocketConnection {} binary_handler exception: {}",
+                          connection_id_, err.what());
+        } catch (...) {
+            Logger::Error("WebSocketConnection {} unknown exception in binary_handler",
+                          connection_id_);
+        }
     }
     current_message_ = WebSocketMessage();
 }
@@ -624,35 +660,101 @@ void WebSocketConnection::SendFrameAsync(const WebSocketFrame& frame) {
         });
 }
 
+// void WebSocketConnection::DoWrite() {
+//     if (write_in_progress_.exchange(true)) {
+//         return;
+//     }
+//     std::lock_guard<std::recursive_mutex> lock(write_mutex_);
+//     if (write_buffer_.empty() || state_ != State::OPEN) {
+//         write_in_progress_ = false;
+//         return;
+//     }
+//     auto self = shared_from_this();
+//     Logger::Trace("WebSocketConnection {} DoWrite: starting async_write", connection_id_);
+//     asio::async_write(socket_, asio::buffer(write_buffer_),
+//     [self](std::error_code ec, size_t bytes) {
+//         Logger::Trace("WebSocketConnection::DoWrite asio::async_write {}", bytes);
+//         if (ec) {
+//             self->HandleError(ec);
+//             self->write_in_progress_ = false;
+//             return;
+//         }
+//         {
+//             std::lock_guard<std::recursive_mutex> lock(self->write_mutex_);
+//             self->write_buffer_.erase(self->write_buffer_.begin(), self->write_buffer_.begin() + bytes);
+//             self->stats_.bytes_sent += bytes;
+//         }
+//         bool more = false;
+//         {
+//             std::lock_guard<std::recursive_mutex> lock(self->write_mutex_);
+//             more = !self->write_buffer_.empty();
+//         }
+//         if (more) {
+//             self->DoWrite();
+//         } else {
+//             self->write_in_progress_ = false;
+//         }
+//     });
+// }
+
 void WebSocketConnection::DoWrite() {
-    std::lock_guard<std::recursive_mutex> lock(write_mutex_);
-    if (write_buffer_.empty() || state_ != State::OPEN)
-        return;
+    if (write_in_progress_.exchange(true)) return;
+    std::vector<uint8_t> data;
+    {
+        std::lock_guard<std::recursive_mutex> lock(write_mutex_);
+        if (write_buffer_.empty() || state_ != State::OPEN) {
+            write_in_progress_ = false;
+            return;
+        }
+        data = std::move(write_buffer_);
+        write_buffer_.clear();
+    }
     auto self = shared_from_this();
     Logger::Trace("WebSocketConnection {} DoWrite: starting async_write", connection_id_);
-    asio::async_write(socket_, asio::buffer(write_buffer_),
-    [self](std::error_code ec, size_t bytes) {
+    asio::async_write(socket_, asio::buffer(data),
+    [self, data = std::move(data)](std::error_code ec, size_t bytes) mutable {
         Logger::Trace("WebSocketConnection::DoWrite asio::async_write {}", bytes);
         if (ec) {
             self->HandleError(ec);
+            self->write_in_progress_ = false;
             return;
         }
         {
             std::lock_guard<std::recursive_mutex> lock(self->write_mutex_);
-            self->write_buffer_.erase(self->write_buffer_.begin(), self->write_buffer_.begin() + bytes);
             self->stats_.bytes_sent += bytes;
         }
-        if (!self->write_buffer_.empty()) {
-            asio::post(self->socket_.get_executor(), [self]() {
+        {
+            std::lock_guard<std::recursive_mutex> lock(self->write_mutex_);
+            if (!self->write_buffer_.empty()) {
                 self->DoWrite();
-            });
+                return;
+            }
         }
+        self->write_in_progress_ = false;
     });
 }
 
 void WebSocketConnection::SendText(const std::string& text) {
-    WebSocketFrame frame = WebSocketFrame::CreateTextFrame(text);
-    SendFrame(frame);
+    constexpr size_t MAX_FRAME_SIZE = 16384;
+    if (text.size() <= MAX_FRAME_SIZE) {
+        WebSocketFrame frame = WebSocketFrame::CreateTextFrame(text);
+        SendFrame(frame);
+        return;
+    }
+    MessageFragmenter fragmenter(MAX_FRAME_SIZE);
+    auto fragments = fragmenter.FragmentText(text);
+    std::vector<uint8_t> combined;
+    for (auto& f : fragments) {
+        auto ser = f.Serialize();
+        combined.insert(combined.end(), ser.begin(), ser.end());
+    }
+    {
+        std::lock_guard<std::recursive_mutex> lock(write_mutex_);
+        write_buffer_.insert(write_buffer_.end(), combined.begin(), combined.end());
+        stats_.messages_sent += fragments.size();
+        stats_.bytes_sent += combined.size();
+    }
+    DoWrite();
 }
 
 void WebSocketConnection::SendBinary(const std::vector<uint8_t>& data) {

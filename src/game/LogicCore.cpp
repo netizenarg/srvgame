@@ -33,7 +33,7 @@ void LogicCore::Initialize() {
     Logger::Info("Initializing LogicCore...");
     auto& config = ConfigManager::GetInstance();
     RegisterDefaultHandlers();
-    pythonEnabled_ = config.GetBool("scripting.python.enabled", false);
+    pythonEnabled_ = config.GetBool("scripting.python.enabled", false, true);
     running_ = true;
     gameLoopThread_ = RAIIThread([this]() { GameLoop(); });
     spawnerThread_ = RAIIThread([this]() { SpawnerLoop(); });
@@ -42,12 +42,12 @@ void LogicCore::Initialize() {
 }
 
 void LogicCore::Shutdown() {
-    if (!running_) return;
-    Logger::Info("Shutting down LogicCore...");
-    running_ = false;
+    if (!running_.exchange(false)) return;
+    Logger::Info("LogicCore::Shutdown running...");
     gameLoopCV_.notify_all();
     spawnerCV_.notify_all();
     saveCV_.notify_all();
+    //gameLoopThread_.detach();
     gameLoopThread_.Stop();
     spawnerThread_.Stop();
     saveThread_.Stop();
@@ -65,7 +65,7 @@ void LogicCore::Shutdown() {
         sessionToPlayerMap_.clear();
         playerToSessionMap_.clear();
     }
-    Logger::Info("LogicCore shutdown complete");
+    Logger::Info("LogicCore::Shutdown complete");
 }
 
 bool LogicCore::IsRunning() const {
@@ -188,39 +188,15 @@ uint64_t LogicCore::GetSessionIdByPlayer(uint64_t playerId) const {
 }
 
 void LogicCore::SendError(uint64_t sessionId, const std::string& description, int code) {
-    nlohmann::json errorMsg = {
-        {"msg", "error"},
-        {"desc", description},
-        {"code", code},
-        {"timestamp", GetCurrentTimestamp()}
-    };
-    SendToSessionJson(sessionId, errorMsg);
+    (void)sessionId; (void)description; (void)code;
 }
 
-void LogicCore::SendSuccess(uint64_t sessionId, const std::string& description, const nlohmann::json& data) {
-    nlohmann::json successMsg = {
-        {"msg", "success"},
-        {"desc", description},
-        {"data", data},
-        {"timestamp", GetCurrentTimestamp()}
-    };
-    SendToSessionJson(sessionId, successMsg);
-}
-
-void LogicCore::SendToSessionJson(uint64_t sessionId, const nlohmann::json& message) {
-    auto& connMgr = ConnectionManager::GetInstance();
-    auto session = connMgr.GetSession(sessionId);
-    if (session) {
-        session->SendJson(message);
-    }
+void LogicCore::SendSuccess(uint64_t sessionId, const std::string& description, const std::vector<uint8_t>& data) {
+    (void)sessionId; (void)description; (void)data;
 }
 
 void LogicCore::SendToSession(uint64_t sessionId, uint16_t messageType, const std::vector<uint8_t>& data) {
-    auto& connMgr = ConnectionManager::GetInstance();
-    auto session = connMgr.GetSession(sessionId);
-    if (session) {
-        session->Send(messageType, data);
-    }
+    (void)sessionId; (void)messageType; (void)data;
 }
 
 void LogicCore::FirePythonEvent(const std::string& eventName, const nlohmann::json& data) {
@@ -253,14 +229,14 @@ void LogicCore::ProcessEvents() {
         eventQueue_.pop();
         try {
             event();
-        } catch (const std::exception& e) {
-            Logger::Error("Error processing event: {}", e.what());
+        } catch (const std::exception& err) {
+            Logger::Error("Error processing event: {}", err.what());
         }
     }
 }
 
 void LogicCore::GameLoop() {
-    Logger::Info("Game loop started");
+    Logger::Info("LogicCore::GameLoop started");
     auto lastUpdate = std::chrono::steady_clock::now();
     while (running_) {
         try {
@@ -279,30 +255,30 @@ void LogicCore::GameLoop() {
                     gameLoopInterval_ - std::chrono::milliseconds(processingTime),
                     [this] { return !running_; });
             } else {
-                Logger::Warn("Game loop lagging: {}ms", processingTime);
+                Logger::Warn("LogicCore::GameLoop lagging: {}ms", processingTime);
             }
-        } catch (const std::exception& e) {
-            Logger::Error("Error in game loop: {}", e.what());
+        } catch (const std::exception& err) {
+            Logger::Error("Error in game loop: {}", err.what());
         }
     }
-    Logger::Info("Game loop stopped");
+    Logger::Info("LogicCore::GameLoop stopped");
 }
 
 void LogicCore::SpawnerLoop() {
-    Logger::Info("Spawner loop started");
+    Logger::Info("LogicCore::SpawnerLoop started");
     while (running_) {
         try {
             SpawnEnemies();
             RespawnNPCs();
             SpawnResources();
             std::unique_lock<std::mutex> lock(spawnerMutex_);
-            spawnerCV_.wait_for(lock, std::chrono::seconds(30),
+            spawnerCV_.wait_for(lock, std::chrono::seconds(1),
                                 [this] { return !running_; });
-        } catch (const std::exception& e) {
-            Logger::Error("Error in spawner loop: {}", e.what());
+        } catch (const std::exception& err) {
+            Logger::Error("Error in spawner loop: {}", err.what());
         }
     }
-    Logger::Info("Spawner loop stopped");
+    Logger::Info("LogicCore::SpawnerLoop stopped");
 }
 
 void LogicCore::SaveLoop() {
@@ -312,7 +288,7 @@ void LogicCore::SaveLoop() {
             SaveGameState();
             CleanupOldData();
             std::unique_lock<std::mutex> lock(saveMutex_);
-            saveCV_.wait_for(lock, std::chrono::minutes(5),
+            saveCV_.wait_for(lock, std::chrono::seconds(1),
                             [this] { return !running_; });
         } catch (const std::exception& e) {
             Logger::Error("Error in save loop: {}", e.what());

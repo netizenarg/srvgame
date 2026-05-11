@@ -496,7 +496,7 @@ void CitusClient::MaintainShardConnections() {
         while (it != connections.end()) {
             if (!it->inUse) {
                 auto idleTime = std::chrono::duration_cast<std::chrono::seconds>(now - it->lastUsed);
-                if (idleTime > std::chrono::minutes(10)) {
+                if (idleTime > std::chrono::minutes(1)) {
                     CloseConnection(it->conn);
                     it = connections.erase(it);
                     continue;

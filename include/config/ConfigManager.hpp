@@ -56,7 +56,7 @@ public:
 
     bool LoadConfig(const std::string& configPath);
     bool ReloadConfig();
-    const std::string& GetConfigPath() const { return configPath_; }
+    const std::string& GetConfigPath() const;
 
     // Setters (generic)
     void SetBool(const std::string& key, bool value);
@@ -107,12 +107,12 @@ public:
     bool GetConsoleOutput() const;
 
     // Generic config accessors
-    int GetInt(const std::string& key, int defaultValue = 0) const;
-    float GetFloat(const std::string& key, float defaultValue = 0.0f) const;
-    bool GetBool(const std::string& key, bool defaultValue = false) const;
-    std::string GetString(const std::string& key, const std::string& defaultValue = "") const;
-    std::vector<std::string> GetStringArray(const std::string& key) const;
-    nlohmann::json GetJson(const std::string& key, const nlohmann::json& default_value = nlohmann::json()) const;
+    int GetInt(const std::string& key, int defaultValue=0, bool required=false) const;
+    float GetFloat(const std::string& key, float defaultValue=0.0f, bool required=false) const;
+    bool GetBool(const std::string& key, bool defaultValue=false, bool required=false) const;
+    std::string GetString(const std::string& key, const std::string& defaultValue="", bool required=false) const;
+    std::vector<std::string> GetStringArray(const std::string& key, bool required=false) const;
+    nlohmann::json GetJson(const std::string& key, const nlohmann::json& default_value=nlohmann::json(), bool required=false) const;
     bool HasKey(const std::string& key) const;
 
 private:
