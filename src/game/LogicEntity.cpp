@@ -1,10 +1,8 @@
 #include "game/LogicEntity.hpp"
 
-// =============== Static Members ===============
 std::mutex LogicEntity::instanceMutex_;
 LogicEntity* LogicEntity::instance_ = nullptr;
 
-// =============== Singleton Access ===============
 LogicEntity& LogicEntity::GetInstance() {
     std::lock_guard<std::mutex> lock(instanceMutex_);
     if (!instance_) {
@@ -139,6 +137,8 @@ CollisionResult LogicEntity::CheckCollision(const glm::vec3& position, float rad
     }
     return collisionSystem_->CheckCollision(position, radius, excludeEntityId);
 }
+
+int LogicEntity::GetActiveNPCCount() const { return npcManager_->GetNPCs().size(); }
 
 bool LogicEntity::Raycast(const glm::vec3& origin, const glm::vec3& direction, float maxDistance, RaycastHit& hit) {
     if (!collisionSystem_) {

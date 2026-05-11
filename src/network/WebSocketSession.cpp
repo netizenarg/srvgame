@@ -1,3 +1,4 @@
+#include "game/GameLogic.hpp"
 #include "network/WebSocketSession.hpp"
 
 std::atomic<uint64_t> WebSocketSession::nextSessionId_{1};

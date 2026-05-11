@@ -1,6 +1,5 @@
 #include "game/CollisionSystem.hpp"
 
-// Constants
 static constexpr float EPSILON = 1e-6f;
 static constexpr float INV_EPSILON = 1e6f;
 
@@ -10,11 +9,26 @@ float distance_between_vec3(glm::vec3 pos0, glm::vec3 pos1)
     return glm::dot(delta, delta);
 }
 
-// BoundingSphere implementation
+size_t GridCell::GetMemoryUsage() const { return entities.size() * sizeof(uint64_t); }
+
+bool GridCellKey::operator==(const GridCellKey& other) const {
+    return x == other.x && y == other.y && z == other.z;
+}
+
+size_t GridCellHash::operator()(const GridCellKey& key) const {
+    size_t h1 = std::hash<int>{}(key.x);
+    size_t h2 = std::hash<int>{}(key.y);
+    size_t h3 = std::hash<int>{}(key.z);
+    return h1 ^ (h2 << 1) ^ (h3 << 2);
+}
+
+bool BoundingSphere::IsValid() const {
+    return radius >= 0.0f &&
+    std::isfinite(center.x) && std::isfinite(center.y) && std::isfinite(center.z);
+}
+
 bool BoundingSphere::Intersects(const BoundingSphere& other) const {
     if (!IsValid() || !other.IsValid()) return false;
-
-    //float distanceSquared = glm::distance2(center, other.center);
     float distanceSquared = distance_between_vec3(center, other.center);
     float radiusSum = radius + other.radius;
     return distanceSquared <= (radiusSum * radiusSum);
@@ -22,22 +36,17 @@ bool BoundingSphere::Intersects(const BoundingSphere& other) const {
 
 bool BoundingSphere::IntersectsRay(const glm::vec3& origin, const glm::vec3& direction, float& distance) const {
     if (!IsValid()) return false;
-
     glm::vec3 oc = origin - center;
     float a = glm::dot(direction, direction);
     float b = 2.0f * glm::dot(oc, direction);
     float c = glm::dot(oc, oc) - radius * radius;
-
     float discriminant = b * b - 4 * a * c;
-
     if (discriminant < 0.0f) {
         return false;
     }
-
     float sqrtDiscriminant = std::sqrt(discriminant);
     float t1 = (-b - sqrtDiscriminant) / (2.0f * a);
     float t2 = (-b + sqrtDiscriminant) / (2.0f * a);
-
     if (t1 >= 0.0f) {
         distance = t1;
         return true;
@@ -45,14 +54,17 @@ bool BoundingSphere::IntersectsRay(const glm::vec3& origin, const glm::vec3& dir
         distance = t2;
         return true;
     }
-
     return false;
 }
 
-// BoundingBox implementation
+bool BoundingBox::IsValid() const {
+    return std::isfinite(min.x) && std::isfinite(min.y) && std::isfinite(min.z) &&
+    std::isfinite(max.x) && std::isfinite(max.y) && std::isfinite(max.z) &&
+    glm::all(glm::lessThanEqual(min, max));
+}
+
 bool BoundingBox::Intersects(const BoundingBox& other) const {
     if (!IsValid() || !other.IsValid()) return false;
-
     return (min.x <= other.max.x && max.x >= other.min.x) &&
            (min.y <= other.max.y && max.y >= other.min.y) &&
            (min.z <= other.max.z && max.z >= other.min.z);
@@ -60,18 +72,13 @@ bool BoundingBox::Intersects(const BoundingBox& other) const {
 
 bool BoundingBox::IntersectsSphere(const glm::vec3& center, float radius) const {
     if (!IsValid() || radius < 0.0f) return false;
-
-    // Find the closest point on the box to the sphere center
     float closestX = std::clamp(center.x, min.x, max.x);
     float closestY = std::clamp(center.y, min.y, max.y);
     float closestZ = std::clamp(center.z, min.z, max.z);
-
-    // Calculate distance between closest point and sphere center
     float distanceSquared =
         (center.x - closestX) * (center.x - closestX) +
         (center.y - closestY) * (center.y - closestY) +
         (center.z - closestZ) * (center.z - closestZ);
-
     return distanceSquared <= (radius * radius);
 }
 
@@ -84,21 +91,16 @@ float BoundingBox::GetRadius() const {
     return glm::length(halfExtents);
 }
 
-// CollisionSystem implementation
 CollisionSystem::CollisionSystem() {
     spatialGrid_.clear();
-    spatialGrid_.reserve(1024); // Pre-allocate space
+    spatialGrid_.reserve(1024);
 }
 
 void CollisionSystem::SetGridCellSize(float size) {
     std::lock_guard<std::mutex> lock(mutex_);
-
     if (size < 0.1f) size = 0.1f;
     if (size > 100.0f) size = 100.0f;
-
     gridCellSize_ = size;
-
-    // Rebuild spatial grid with new cell size
     spatialGrid_.clear();
     for (const auto& [entityId, entity] : entities_) {
         GridCellKey key = GetGridKey(entity.bounds.center);
@@ -108,7 +110,6 @@ void CollisionSystem::SetGridCellSize(float size) {
 
 void CollisionSystem::SetWorldBounds(const BoundingBox& bounds) {
     std::lock_guard<std::mutex> lock(mutex_);
-
     if (bounds.IsValid()) {
         worldBounds_ = bounds;
     }
@@ -118,14 +119,10 @@ bool CollisionSystem::RegisterEntity(uint64_t entityId, const BoundingSphere& bo
     if (entityId == 0) return false; // 0 is reserved for world
     if (!ValidateBounds(bounds)) return false;
     if (!ValidatePosition(bounds.center)) return false;
-
     std::lock_guard<std::mutex> lock(mutex_);
-
-    // Check if entity already exists
     if (entities_.find(entityId) != entities_.end()) {
         return false;
     }
-
     CollisionEntity entity;
     entity.id = entityId;
     entity.bounds = bounds;
@@ -133,76 +130,51 @@ bool CollisionSystem::RegisterEntity(uint64_t entityId, const BoundingSphere& bo
     entity.isStatic = isStatic;
     entity.isValid = true;
     entity.previousPosition = bounds.center;
-
     entities_[entityId] = entity;
-
-    // Add to spatial grid
     GridCellKey key = GetGridKey(bounds.center);
     spatialGrid_[key].entities.insert(entityId);
-
     return true;
 }
 
 bool CollisionSystem::UpdateEntity(uint64_t entityId, const glm::vec3& position) {
     if (!ValidatePosition(position)) return false;
-
     std::lock_guard<std::mutex> lock(mutex_);
-
     auto it = entities_.find(entityId);
     if (it == entities_.end() || !it->second.isValid) {
         return false;
     }
-
-    // Skip update for static entities
     if (it->second.isStatic) {
         return true;
     }
-
-    // Remove from old grid cell
     GridCellKey oldKey = GetGridKey(it->second.previousPosition);
     RemoveFromGrid(entityId, oldKey);
-
-    // Update position
     it->second.bounds.center = position;
-
-    // Add to new grid cell
     GridCellKey newKey = GetGridKey(position);
     AddToGrid(entityId, newKey);
-
     return true;
 }
 
 bool CollisionSystem::UnregisterEntity(uint64_t entityId) {
     std::lock_guard<std::mutex> lock(mutex_);
-
     auto it = entities_.find(entityId);
     if (it == entities_.end()) {
         return false;
     }
-
-    // Remove from spatial grid
     GridCellKey key = GetGridKey(it->second.bounds.center);
     RemoveFromGrid(entityId, key);
-
-    // Remove from entities map
     entities_.erase(it);
-
-    // Clean up empty grid cells periodically
     if (entities_.empty() || entities_.size() % 100 == 0) {
         CleanEmptyGridCells();
     }
-
     return true;
 }
 
 const BoundingSphere* CollisionSystem::GetEntityBounds(uint64_t entityId) const {
     std::lock_guard<std::mutex> lock(mutex_);
-
     auto it = entities_.find(entityId);
     if (it == entities_.end() || !it->second.isValid) {
         return nullptr;
     }
-
     return &it->second.bounds;
 }
 
@@ -213,39 +185,26 @@ bool CollisionSystem::IsEntityRegistered(uint64_t entityId) const {
 
 void CollisionSystem::RegisterChunk(const WorldChunk& chunk) {
     std::lock_guard<std::mutex> lock(mutex_);
-
     uint64_t chunk_id = CalculateChunkId(chunk.GetChunkX(), chunk.GetChunkZ());
-
-    // Check if chunk already exists
     if (chunks_.find(chunk_id) != chunks_.end()) {
         return;
     }
-
-    // Create collision chunk
     CollisionChunk collisionChunk;
     collisionChunk.chunkX = chunk.GetChunkX();
     collisionChunk.chunkZ = chunk.GetChunkZ();
     collisionChunk.chunk_id = chunk_id;
-
-    // Calculate bounding box for the chunk
     glm::vec3 worldPos = chunk.GetWorldPosition();
     collisionChunk.bounds.min = worldPos;
     collisionChunk.bounds.max = worldPos + glm::vec3(WorldChunk::CHUNK_WIDTH, 100.0f, WorldChunk::CHUNK_WIDTH);
-
     if (!collisionChunk.bounds.IsValid()) {
         return;
     }
-
-    // Build optimized collision data
     BuildChunkCollisionData(collisionChunk, chunk);
-
-    // Store the chunk
     chunks_[chunk_id] = std::move(collisionChunk);
 }
 
 void CollisionSystem::UnregisterChunk(int chunkX, int chunkZ) {
     std::lock_guard<std::mutex> lock(mutex_);
-
     uint64_t chunk_id = CalculateChunkId(chunkX, chunkZ);
     chunks_.erase(chunk_id);
 }
@@ -259,20 +218,14 @@ CollisionResult CollisionSystem::CheckCollision(const glm::vec3& position, float
     if (!ValidatePosition(position) || radius < 0.0f) {
         return CollisionResult(); // Invalid input
     }
-
     std::lock_guard<std::mutex> lock(mutex_);
-
     CollisionResult result;
     BoundingSphere testSphere{position, radius};
-
     if (!testSphere.IsValid()) {
         return result;
     }
-
-    // Check against entities
     for (const auto& [entityId, entity] : entities_) {
         if (entityId == excludeId || !entity.isValid) continue;
-
         if (TestSphereSphere(testSphere, entity.bounds, result)) {
             result.collided = true;
             result.collided_id = entityId;
@@ -280,36 +233,25 @@ CollisionResult CollisionSystem::CheckCollision(const glm::vec3& position, float
             return result;
         }
     }
-
-    // Check against world chunks
     for (const auto& [chunk_id, chunk] : chunks_) {
-        // Early out with bounding box test
         if (!chunk.bounds.IntersectsSphere(position, radius)) {
             continue;
         }
-
-        // Test against chunk bounding box first
         if (TestSphereBox(testSphere, chunk.bounds, result)) {
             result.collided = true;
             result.collided_id = 0; // World collision
             result.type = CollisionType::WORLD;
             result.chunk_id = chunk_id;
-
-            // If chunk has detailed collision data, test against triangles
             if (chunk.hasCollisionData) {
                 bool detailedCollision = false;
                 CollisionResult detailedResult;
-
-                // Test against triangles (simplified - should use spatial partitioning)
                 for (const auto& tri : chunk.triangles) {
                     if (tri[0] < chunk.vertices.size() &&
                         tri[1] < chunk.vertices.size() &&
                         tri[2] < chunk.vertices.size()) {
-
                         const glm::vec3& v0 = chunk.vertices[tri[0]];
                         const glm::vec3& v1 = chunk.vertices[tri[1]];
                         const glm::vec3& v2 = chunk.vertices[tri[2]];
-
                         if (TestSphereTriangle(position, radius, v0, v1, v2, detailedResult)) {
                             if (!detailedCollision || detailedResult.penetration < result.penetration) {
                                 detailedCollision = true;
@@ -322,11 +264,9 @@ CollisionResult CollisionSystem::CheckCollision(const glm::vec3& position, float
                     }
                 }
             }
-
             return result;
         }
     }
-
     return result;
 }
 
@@ -342,7 +282,6 @@ bool CollisionSystem::Raycast(const glm::vec3& origin, const glm::vec3& directio
     float closestDistance = maxDistance;
     bool foundHit = false;
 
-    // Check against entities
     for (const auto& [entityId, entity] : entities_) {
         if (entityId == excludeId || !entity.isValid) continue;
 
@@ -360,7 +299,6 @@ bool CollisionSystem::Raycast(const glm::vec3& origin, const glm::vec3& directio
         }
     }
 
-    // Check against world chunks
     for (const auto& [chunk_id, chunk] : chunks_) {
         float tMin, tMax;
         if (!TestRayAABB(origin, normalizedDir, chunk.bounds, tMin, tMax)) {
@@ -372,13 +310,11 @@ bool CollisionSystem::Raycast(const glm::vec3& origin, const glm::vec3& directio
             continue;
         }
 
-        // Test against detailed geometry if available
         if (chunk.hasCollisionData) {
             bool chunkHit = false;
             float chunkDistance = closestDistance;
             glm::vec3 chunkNormal;
 
-            // Simplified triangle testing - should use BVH or similar
             for (const auto& tri : chunk.triangles) {
                 if (tri[0] >= chunk.vertices.size() ||
                     tri[1] >= chunk.vertices.size() ||
@@ -410,18 +346,15 @@ bool CollisionSystem::Raycast(const glm::vec3& origin, const glm::vec3& directio
                 foundHit = true;
             }
         } else {
-            // Use bounding box hit as fallback
             hit.hit = true;
             hit.point = origin + normalizedDir * tMin;
             hit.distance = tMin;
             hit.chunk_id = chunk_id;
 
-            // Calculate normal from bounding box
             glm::vec3 center = chunk.bounds.GetCenter();
             glm::vec3 pointInBox = hit.point - center;
             glm::vec3 halfSize = (chunk.bounds.max - chunk.bounds.min) * 0.5f;
 
-            // Find which face was hit based on minimum penetration
             glm::vec3 normal(0.0f);
             float minPenetration = FLT_MAX;
 
@@ -464,14 +397,11 @@ std::vector<uint64_t> CollisionSystem::GetEntitiesInRadius(const glm::vec3& posi
         return entitiesInRadius;
     }
 
-    // Calculate grid bounds based on radius
     GridCellKey minKey = GetGridKey(position - glm::vec3(radius));
     GridCellKey maxKey = GetGridKey(position + glm::vec3(radius));
 
-    // Track processed entities to avoid duplicates
     std::unordered_set<uint64_t> processed;
 
-    // Check only the necessary grid cells
     for (int x = minKey.x; x <= maxKey.x; x++) {
         for (int y = minKey.y; y <= maxKey.y; y++) {
             for (int z = minKey.z; z <= maxKey.z; z++) {
@@ -499,36 +429,26 @@ std::vector<uint64_t> CollisionSystem::GetEntitiesInRadius(const glm::vec3& posi
 
 void CollisionSystem::UpdateBroadPhase() {
     std::lock_guard<std::mutex> lock(mutex_);
-
-    // Clean up empty grid cells
     CleanEmptyGridCells();
-
-    // Update spatial partitioning if needed
-    // This could rebuild the grid if cell size changed significantly
 }
 
 void CollisionSystem::Update(float deltaTime) {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    // First, update spatial grid using swept volumes of moving entities
     for (auto& [id, entity] : entities_) {
         if (!entity.isValid) continue;
-        if (entity.isStatic) continue;  // static entities don't move
+        if (entity.isStatic) continue;
 
         glm::vec3& current = entity.bounds.center;
         glm::vec3& previous = entity.previousPosition;
 
-        // If the entity moved this frame
         if (distance_between_vec3(current, previous) > EPSILON) {
-            // Remove from old grid cells (based on previous position)
             GridCellKey oldKey = GetGridKey(previous);
             RemoveFromGrid(id, oldKey);
 
-            // Compute swept AABB: union of sphere at start and end, expanded by radius
             glm::vec3 minPos = glm::min(previous, current) - entity.bounds.radius;
             glm::vec3 maxPos = glm::max(previous, current) + entity.bounds.radius;
 
-            // Determine all grid cells overlapped by this swept AABB
             GridCellKey minKey = GetGridKey(minPos);
             GridCellKey maxKey = GetGridKey(maxPos);
 
@@ -541,24 +461,26 @@ void CollisionSystem::Update(float deltaTime) {
                 }
             }
 
-            // Update previous position for next frame
             entity.previousPosition = current;
         }
     }
 
-    // Now perform continuous collision detection
     PerformContinuousCollisionDetection(deltaTime);
 
-    // Clean up empty grid cells
     CleanEmptyGridCells();
 }
+
+size_t CollisionSystem::GetEntityCount() const { return entities_.size(); }
+
+size_t CollisionSystem::GetChunkCount() const { return chunks_.size(); }
+
+size_t CollisionSystem::GetGridCellCount() const { return spatialGrid_.size(); }
 
 std::vector<std::pair<uint64_t, uint64_t>> CollisionSystem::GetPotentialCollisions() {
     std::lock_guard<std::mutex> lock(mutex_);
 
     std::vector<std::pair<uint64_t, uint64_t>> potentialCollisions;
 
-    // For each grid cell, check all entity pairs
     for (const auto& [cellKey, cell] : spatialGrid_) {
         if (cell.entities.size() < 2) continue;
 
@@ -572,12 +494,10 @@ std::vector<std::pair<uint64_t, uint64_t>> CollisionSystem::GetPotentialCollisio
                 auto entityB = entities_.find(entities[j]);
                 if (entityB == entities_.end() || !entityB->second.isValid) continue;
 
-                // Skip static-static pairs (they never move)
                 if (entityA->second.isStatic && entityB->second.isStatic) {
                     continue;
                 }
 
-                // Check if they might collide
                 if (entityA->second.bounds.Intersects(entityB->second.bounds)) {
                     potentialCollisions.emplace_back(entities[i], entities[j]);
                 }
@@ -588,12 +508,10 @@ std::vector<std::pair<uint64_t, uint64_t>> CollisionSystem::GetPotentialCollisio
     return potentialCollisions;
 }
 
-// Private helper methods
-CollisionSystem::GridCellKey CollisionSystem::GetGridKey(const glm::vec3& position) const {
+GridCellKey CollisionSystem::GetGridKey(const glm::vec3& position) const {
     int gridX = static_cast<int>(std::floor(position.x / gridCellSize_));
     int gridY = static_cast<int>(std::floor(position.y / gridCellSize_));
     int gridZ = static_cast<int>(std::floor(position.z / gridCellSize_));
-
     return GridCellKey{gridX, gridY, gridZ};
 }
 
@@ -601,7 +519,6 @@ void CollisionSystem::RemoveFromGrid(uint64_t entityId, const GridCellKey& oldKe
     auto it = spatialGrid_.find(oldKey);
     if (it != spatialGrid_.end()) {
         it->second.entities.erase(entityId);
-        // Note: We don't immediately remove empty cells here to avoid thrashing
     }
 }
 
@@ -610,7 +527,6 @@ void CollisionSystem::AddToGrid(uint64_t entityId, const GridCellKey& newKey) {
 }
 
 void CollisionSystem::CleanEmptyGridCells() {
-    // Remove empty grid cells to save memory
     for (auto it = spatialGrid_.begin(); it != spatialGrid_.end(); ) {
         if (it->second.entities.empty()) {
             it = spatialGrid_.erase(it);

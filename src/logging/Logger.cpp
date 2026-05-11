@@ -213,7 +213,7 @@ void Logger::SetupLogger(const std::string& loggerName, nlohmann::json config) {
     if (sinks.empty() && !g_logService) {
         auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
         console_sink->set_level(spdlog::level::info);
-        //console_sink->set_pattern(pattern);
+        console_sink->set_pattern(pattern);
         sinks.push_back(console_sink);
     }
     if (logger_) {

@@ -12,16 +12,16 @@
 #include <set>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
-#include "logging/Logger.hpp"
-#include "network/ConnectionManager.hpp"
-#include "network/BinarySession.hpp"
-#include "utils/Passwords.hpp"
 
 #include "database/DbManager.hpp"
+#include "logging/Logger.hpp"
+#include "utils/Passwords.hpp"
+
 #include "game/RAIIThread.hpp"
 #include "game/Player.hpp"
 
@@ -64,15 +64,12 @@ public:
     void UpdatePosition(uint64_t playerId, float x, float y, float z);
     std::vector<uint64_t> GetDirtyPlayersAndClear();
 
-    void BroadcastToNearbyPlayers(int64_t playerId, const nlohmann::json& message);
-    std::vector<int64_t> GetNearbyPlayers(int64_t playerId, float radius);
     std::vector<std::shared_ptr<Player>> GetPlayersInRadius(const glm::vec3& center, float radius);
+    std::vector<int64_t> GetNearbyPlayers(int64_t playerId, float radius);
 
     void SaveAllPlayers();
     void CleanupInactivePlayers();
 
-    void SendToPlayer(int64_t playerId, const nlohmann::json& message);
-    void SendToPlayers(const std::vector<int64_t>& playerIds, const nlohmann::json& message);
     void BanPlayer(int64_t playerId, const std::string& reason, int64_t durationSeconds);
     void UnbanPlayer(int64_t playerId);
     void TeleportPlayer(int64_t playerId, float x, float y, float z);
@@ -101,6 +98,9 @@ public:
     int64_t GeneratePartyId();
 
     void Shutdown();
+    void BroadcastToNearbyPlayers(int64_t playerId, const nlohmann::json& message);
+    void SendToPlayer(int64_t playerId, const nlohmann::json& message);
+    void SendToPlayers(const std::vector<int64_t>& playerIds, const nlohmann::json& message);
 
 private:
     PlayerManager();
@@ -130,7 +130,6 @@ private:
 
     std::chrono::system_clock::time_point lastCleanup_;
 
-    // Thread management with RAII
     RAIIThread saveThread_;
     RAIIThread cleanupThread_;
 
@@ -150,5 +149,4 @@ private:
     std::unordered_set<uint64_t> dirtyPlayers_;
 
     void MarkDirty(uint64_t playerId);
-
 };

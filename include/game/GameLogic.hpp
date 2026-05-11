@@ -12,17 +12,17 @@
 #include "database/DbService.hpp"
 #include "network/PredictionSystem.hpp"
 #include "scripting/PythonScripting.hpp"
+#include "game/GameData.hpp"
 #include "game/LogicCore.hpp"
 #include "game/LogicWorld.hpp"
-#include "game/PlayerManager.hpp"
+#include "game/CollisionSystem.hpp"
 #include "game/InventorySystem.hpp"
 #include "game/LootTableManager.hpp"
 #include "game/SkillSystem.hpp"
 #include "game/QuestManager.hpp"
+#include "game/NPCEntity.hpp"
 #include "game/EntityManager.hpp"
-#include "game/GameData.hpp"
-
-class DatabaseService;
+#include "game/PlayerManager.hpp"
 
 class GameLogic : public LogicCore, public std::enable_shared_from_this<GameLogic>
 {
@@ -31,6 +31,10 @@ public:
 
     void Initialize() override;
     void Shutdown() override;
+
+    void SendError(uint64_t sessionId, const std::string& description, int code = 0) override;
+    void SendSuccess(uint64_t sessionId, const std::string& description, const std::vector<uint8_t>& data = {}) override;
+    void SendToSession(uint64_t sessionId, uint16_t messageType, const std::vector<uint8_t>& data) override;
 
     //struct WorldConfig : public WorldConfig {};
     void SetWorldConfig(const WorldConfig& config);

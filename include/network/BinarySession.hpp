@@ -28,7 +28,7 @@
 #include "network/IConnection.hpp"
 
 #include "game/GameData.hpp"
-#include "game/GameLogic.hpp"
+//#include "game/GameLogic.hpp"
 
 struct SessionStats {
     uint64_t messages_received{0};

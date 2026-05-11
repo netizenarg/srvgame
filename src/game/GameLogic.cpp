@@ -23,6 +23,43 @@ GameLogic::~GameLogic() {
     }
 }
 
+void GameLogic::SendError(uint64_t sessionId, const std::string& description, int code) {
+    if (!sendReplyCb_) {
+        Logger::Error("GameLogic::SendError sendReplyCb_ not set");
+        return;
+    }
+    BinaryProtocol::BinaryWriter w;
+    w.WriteUInt16(BinaryProtocol::MESSAGE_TYPE_ERROR);
+    w.WriteUInt8(1);
+    w.WriteString(description);
+    w.WriteUInt32(code);
+    sendReplyCb_(sessionId, w.GetBuffer());
+}
+
+void GameLogic::SendSuccess(uint64_t sessionId, const std::string& description, const std::vector<uint8_t>& data) {
+    if (!sendReplyCb_) {
+        Logger::Error("GameLogic::SendSuccess sendReplyCb_ not set");
+        return;
+    }
+    BinaryProtocol::BinaryWriter w;
+    w.WriteUInt16(BinaryProtocol::MESSAGE_TYPE_SUCCESS);
+    w.WriteString(description);
+    w.WriteUInt32(static_cast<uint32_t>(data.size()));
+    w.WriteBytes(data.data(), data.size());
+    sendReplyCb_(sessionId, w.GetBuffer());
+}
+
+void GameLogic::SendToSession(uint64_t sessionId, uint16_t messageType, const std::vector<uint8_t>& data) {
+    if (!sendReplyCb_) {
+        Logger::Error("GameLogic::SendToSession sendReplyCb_ not set");
+        return;
+    }
+    BinaryProtocol::BinaryWriter w;
+    w.WriteUInt16(messageType);
+    w.WriteBytes(data.data(), data.size());
+    sendReplyCb_(sessionId, w.GetBuffer());
+}
+
 void GameLogic::Initialize() {
     if (running_.load()) {
         Logger::Warn("GameLogic already initialized");
@@ -315,16 +352,16 @@ void GameLogic::OnCollisionCheck(const CollisionData& data) {
 
 void GameLogic::SyncNearbyEntitiesToPlayer(uint64_t session_id, const glm::vec3& position) {
     auto nearbyEntities = EntityManager::GetInstance().GetEntitiesInRadius(position, 100.0f);
-    nlohmann::json entityList = nlohmann::json::array();
+    BinaryProtocol::BinaryWriter w;
+    w.WriteUInt64(GetCurrentTimestamp());
+    w.WriteUInt32(static_cast<uint32_t>(nearbyEntities.size()));
     for (uint64_t id : nearbyEntities) {
         auto entity = GetEntity(id);
-        if (entity) entityList.push_back(entity->Serialize());
+        if (entity) {
+            std::string serialized = entity->Serialize().dump();
+            w.WriteString(serialized);
+        }
     }
-    nlohmann::json msg = {{"msg","entity_sync"},{"entities",entityList},{"timestamp",GetCurrentTimestamp()}};
-    std::string jsonStr = msg.dump();
-    BinaryProtocol::BinaryWriter w;
-    w.WriteUInt32(static_cast<uint32_t>(jsonStr.size()));
-    w.WriteBytes(reinterpret_cast<const uint8_t*>(jsonStr.data()), jsonStr.size());
     sendReplyCb_(session_id, w.GetBuffer());
 }
 
@@ -951,11 +988,6 @@ void GameLogic::SetDatabaseService(DatabaseService* dbService) {
     dbService_ = dbService;
 }
 
-// void GameLogic::SetConnectionManager(std::shared_ptr<ConnectionManager> connMgr) {
-//     connectionManager_ = std::move(connMgr);
-//     Logger::Trace("ConnectionManager set for GameLogic");
-// }
-
 void GameLogic::SetDatabaseBackend(std::unique_ptr<DatabaseBackend> backend) {
     databaseBackend_ = std::move(backend);
     Logger::Trace("Database backend set for GameLogic");
@@ -1045,174 +1077,6 @@ void GameLogic::SaveLoop() {
     }
     Logger::Trace("GameLogic::SaveLoop stopped");
 }
-
-// void GameLogic::HandleLogin(uint64_t session_id, const nlohmann::json& data) {
-//     if (!data.contains("username") || !data["username"].is_string() ||
-//         !data.contains("password") || !data["password"].is_string()) {
-//         SendError(session_id, "Missing or invalid username/password", 400);
-//         return;
-//     }
-//     std::string username = data["username"];
-//     std::string password = data["password"];
-//     auto& pm = PlayerManager::GetInstance();
-//     bool authenticated = pm.AuthenticatePlayer(username, password);
-//     if (!authenticated) {
-//         SendError(session_id, "Invalid credentials", 401);
-//         return;
-//     }
-//     auto player = pm.GetPlayerByUsername(username);
-//     if (!player) {
-//         SendError(session_id, "Player data unavailable", 500);
-//         return;
-//     }
-//     uint64_t player_id = player->GetId();
-//     OnPlayerConnected(session_id, player_id);
-//     auto& world = LogicWorld::GetInstance();
-//     world.AddEntity(player);
-//     FirePythonEvent("player_login", {{"player_id", player_id}, {"username", username}});
-//     SendSuccess(session_id, "Login successful", nlohmann::json{
-//         {"player_id", player_id},
-//         {"position", player->JsonGetPosition()},
-//         {"health", player->GetHealth()},
-//         {"max_health", player->GetMaxHealth()},
-//         {"level", player->GetLevel()},
-//         {"experience", player->GetExperience()},
-//         {"inventory", player->JsonGetInventory()}
-//     });
-// }
-
-// void GameLogic::HandleChat(uint64_t session_id, const nlohmann::json& data) {
-//     uint64_t player_id = GetPlayerIdBySession(session_id);
-//     if (player_id == 0) {
-//         SendError(session_id, "Player not authenticated", 401);
-//         return;
-//     }
-//     if (!data.contains("message") || !data["message"].is_string()) {
-//         SendError(session_id, "Missing or invalid message", 400);
-//         return;
-//     }
-//     std::string chatMessage = data["message"];
-//     if (chatMessage.empty()) {
-//         SendError(session_id, "Message cannot be empty", 400);
-//         return;
-//     }
-//     auto player = PlayerManager::GetInstance().GetPlayer(player_id);
-//     if (!player) {
-//         SendError(session_id, "Player not found", 500);
-//         return;
-//     }
-//     Logger::Info("Chat from player {} ({}): {}", player_id, player->GetName(), chatMessage);
-//     nlohmann::json chatJson = {
-//         {"type", "chat"},
-//         {"player_id", player_id},
-//         {"name", player->GetName()},
-//         {"message", chatMessage},
-//         {"timestamp", GetCurrentTimestamp()}
-//     };
-//     std::string channel = data.value("channel", "local");
-//     if (channel == "global") {
-//         auto& connMgr = ConnectionManager::GetInstance();
-//         auto sessions = connMgr.GetAllSessions();
-//         for (auto& session : sessions) {
-//             if (session && session->IsConnected())
-//                 session->SendJson(chatJson);
-//         }
-//     } else {
-//         PlayerManager::GetInstance().BroadcastToNearbyPlayers(player_id, chatJson);
-//     }
-//     FirePythonEvent("player_chat", {{"player_id", player_id}, {"message", chatMessage}, {"channel", channel}});
-// }
-
-// void GameLogic::HandleCombat(uint64_t session_id, const nlohmann::json& data) {
-//     uint64_t player_id = GetPlayerIdBySession(session_id);
-//     if (player_id == 0) {
-//         SendError(session_id, "Player not authenticated", 401);
-//         return;
-//     }
-//     if (!data.contains("target_id") || !data["target_id"].is_number_integer()) {
-//         SendError(session_id, "Missing or invalid target_id", 400);
-//         return;
-//     }
-//     uint64_t target_id = data["target_id"];
-//     std::string attack_type = data.value("attack_type", "melee");
-//     auto player = PlayerManager::GetInstance().GetPlayer(player_id);
-//     if (!player) {
-//         SendError(session_id, "Player not found", 500);
-//         return;
-//     }
-//     auto& world = LogicWorld::GetInstance();
-//     auto target = world.GetEntity(target_id);
-//     if (!target) {
-//         SendError(session_id, "Target not found", 404);
-//         return;
-//     }
-//     float distance = glm::distance(player->GetPosition(), target->GetPosition());
-//     if (distance > player->GetAttackRange()) {
-//         SendError(session_id, "Target out of range", 400);
-//         return;
-//     }
-//     int damage = player->CalculateDamage(attack_type);
-//     target->TakeDamage(damage, player_id);
-//     FirePythonEvent("player_attack", {{"player_id", player_id}, {"target_id", target_id}, {"damage", damage}, {"attack_type", attack_type}});
-//     SendSuccess(session_id, "Combat resolved", nlohmann::json{
-//         {"damage", damage},
-//         {"target_health", target->GetHealth()},
-//         {"target_defeated", target->IsDead()}
-//     });
-// }
-
-// void GameLogic::HandleQuest(uint64_t session_id, const nlohmann::json& data) {
-//     uint64_t player_id = GetPlayerIdBySession(session_id);
-//     if (player_id == 0) {
-//         SendError(session_id, "Player not authenticated", 401);
-//         return;
-//     }
-//     if (!data.contains("quest_id") || !data["quest_id"].is_number_integer()) {
-//         SendError(session_id, "Missing or invalid quest_id", 400);
-//         return;
-//     }
-//     uint64_t quest_id = data["quest_id"];
-//     if (!data.contains("action") || !data["action"].is_string()) {
-//         SendError(session_id, "Missing or invalid action", 400);
-//         return;
-//     }
-//     std::string action = data["action"];
-//     auto player = PlayerManager::GetInstance().GetPlayer(player_id);
-//     if (!player) {
-//         SendError(session_id, "Player not found", 500);
-//         return;
-//     }
-//     auto& questManager = QuestManager::GetInstance();
-//     nlohmann::json result;
-//     if (action == "start") {
-//         if (questManager.CanStartQuest(player_id, quest_id)) {
-//             questManager.StartQuest(player_id, quest_id);
-//             result["status"] = "started";
-//         } else {
-//             SendError(session_id, "Cannot start quest", 400);
-//             return;
-//         }
-//     } else if (action == "update") {
-//         std::string objective = data.value("objective", "");
-//         int progress = data.value("progress", 1);
-//         questManager.UpdateObjective(player_id, quest_id, objective, progress);
-//         result["status"] = "updated";
-//     } else if (action == "complete") {
-//         if (questManager.CanCompleteQuest(player_id, quest_id)) {
-//             auto rewards = questManager.CompleteQuest(player_id, quest_id);
-//             result["status"] = "completed";
-//             result["rewards"] = rewards;
-//         } else {
-//             SendError(session_id, "Quest cannot be completed yet", 400);
-//             return;
-//         }
-//     } else {
-//         SendError(session_id, "Unknown action: " + action, 400);
-//         return;
-//     }
-//     FirePythonEvent("player_quest", {{"player_id", player_id}, {"quest_id", quest_id}, {"action", action}});
-//     SendSuccess(session_id, "Quest action processed", result);
-// }
 
 void GameLogic::GameLoop() {
     Logger::Info("Game loop started");

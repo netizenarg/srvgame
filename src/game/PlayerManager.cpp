@@ -221,14 +221,8 @@ void PlayerManager::UpdatePosition(uint64_t playerId, float x, float y, float z)
 }
 
 void PlayerManager::BroadcastToNearbyPlayers(int64_t playerId, const nlohmann::json& message) {
-    auto nearby = GetNearbyPlayers(playerId, DEFAULT_BROADCAST_RANGE);
-    auto& connMgr = ConnectionManager::GetInstance();
-    for (int64_t id : nearby) {
-        if (auto sessionId = GetSessionIdByPlayerId(id)) {
-            if (auto session = connMgr.GetSession(sessionId))
-                session->SendJson(message);
-        }
-    }
+    (void)playerId;
+    (void)message;
 }
 
 std::vector<int64_t> PlayerManager::GetNearbyPlayers(int64_t playerId, float radius) {
@@ -482,12 +476,7 @@ void PlayerManager::CreateParty(int64_t leaderId, const std::string& partyName) 
     party.members.insert(leaderId);
     party.created_at = std::chrono::system_clock::now();
     parties_[party.id] = party;
-
-    auto& connMgr = ConnectionManager::GetInstance();
-    if (auto sessionId = GetSessionIdByPlayerId(leaderId))
-        connMgr.AddToGroup("party_" + std::to_string(party.id), sessionId);
-
-    Logger::Info("Party created: {} (ID: {}) by player {}", partyName, party.id, leaderId);
+    Logger::Trace("Party created: {} (ID: {}) by player {}", partyName, party.id, leaderId);
 }
 
 void PlayerManager::AddPlayerToParty(int64_t partyId, int64_t playerId) {
@@ -503,31 +492,20 @@ void PlayerManager::AddPlayerToParty(int64_t partyId, int64_t playerId) {
         return;
     }
     party.members.insert(playerId);
-
-    auto& connMgr = ConnectionManager::GetInstance();
-    if (auto sessionId = GetSessionIdByPlayerId(playerId))
-        connMgr.AddToGroup("party_" + std::to_string(partyId), sessionId);
-
-    Logger::Info("Player {} added to party {}", playerId, partyId);
+    Logger::Trace("Player {} added to party {}", playerId, partyId);
 }
 
 void PlayerManager::RemovePlayerFromParty(int64_t partyId, int64_t playerId) {
     std::lock_guard<std::mutex> lock(partyMutex_);
     auto it = parties_.find(partyId);
     if (it == parties_.end()) return;
-
     auto& party = it->second;
     party.members.erase(playerId);
-
-    auto& connMgr = ConnectionManager::GetInstance();
-    if (auto sessionId = GetSessionIdByPlayerId(playerId))
-        connMgr.RemoveFromGroup("party_" + std::to_string(partyId), sessionId);
-
     if (party.members.empty() || playerId == party.leader_id) {
         parties_.erase(it);
-        Logger::Info("Party {} disbanded", partyId);
+        Logger::Trace("Party {} disbanded", partyId);
     } else {
-        Logger::Info("Player {} removed from party {}", playerId, partyId);
+        Logger::Trace("Player {} removed from party {}", playerId, partyId);
     }
 }
 
@@ -545,23 +523,13 @@ int64_t PlayerManager::GeneratePartyId() {
 }
 
 void PlayerManager::SendToPlayer(int64_t playerId, const nlohmann::json& message) {
-    if (auto sessionId = GetSessionIdByPlayerId(playerId)) {
-        auto& connMgr = ConnectionManager::GetInstance();
-        if (auto session = connMgr.GetSession(sessionId))
-            session->SendJson(message);
-    } else {
-        Logger::Warn("Player {} is not online", playerId);
-    }
+    (void)playerId;
+    (void)message;
 }
 
 void PlayerManager::SendToPlayers(const std::vector<int64_t>& playerIds, const nlohmann::json& message) {
-    auto& connMgr = ConnectionManager::GetInstance();
-    for (int64_t id : playerIds) {
-        if (auto sessionId = GetSessionIdByPlayerId(id)) {
-            if (auto session = connMgr.GetSession(sessionId))
-                session->SendJson(message);
-        }
-    }
+    (void)playerIds;
+    (void)message;
 }
 
 void PlayerManager::BanPlayer(int64_t playerId, const std::string& reason, int64_t durationSeconds) {
@@ -575,15 +543,6 @@ void PlayerManager::BanPlayer(int64_t playerId, const std::string& reason, int64
     if (durationSeconds > 0) {
         auto expires = std::chrono::system_clock::now() + std::chrono::seconds(durationSeconds);
         player->SetBanExpires(expires);
-    }
-
-    if (auto sessionId = GetSessionIdByPlayerId(playerId)) {
-        auto& connMgr = ConnectionManager::GetInstance();
-        if (auto session = connMgr.GetSession(sessionId)) {
-            nlohmann::json msg = {{"msg", "banned"}, {"reason", reason}, {"duration", durationSeconds}};
-            session->SendJson(msg);
-            session->Stop();
-        }
     }
     player->SaveToDatabase();
     Logger::Info("Player {} banned: {} ({}s)", playerId, reason, durationSeconds);

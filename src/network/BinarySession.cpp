@@ -1,3 +1,4 @@
+#include "game/GameLogic.hpp"
 #include "network/BinarySession.hpp"
 
 // Static member initialization

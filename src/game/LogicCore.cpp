@@ -188,39 +188,15 @@ uint64_t LogicCore::GetSessionIdByPlayer(uint64_t playerId) const {
 }
 
 void LogicCore::SendError(uint64_t sessionId, const std::string& description, int code) {
-    nlohmann::json errorMsg = {
-        {"msg", "error"},
-        {"desc", description},
-        {"code", code},
-        {"timestamp", GetCurrentTimestamp()}
-    };
-    SendToSessionJson(sessionId, errorMsg);
+    (void)sessionId; (void)description; (void)code;
 }
 
-void LogicCore::SendSuccess(uint64_t sessionId, const std::string& description, const nlohmann::json& data) {
-    nlohmann::json successMsg = {
-        {"msg", "success"},
-        {"desc", description},
-        {"data", data},
-        {"timestamp", GetCurrentTimestamp()}
-    };
-    SendToSessionJson(sessionId, successMsg);
-}
-
-void LogicCore::SendToSessionJson(uint64_t sessionId, const nlohmann::json& message) {
-    auto& connMgr = ConnectionManager::GetInstance();
-    auto session = connMgr.GetSession(sessionId);
-    if (session) {
-        session->SendJson(message);
-    }
+void LogicCore::SendSuccess(uint64_t sessionId, const std::string& description, const std::vector<uint8_t>& data) {
+    (void)sessionId; (void)description; (void)data;
 }
 
 void LogicCore::SendToSession(uint64_t sessionId, uint16_t messageType, const std::vector<uint8_t>& data) {
-    auto& connMgr = ConnectionManager::GetInstance();
-    auto session = connMgr.GetSession(sessionId);
-    if (session) {
-        session->Send(messageType, data);
-    }
+    (void)sessionId; (void)messageType; (void)data;
 }
 
 void LogicCore::FirePythonEvent(const std::string& eventName, const nlohmann::json& data) {

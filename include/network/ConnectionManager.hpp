@@ -1,174 +1,59 @@
 #pragma once
 
-#include <algorithm>
 #include <atomic>
-#include <chrono>
 #include <functional>
 #include <memory>
-#include <mutex>
 #include <shared_mutex>
 #include <string>
-#include <set>
-#include <vector>
-#include <unordered_set>
+#include <thread>
 #include <unordered_map>
 
-#include "nlohmann/json.hpp"
+#include <asio.hpp>
+#include <asio/ssl.hpp>
 
 #include "logging/Logger.hpp"
+#include "config/ConfigManager.hpp"
 #include "network/IConnection.hpp"
+#include "network/BinaryProtocol.hpp"
+#include "network/BinarySession.hpp"
+#include "network/WebSocketProtocol.hpp"
+#include "network/WebSocketSession.hpp"
+#include "game/GameData.hpp"
 
 class ConnectionManager {
 public:
-    // Delete copy constructor and assignment operator
-    ConnectionManager(const ConnectionManager&) = delete;
-    ConnectionManager& operator=(const ConnectionManager&) = delete;
-
-    // Get singleton instance
-    static ConnectionManager& GetInstance();
-
-    // Get shared_ptr to singleton (useful for passing to other components)
-    static std::shared_ptr<ConnectionManager> GetInstancePtr();
-
-    void Start(std::shared_ptr<IConnection> session);
-    void Stop(std::shared_ptr<IConnection> session);
-    void StopAll();
-
-    size_t GetConnectionCount() const;
-    std::shared_ptr<IConnection> GetSession(uint64_t sessionId) const;
-    std::vector<std::shared_ptr<IConnection>> GetAllSessions() const;
-
-    // Broadcast methods
-    void Broadcast(const nlohmann::json& message);
-    void BroadcastToGroup(const std::string& groupId, const nlohmann::json& message);
-    
-    // New broadcast methods
-    void BroadcastWithFilter(const nlohmann::json& message,
-                           std::function<bool(std::shared_ptr<IConnection>)> filter);
-    void BroadcastExcept(uint64_t excludeSessionId, const nlohmann::json& message);
-    void BroadcastToAuthenticated(const nlohmann::json& message);
-    void BroadcastToUnauthenticated(const nlohmann::json& message);
-
-    // Session groups
-    void AddToGroup(const std::string& groupId, uint64_t sessionId);
-    void RemoveFromGroup(const std::string& groupId, uint64_t sessionId);
-    void RemoveFromAllGroups(uint64_t sessionId);
-
-    // Session query methods
-    std::vector<std::shared_ptr<IConnection>> GetSessionsByPlayerId(int64_t playerId) const;
-    std::vector<uint64_t> GetSessionIdsInGroup(const std::string& groupId) const;
-    std::vector<std::shared_ptr<IConnection>> GetSessionsInGroup(const std::string& groupId) const;
-    std::set<std::string> GetGroupsForSession(uint64_t sessionId) const;
-    bool IsSessionInGroup(uint64_t sessionId, const std::string& groupId) const;
-    
-    // Session search
-    std::vector<uint64_t> FindSessionsByProperty(const std::string& key,
-                                                const std::string& value) const;
-    std::vector<uint64_t> FindSessionsByData(const std::string& key,
-                                           const nlohmann::json& value) const;
-
-    // Statistics
-    struct SessionStatsInfo {
-        std::chrono::system_clock::time_point start_time;
-        std::chrono::system_clock::time_point last_activity;
-        uint64_t messages_sent = 0;
-        uint64_t messages_received = 0;
-        uint64_t bytes_sent = 0;
-        uint64_t bytes_received = 0;
-    };
-
-    struct GlobalStats {
-        uint64_t total_sessions_created = 0;
-        uint64_t total_connections = 0;
-        uint64_t total_connection_time_seconds = 0;
-        double average_connection_duration_seconds = 0.0;
-        
-        uint64_t total_bytes_received = 0;
-        uint64_t total_bytes_sent = 0;
-        uint64_t total_messages_received = 0;
-        uint64_t total_messages_sent = 0;
-        
-        double bytes_received_per_second = 0.0;
-        double bytes_sent_per_second = 0.0;
-        double messages_received_per_second = 0.0;
-        double messages_sent_per_second = 0.0;
-        
-        size_t total_groups = 0;
-        size_t largest_group_size = 0;
-        std::string largest_group_id;
-    };
-
-    GlobalStats GetGlobalStats() const;
-    SessionStatsInfo GetSessionStats(uint64_t sessionId) const;
-    void PrintGlobalStats() const;
-    
-    // Connection maintenance
-    void CleanupInactiveSessions(int timeoutSeconds = 300);
-    void DisconnectAllInGroup(const std::string& groupId);
-    
-    // Load balancing
-    std::vector<std::shared_ptr<IConnection>> GetSessionsByWorkerId(int workerId) const;
-    void RedistributeSessions(const std::vector<int>& workerIds);
-    
-    // Event system
-    using EventHandler = std::function<void(const std::string&, const nlohmann::json&)>;
-    void RegisterEventHandler(const std::string& eventType, EventHandler handler);
-    void UnregisterEventHandler(const std::string& eventType, EventHandler handler);
-    
-    // Rate limiting
-    void EnforceGlobalRateLimit(int maxMessagesPerSecond);
-    
-    // Session migration
-    bool MigrateSession(uint64_t sessionId, std::shared_ptr<IConnection> newSession);
-    
-    // Monitoring
-    void MonitorConnections();
-    
-    // Utility methods
-    void DisconnectAll();
-    void GracefulShutdown(int timeoutSeconds = 30);
-    std::string GetStatusReport() const;
+    using MasterSender = std::function<void(uint32_t correlationId, uint64_t sessionId, uint16_t messageType, const std::vector<uint8_t>& body)>;
+    ConnectionManager(const WorkerGroupConfig& groupConfig, MasterSender masterSender);
+    ~ConnectionManager();
+    bool Start();
+    void Shutdown();
+    void OnMasterReply(uint32_t correlationId, const std::vector<uint8_t>& reply);
 
 private:
-    ConnectionManager();
-    ~ConnectionManager();
-
-    // Singleton instance
-    static std::mutex instanceMutex_;
-    static ConnectionManager* instance_;
-
-    // Session storage
+    asio::io_context ioContext_;
+    asio::ip::tcp::acceptor acceptor_;
+    std::vector<std::thread> workerThreads_;
+    std::atomic<bool> running_{false};
+    std::shared_ptr<asio::ssl::context> sslContext_;
+    MasterSender masterSender_;
     mutable std::shared_mutex sessionsMutex_;
     std::unordered_map<uint64_t, std::shared_ptr<IConnection>> sessions_;
-
-    // Group management
-    mutable std::shared_mutex groupsMutex_;
-    std::unordered_map<std::string, std::unordered_set<uint64_t>> groups_;
-    std::unordered_map<uint64_t, std::set<std::string>> sessionGroups_;
-
-    // Statistics
-    mutable std::mutex statsMutex_;
-    std::unordered_map<uint64_t, SessionStatsInfo> sessionStats_;
-    std::atomic<uint64_t> totalConnections_{0};
-    std::atomic<uint64_t> totalSessionsCreated_{0};
-    std::atomic<uint64_t> totalConnectionTime_{0}; // in seconds
-
-    // Event system
-    mutable std::mutex eventHandlersMutex_;
-    std::unordered_map<std::string, std::vector<EventHandler>> eventHandlers_;
-
-    // Maintenance
-    std::chrono::system_clock::time_point lastCleanup_;
-    std::chrono::system_clock::time_point lastMonitor_;
-
-    // Internal methods
-    void AddToGroupInternal(const std::string& groupId, uint64_t sessionId);
-    void RemoveFromGroupInternal(const std::string& groupId, uint64_t sessionId);
-    void RemoveFromAllGroupsInternal(uint64_t sessionId);
-    std::set<std::string> GetDefaultGroups() const;
-    
-    void UpdateSessionStats(uint64_t sessionId,
-                          size_t bytesReceived = 0,
-                          size_t bytesSent = 0);
-    void EmitEvent(const std::string& eventType, const nlohmann::json& data);
+    struct PendingEntry {
+        uint64_t sessionId;
+        uint16_t messageType;
+    };
+    std::unordered_map<uint32_t, PendingEntry> pendingReplies_;
+    std::atomic<uint32_t> nextCorrelationId_{1};
+    std::function<std::shared_ptr<IConnection>(asio::ip::tcp::socket, std::shared_ptr<asio::ssl::context>)> sessionFactory_;
+    std::function<std::shared_ptr<IConnection>(asio::ip::tcp::socket, std::shared_ptr<asio::ssl::context>)> webSocketFactory_;
+    WorkerGroupConfig groupConfig_;
+    std::string host_;
+    uint16_t port_;
+    bool reuse_;
+    void initSessionFactory();
+    void doAccept();
+    void onClientMessage(uint64_t sessionId, uint16_t type, const std::vector<uint8_t>& data);
+    void onClientClose(uint64_t sessionId);
+    static uint16_t jsonMsgType(const std::string& msg);
+    static nlohmann::json binaryToJson(uint16_t type, const std::vector<uint8_t>& body);
 };
