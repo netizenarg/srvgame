@@ -21,7 +21,7 @@ endif()
 # Add GLM include directory
 set(GLM_DIR "${CMAKE_SOURCE_DIR}/thirdparty/glm")
 set(GLM_INCLUDE_DIRS "${GLM_DIR}")
-include_directories(${glm_INCLUDE_DIRS})
+include_directories(${GLM_INCLUDE_DIRS})
 
 find_package(nlohmann_json 3.2.0 QUIET)
 if(NOT nlohmann_json_FOUND)
@@ -68,7 +68,20 @@ if(NOT UUID_LIBRARY)
     message(FATAL_ERROR "libuuid not found - install libuuid-dev or equivalent")
 endif()
 
-find_library(CRYPT_LIB crypt)
+# Find crypt library and header
+find_library(CRYPT_LIB NAMES crypt)
+find_path(CRYPT_INCLUDE_DIR NAMES crypt.h)
+
+if(NOT CRYPT_LIB)
+    message(FATAL_ERROR "libcrypt not found - install libcrypt-dev")
+endif()
+
+if(NOT CRYPT_INCLUDE_DIR)
+    message(FATAL_ERROR "crypt.h not found - install libcrypt-dev")
+endif()
+
+message(STATUS "Found crypt library: ${CRYPT_LIB}")
+message(STATUS "Found crypt.h in: ${CRYPT_INCLUDE_DIR}")
 
 # Config system
 set(CONFIG_SOURCES
@@ -160,10 +173,11 @@ endif()
 include_directories(
     include
     ${OPENGL_INCLUDE_DIR}
-    ${glm_INCLUDE_DIRS}
+    ${GLM_INCLUDE_DIRS}
     ${PostgreSQL_INCLUDE_DIRS}
     ${ZLIB_INCLUDE_DIRS}
     ${OPENSSL_INCLUDE_DIR}
+    ${CRYPT_INCLUDE_DIR}
 )
 
 option(ENABLE_ASAN "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)

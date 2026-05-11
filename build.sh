@@ -7,7 +7,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 mkdir -p thirdparty
 cd thirdparty
 
-git clone https://github.com/chriskohlhoff/asio.git
+# Clone or update ASIO
+if [ -d "asio" ]; then
+    echo "ASIO already exists, updating..."
+    cd asio && git pull && cd ..
+else
+    git clone https://github.com/chriskohlhoff/asio.git
+fi
+
 if [ ! -d "asio/asio/include" ]; then
     echo "ASIO directory structure incorrect, checking..."
     if [ -f "asio/asio.hpp" ]; then
@@ -17,13 +24,34 @@ if [ ! -d "asio/asio/include" ]; then
     fi
 fi
 
-git clone https://github.com/nlohmann/json.git
-git clone https://github.com/gabime/spdlog.git
-git clone https://github.com/g-truc/glm.git
+# Clone or update JSON
+if [ -d "json" ]; then
+    echo "JSON already exists, updating..."
+    cd json && git pull && cd ..
+else
+    git clone https://github.com/nlohmann/json.git
+fi
+
+# Clone or update spdlog
+if [ -d "spdlog" ]; then
+    echo "spdlog already exists, updating..."
+    cd spdlog && git pull && cd ..
+else
+    git clone https://github.com/gabime/spdlog.git
+fi
+
+# Clone or update GLM
+if [ -d "glm" ]; then
+    echo "GLM already exists, updating..."
+    cd glm && git pull && cd ..
+else
+    git clone https://github.com/g-truc/glm.git
+fi
+
 cd ..
 
-# Install system dependencies
-#sudo apt-get update
+# Install system dependencies (NO Boost packages)
+sudo apt-get update
 sudo apt-get install -y \
     build-essential \
     cmake \
@@ -35,7 +63,16 @@ sudo apt-get install -y \
     libglm-dev \
     libasio-dev \
     libspdlog-dev \
-    nlohmann-json3-dev
+    nlohmann-json3-dev \
+    libgl1-mesa-dev \
+    libglu1-mesa-dev \
+    libx11-dev \
+    libxi-dev \
+    libxrandr-dev \
+    mesa-common-dev \
+    uuid-dev \
+    libcrypt-dev \
+    libfmt-dev
 
 # Parse command line arguments
 USE_CITUS=OFF
@@ -78,7 +115,7 @@ rm -rf CMakeFiles
 # Create build directory and copy related folders
 mkdir -p build
 cd build
-if $CLEAR_PREVIOUS; then
+if [ "$CLEAR_PREVIOUS" = true ]; then
     echo "Clearing previous compilations..."
     find . -mindepth 1 -maxdepth 1 ! -name "certs" -exec rm -rf {} +
 fi
