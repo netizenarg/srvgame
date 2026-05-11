@@ -31,7 +31,7 @@ sudo apt-get install -y \
     python3-dev \
     libssl-dev \
     zlib1g-dev \
-    postgresql-15 \
+    postgresql \
     libglm-dev \
     libasio-dev \
     libspdlog-dev \
@@ -47,7 +47,7 @@ for arg in "$@"; do
     case $arg in
         --with-citus)
             echo "Installing Citus extension..."
-            sudo apt-get install -y postgresql-15-citus-12
+            sudo apt-get install -y postgresql-citus
             USE_CITUS=ON
             ;;
         --with-sqlite)
