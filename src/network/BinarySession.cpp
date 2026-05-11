@@ -60,6 +60,23 @@ BinarySession::~BinarySession() {
     Logger::Debug("BinarySession {} destroyed", sessionId_);
 }
 
+ProtocolMode BinarySession::GetProtocolMode() const { return ProtocolMode::Binary; }
+
+uint64_t BinarySession::GetSessionId() const { return sessionId_; }
+
+bool BinarySession::IsEncrypted() const { return ssl_stream_ != nullptr; }
+
+std::string BinarySession::GetRemoteAddress() const {
+    try {
+        return GetRemoteEndpoint().address().to_string();
+    } catch (const std::exception& e) {
+        Logger::Error("GetRemoteAddress: {}", e.what());
+        return "unknown";
+    }
+}
+
+NetworkQualityMonitor& BinarySession::GetNetworkMonitor() { return network_monitor_; }
+
 // =============== Core Session Management ===============
 
 void BinarySession::Start() {
