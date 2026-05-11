@@ -109,10 +109,10 @@ set(SCRIPTING_SOURCES
 # Network system
 set(NETWORK_SOURCES
     src/network/BinaryProtocol.cpp
+    src/network/BinarySession.cpp
     src/network/ConnectionManager.cpp
     src/network/ClientListener.cpp
     src/network/MasterServer.cpp
-    src/network/BinarySession.cpp
     src/network/NetworkQualityMonitor.cpp
     src/network/PredictionSystem.cpp
     src/network/WebSocketProtocol.cpp
@@ -127,7 +127,7 @@ set(LOOT_SOURCES
     src/game/LootTableManager.cpp
 )
 
-# 3D world system
+# world system
 set(WORLD_SOURCES
     src/game/WorldChunk.cpp
     src/game/WorldGenerator.cpp
@@ -143,12 +143,12 @@ set(WORLD_SOURCES
 set(LOGIC_CORE_SOURCES
     src/game/LogicCore.cpp
     src/game/LogicEntity.cpp
-    src/game/GameLogic.cpp
     src/game/EntityManager.cpp
     src/game/SkillSystem.cpp
     src/game/Player.cpp
     src/game/PlayerManager.cpp
     src/game/QuestManager.cpp
+    src/game/GameLogic.cpp
 )
 
 # Database system
