@@ -22,6 +22,7 @@
 #include <openssl/evp.h>
 
 #include "logging/Logger.hpp"
+#include "network/BinaryProtocol.hpp"
 
 namespace WebSocketProtocol {
 
@@ -227,6 +228,7 @@ namespace WebSocketProtocol {
         // Statistics
         mutable std::mutex stats_mutex_;
         Statistics stats_;
+        std::atomic<bool> write_in_progress_{false};
 
         // Handshake
         virtual void HandleHandshake();

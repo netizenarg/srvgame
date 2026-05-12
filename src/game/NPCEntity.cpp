@@ -1294,7 +1294,6 @@ void NPCEntity::LoadTradeItemsFromJson(const nlohmann::json& json) {
     }
 }
 
-// =============== Event Handlers ===============
 void NPCEntity::OnCreate() {
     GameEntity::OnCreate();
     Logger::Debug("NPC {} created", GetId());
@@ -1315,7 +1314,6 @@ void NPCEntity::OnCollision(std::shared_ptr<GameEntity> other) {
     }
 }
 
-// =============== Fixed Update ===============
 void NPCEntity::FixedUpdate(float delta_time) {
     GameEntity::FixedUpdate(delta_time);
 }
@@ -1335,3 +1333,58 @@ void NPCEntity::MoveTo(const glm::vec3& destination, float speed_multiplier) {
         has_move_target_ = false;
     }
 }
+
+NPCType NPCEntity::GetNPCType() const { return npc_type_; }
+
+NPCRarity NPCEntity::GetRarity() const { return rarity_; }
+void NPCEntity::SetRarity(NPCRarity rarity) { rarity_ = rarity; }
+
+NPCFaction NPCEntity::GetFaction() const { return faction_; }
+void NPCEntity::SetFaction(NPCFaction faction) { faction_ = faction; }
+
+NPCAIState NPCEntity::GetAIState() const { return ai_state_; }
+
+const NPCStats& NPCEntity::GetNPCStats() const { return npc_stats_; }
+
+float NPCEntity::GetAttackDamage() const { return npc_stats_.attack_damage; }
+float NPCEntity::GetAttackRange() const { return npc_stats_.attack_range; }
+float NPCEntity::GetSightRange() const { return npc_stats_.sight_range; }
+float NPCEntity::GetChaseRange() const { return npc_stats_.chase_range; }
+
+const NPCAIProfile& NPCEntity::GetAIProfile() const { return ai_profile_; }
+
+uint64_t NPCEntity::GetTarget() const { return target_id_; }
+bool NPCEntity::HasTarget() const { return target_id_ != 0; }
+
+const std::vector<glm::vec3>& NPCEntity::GetPatrolPoints() const { return ai_profile_.patrol_points; }
+
+std::string NPCEntity::GetLootTable() const { return loot_table_.table_id; }
+
+int NPCEntity::GetExperienceReward() const { return npc_stats_.experience_reward; }
+
+const NPCDialogue& NPCEntity::GetDialogue() const { return dialogue_; }
+
+std::string NPCEntity::GetGreeting() const { return dialogue_.greeting; }
+void NPCEntity::SetGreeting(const std::string& greeting) { dialogue_.greeting = greeting; }
+
+const std::vector<std::string>& NPCEntity::GetQuests() const { return quests_; }
+
+const std::unordered_map<std::string, int>& NPCEntity::GetTradeItems() const { return trade_items_; }
+
+void NPCEntity::SetSpawnPosition(const glm::vec3& position) { spawn_position_ = position; }
+glm::vec3 NPCEntity::GetSpawnPosition() const { return spawn_position_; }
+
+void NPCEntity::SetRespawnTime(float time) { npc_stats_.respawn_time = time; }
+float NPCEntity::GetRespawnTime() const { return npc_stats_.respawn_time; }
+
+bool NPCEntity::ShouldRespawn() const { return ai_profile_.respawns && IsDead(); }
+
+bool NPCEntity::IsHostile() const { return faction_ == NPCFaction::HOSTILE || ai_profile_.is_hostile; }
+bool NPCEntity::IsFriendly() const { return faction_ == NPCFaction::FRIENDLY || ai_profile_.is_friendly; }
+bool NPCEntity::IsNeutral() const { return faction_ == NPCFaction::NEUTRAL || ai_profile_.is_neutral; }
+
+bool NPCEntity::IsAggressive() const { return ai_profile_.is_aggressive; }
+
+NPCStats NPCEntity::GetStats() const { return npc_stats_; };
+uint64_t NPCEntity::GetOwnerId() const { return target_id_; };
+void NPCEntity::SetBehaviorState(NPCAIState st) { ai_state_ = st; };

@@ -1,10 +1,8 @@
 #include "game/LogicEntity.hpp"
 
-// =============== Static Members ===============
 std::mutex LogicEntity::instanceMutex_;
 LogicEntity* LogicEntity::instance_ = nullptr;
 
-// =============== Singleton Access ===============
 LogicEntity& LogicEntity::GetInstance() {
     std::lock_guard<std::mutex> lock(instanceMutex_);
     if (!instance_) {
@@ -14,7 +12,7 @@ LogicEntity& LogicEntity::GetInstance() {
 }
 
 LogicEntity::LogicEntity()
-    : mobSystem_(MobSystem::GetInstance()),
+    : running_(true), mobSystem_(MobSystem::GetInstance()),
       entityManager_(EntityManager::GetInstance()) {
     Logger::Trace("LogicEntity created");
 }
@@ -35,11 +33,13 @@ void LogicEntity::Initialize() {
 }
 
 void LogicEntity::Shutdown() {
+    if (!running_.exchange(false)) return;
+    Logger::Trace("LogicEntity::Shutdown running...");
     npcManager_.reset();
     collisionSystem_.reset();
     //inventorySystem_.reset();
     lootTableManager_.reset();
-    Logger::Info("LogicEntity shutdown");
+    Logger::Trace("LogicEntity::Shutdown complete");
 }
 
 void LogicEntity::InitializeNPCSystem() {
@@ -111,6 +111,7 @@ void LogicEntity::DespawnNPC(uint64_t npcId) {
 
 void LogicEntity::UpdateNPCs(float deltaTime) {
     std::lock_guard<std::mutex> lock(npcMutex_);
+    if (!npcManager_) return;
     npcManager_->Update(deltaTime);
     for (auto& [npcId, npc] : npcManager_->GetAllNPCs()) {
         if (npc && collisionSystem_) {
@@ -136,6 +137,8 @@ CollisionResult LogicEntity::CheckCollision(const glm::vec3& position, float rad
     }
     return collisionSystem_->CheckCollision(position, radius, excludeEntityId);
 }
+
+int LogicEntity::GetActiveNPCCount() const { return npcManager_->GetNPCs().size(); }
 
 bool LogicEntity::Raycast(const glm::vec3& origin, const glm::vec3& direction, float maxDistance, RaycastHit& hit) {
     if (!collisionSystem_) {

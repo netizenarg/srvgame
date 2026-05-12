@@ -219,62 +219,57 @@ public:
     NPCEntity(NPCType type, const glm::vec3& position, int level = 1);
     virtual ~NPCEntity();
 
-    // NPC type and classification
-    NPCType GetNPCType() const { return npc_type_; }
+    NPCType GetNPCType() const;
     void SetNPCType(NPCType type);
 
-    NPCRarity GetRarity() const { return rarity_; }
-    void SetRarity(NPCRarity rarity) { rarity_ = rarity; }
+    NPCRarity GetRarity() const;
+    void SetRarity(NPCRarity rarity);
 
-    NPCFaction GetFaction() const { return faction_; }
-    void SetFaction(NPCFaction faction) { faction_ = faction; }
+    NPCFaction GetFaction() const;
+    void SetFaction(NPCFaction faction);
 
-    NPCAIState GetAIState() const { return ai_state_; }
+    NPCAIState GetAIState() const;
     void SetAIState(NPCAIState state);
 
-    // Stats and combat
-    const NPCStats& GetNPCStats() const { return npc_stats_; }
+    const NPCStats& GetNPCStats() const;
     void SetNPCStats(const NPCStats& stats);
 
     void TakeDamage(float damage, uint64_t attacker_id = 0);
     void Heal(float amount, uint64_t healer_id = 0);
 
-    float GetAttackDamage() const { return npc_stats_.attack_damage; }
-    float GetAttackRange() const { return npc_stats_.attack_range; }
-    float GetSightRange() const { return npc_stats_.sight_range; }
-    float GetChaseRange() const { return npc_stats_.chase_range; }
+    float GetAttackDamage() const;
+    float GetAttackRange() const;
+    float GetSightRange() const;
+    float GetChaseRange() const;
 
-    // AI and behavior
-    const NPCAIProfile& GetAIProfile() const { return ai_profile_; }
+    const NPCAIProfile& GetAIProfile() const;
     void SetAIProfile(const NPCAIProfile& profile);
     void SetDefaultAIProfile();
 
     void UpdateAI(float delta_time);
     void SetTarget(uint64_t target_id);
-    uint64_t GetTarget() const { return target_id_; }
-    bool HasTarget() const { return target_id_ != 0; }
+    uint64_t GetTarget() const;
+    bool HasTarget() const;
 
     void AddPatrolPoint(const glm::vec3& point);
     void ClearPatrolPoints();
-    const std::vector<glm::vec3>& GetPatrolPoints() const { return ai_profile_.patrol_points; }
+    const std::vector<glm::vec3>& GetPatrolPoints() const;
 
-    // Loot and rewards
     void SetLootTable(const std::string& table_id);
-    std::string GetLootTable() const { return loot_table_.table_id; }
+    std::string GetLootTable() const;
 
     void AddDropItem(const std::string& item_id, float drop_rate);
     void RemoveDropItem(const std::string& item_id);
 
     std::vector<std::pair<std::string, int>> GenerateLoot() const;
     int GenerateGold() const;
-    int GetExperienceReward() const { return npc_stats_.experience_reward; }
+    int GetExperienceReward() const;
 
-    // Dialogue and interaction
-    const NPCDialogue& GetDialogue() const { return dialogue_; }
+    const NPCDialogue& GetDialogue() const;
     void SetDialogue(const NPCDialogue& dialogue);
 
-    std::string GetGreeting() const { return dialogue_.greeting; }
-    void SetGreeting(const std::string& greeting) { dialogue_.greeting = greeting; }
+    std::string GetGreeting() const;
+    void SetGreeting(const std::string& greeting);
 
     void AddDialogueTopic(const std::string& topic, const std::string& response);
     void AddQuestDialogue(const std::string& quest_id, const nlohmann::json& dialogue);
@@ -283,47 +278,41 @@ public:
     bool HasDialogueTopic(const std::string& topic) const;
     std::string GetDialogueResponse(const std::string& topic) const;
 
-    // Quest and trade
     void AddQuest(const std::string& quest_id);
     void RemoveQuest(const std::string& quest_id);
     bool HasQuest(const std::string& quest_id) const;
-    const std::vector<std::string>& GetQuests() const { return quests_; }
+    const std::vector<std::string>& GetQuests() const;
 
     void AddTradeItem(const std::string& item_id, int price);
     void RemoveTradeItem(const std::string& item_id);
     bool SellsItem(const std::string& item_id) const;
     int GetItemPrice(const std::string& item_id) const;
-    const std::unordered_map<std::string, int>& GetTradeItems() const { return trade_items_; }
+    const std::unordered_map<std::string, int>& GetTradeItems() const;
 
-    // Spawn and respawn
-    void SetSpawnPosition(const glm::vec3& position) { spawn_position_ = position; }
-    glm::vec3 GetSpawnPosition() const { return spawn_position_; }
+    void SetSpawnPosition(const glm::vec3& position);
+    glm::vec3 GetSpawnPosition() const;
 
-    void SetRespawnTime(float time) { npc_stats_.respawn_time = time; }
-    float GetRespawnTime() const { return npc_stats_.respawn_time; }
+    void SetRespawnTime(float time);
+    float GetRespawnTime() const;
 
-    bool ShouldRespawn() const { return ai_profile_.respawns && IsDead(); }
+    bool ShouldRespawn() const;
     void Respawn();
 
-    // Serialization
     virtual nlohmann::json Serialize() const override;
     virtual void Deserialize(const nlohmann::json& data) override;
 
-    // Update
     virtual void Update(float delta_time) override;
     virtual void FixedUpdate(float delta_time) override;
 
-    // Events
     virtual void OnCreate() override;
     virtual void OnDestroy() override;
     virtual void OnCollision(std::shared_ptr<GameEntity> other) override;
 
-    // Utility
-    bool IsHostile() const { return faction_ == NPCFaction::HOSTILE || ai_profile_.is_hostile; }
-    bool IsFriendly() const { return faction_ == NPCFaction::FRIENDLY || ai_profile_.is_friendly; }
-    bool IsNeutral() const { return faction_ == NPCFaction::NEUTRAL || ai_profile_.is_neutral; }
+    bool IsHostile() const;
+    bool IsFriendly() const;
+    bool IsNeutral() const;
 
-    bool IsAggressive() const { return ai_profile_.is_aggressive; }
+    bool IsAggressive() const;
     bool IsBoss() const;
     bool IsElite() const;
     bool IsRare() const;
@@ -334,12 +323,11 @@ public:
     std::string GetAIStateString() const;
     std::string AIStateToString(NPCAIState state) const;
 
-    NPCStats GetStats() const { return npc_stats_; };
-    uint64_t GetOwnerId() const { return target_id_; };
-    void SetBehaviorState(NPCAIState st) { ai_state_ = st; };
+    NPCStats GetStats() const;
+    uint64_t GetOwnerId() const;
+    void SetBehaviorState(NPCAIState st);
     void MoveTo(const glm::vec3& destination, float speed_multiplier = 1.0f);
 
-    // AI decision making
     void UpdateIdle(float delta_time);
     void UpdatePatrol(float delta_time);
     void UpdateChase(float delta_time);
@@ -360,7 +348,6 @@ public:
     glm::vec3 GetNextPatrolPoint();
     bool IsAtPatrolPoint(const glm::vec3& point) const;
 
-    // Internal state changes
     void ChangeToIdle();
     void ChangeToPatrol();
     void ChangeToChase(uint64_t target_id);
@@ -368,12 +355,10 @@ public:
     void ChangeToFlee();
     void ChangeToDead();
 
-    // Stat calculation
     void CalculateStats();
     void ApplyRarityModifiers();
     void ApplyFactionModifiers();
 
-    // Serialization helpers
     void SaveStatsToJson(nlohmann::json& json) const;
     void LoadStatsFromJson(const nlohmann::json& json);
 

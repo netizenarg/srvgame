@@ -9,8 +9,8 @@ PlayerManager::PlayerManager()
     : dbManager_(DbManager::GetInstance()),
       lastCleanup_(std::chrono::system_clock::now()),
       running_(true),
-      saveInterval_(std::chrono::minutes(5)),
-      cleanupInterval_(std::chrono::minutes(10)) {
+      saveInterval_(std::chrono::seconds(10)),
+      cleanupInterval_(std::chrono::seconds(10)) {
 
     Logger::Info("PlayerManager initialized");
 
@@ -35,7 +35,6 @@ void PlayerManager::Shutdown() {
     saveThread_.Stop();
     cleanupThread_.Stop();
 
-    SaveAllPlayers();
     Logger::Info("PlayerManager shutdown complete");
 }
 
@@ -222,14 +221,8 @@ void PlayerManager::UpdatePosition(uint64_t playerId, float x, float y, float z)
 }
 
 void PlayerManager::BroadcastToNearbyPlayers(int64_t playerId, const nlohmann::json& message) {
-    auto nearby = GetNearbyPlayers(playerId, DEFAULT_BROADCAST_RANGE);
-    auto& connMgr = ConnectionManager::GetInstance();
-    for (int64_t id : nearby) {
-        if (auto sessionId = GetSessionIdByPlayerId(id)) {
-            if (auto session = connMgr.GetSession(sessionId))
-                session->SendJson(message);
-        }
-    }
+    (void)playerId;
+    (void)message;
 }
 
 std::vector<int64_t> PlayerManager::GetNearbyPlayers(int64_t playerId, float radius) {
@@ -257,21 +250,26 @@ std::vector<std::shared_ptr<Player>> PlayerManager::GetPlayersInRadius(const glm
 }
 
 void PlayerManager::SaveAllPlayers() {
-    Logger::Info("Saving all players to database...");
-    std::vector<std::shared_ptr<Player>> toSave;
+    if (players_.size() && running_)
     {
-        std::shared_lock<std::shared_mutex> lock(playersMutex_);
-        for (const auto& [id, player] : players_)
-            toSave.push_back(player);
+        Logger::Trace("PlayerManager::SaveAllPlayers to database...");
+        std::vector<std::shared_ptr<Player>> toSave;
+        {
+            std::shared_lock<std::shared_mutex> lock(playersMutex_);
+            for (const auto& [id, player] : players_)
+                toSave.push_back(player);
+        }
+        int saved = 0, failed = 0;
+        for (auto& player : toSave) {
+            if (!running_)
+                break;
+            if (player->SaveToDatabase())
+                saved++;
+            else
+                failed++;
+        }
+        Logger::Trace("PlayerManager::SaveAllPlayers: saved {} players ({} failed)", saved, failed);
     }
-    int saved = 0, failed = 0;
-    for (auto& player : toSave) {
-        if (player->SaveToDatabase())
-            saved++;
-        else
-            failed++;
-    }
-    Logger::Info("Saved {} players ({} failed)", saved, failed);
 }
 
 std::shared_ptr<Player> PlayerManager::LoadPlayer(int64_t playerId) {
@@ -322,14 +320,14 @@ std::shared_ptr<Player> PlayerManager::LoadPlayerByUsername(const std::string& u
 }
 
 void PlayerManager::SaveLoop() {
-    Logger::Info("Player save loop started");
+    Logger::Trace("PlayerManager::SaveLoop started");
     while (running_) {
         std::unique_lock<std::mutex> lock(saveMutex_);
         saveCV_.wait_for(lock, saveInterval_, [this] { return !running_; });
         if (!running_) break;
         SaveAllPlayers();
     }
-    Logger::Info("Player save loop stopped");
+    Logger::Trace("PlayerManager::SaveLoop stopped");
 }
 
 void PlayerManager::CleanupLoop() {
@@ -345,7 +343,7 @@ void PlayerManager::CleanupLoop() {
 
 void PlayerManager::CleanupInactivePlayers() {
     auto now = std::chrono::system_clock::now();
-    if (std::chrono::duration_cast<std::chrono::minutes>(now - lastCleanup_).count() < 10)
+    if (std::chrono::duration_cast<std::chrono::seconds>(now - lastCleanup_).count() < 10)
         return;
     lastCleanup_ = now;
 
@@ -478,12 +476,7 @@ void PlayerManager::CreateParty(int64_t leaderId, const std::string& partyName) 
     party.members.insert(leaderId);
     party.created_at = std::chrono::system_clock::now();
     parties_[party.id] = party;
-
-    auto& connMgr = ConnectionManager::GetInstance();
-    if (auto sessionId = GetSessionIdByPlayerId(leaderId))
-        connMgr.AddToGroup("party_" + std::to_string(party.id), sessionId);
-
-    Logger::Info("Party created: {} (ID: {}) by player {}", partyName, party.id, leaderId);
+    Logger::Trace("Party created: {} (ID: {}) by player {}", partyName, party.id, leaderId);
 }
 
 void PlayerManager::AddPlayerToParty(int64_t partyId, int64_t playerId) {
@@ -499,31 +492,20 @@ void PlayerManager::AddPlayerToParty(int64_t partyId, int64_t playerId) {
         return;
     }
     party.members.insert(playerId);
-
-    auto& connMgr = ConnectionManager::GetInstance();
-    if (auto sessionId = GetSessionIdByPlayerId(playerId))
-        connMgr.AddToGroup("party_" + std::to_string(partyId), sessionId);
-
-    Logger::Info("Player {} added to party {}", playerId, partyId);
+    Logger::Trace("Player {} added to party {}", playerId, partyId);
 }
 
 void PlayerManager::RemovePlayerFromParty(int64_t partyId, int64_t playerId) {
     std::lock_guard<std::mutex> lock(partyMutex_);
     auto it = parties_.find(partyId);
     if (it == parties_.end()) return;
-
     auto& party = it->second;
     party.members.erase(playerId);
-
-    auto& connMgr = ConnectionManager::GetInstance();
-    if (auto sessionId = GetSessionIdByPlayerId(playerId))
-        connMgr.RemoveFromGroup("party_" + std::to_string(partyId), sessionId);
-
     if (party.members.empty() || playerId == party.leader_id) {
         parties_.erase(it);
-        Logger::Info("Party {} disbanded", partyId);
+        Logger::Trace("Party {} disbanded", partyId);
     } else {
-        Logger::Info("Player {} removed from party {}", playerId, partyId);
+        Logger::Trace("Player {} removed from party {}", playerId, partyId);
     }
 }
 
@@ -541,23 +523,13 @@ int64_t PlayerManager::GeneratePartyId() {
 }
 
 void PlayerManager::SendToPlayer(int64_t playerId, const nlohmann::json& message) {
-    if (auto sessionId = GetSessionIdByPlayerId(playerId)) {
-        auto& connMgr = ConnectionManager::GetInstance();
-        if (auto session = connMgr.GetSession(sessionId))
-            session->SendJson(message);
-    } else {
-        Logger::Warn("Player {} is not online", playerId);
-    }
+    (void)playerId;
+    (void)message;
 }
 
 void PlayerManager::SendToPlayers(const std::vector<int64_t>& playerIds, const nlohmann::json& message) {
-    auto& connMgr = ConnectionManager::GetInstance();
-    for (int64_t id : playerIds) {
-        if (auto sessionId = GetSessionIdByPlayerId(id)) {
-            if (auto session = connMgr.GetSession(sessionId))
-                session->SendJson(message);
-        }
-    }
+    (void)playerIds;
+    (void)message;
 }
 
 void PlayerManager::BanPlayer(int64_t playerId, const std::string& reason, int64_t durationSeconds) {
@@ -571,15 +543,6 @@ void PlayerManager::BanPlayer(int64_t playerId, const std::string& reason, int64
     if (durationSeconds > 0) {
         auto expires = std::chrono::system_clock::now() + std::chrono::seconds(durationSeconds);
         player->SetBanExpires(expires);
-    }
-
-    if (auto sessionId = GetSessionIdByPlayerId(playerId)) {
-        auto& connMgr = ConnectionManager::GetInstance();
-        if (auto session = connMgr.GetSession(sessionId)) {
-            nlohmann::json msg = {{"msg", "banned"}, {"reason", reason}, {"duration", durationSeconds}};
-            session->SendJson(msg);
-            session->Stop();
-        }
     }
     player->SaveToDatabase();
     Logger::Info("Player {} banned: {} ({}s)", playerId, reason, durationSeconds);

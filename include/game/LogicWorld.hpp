@@ -13,18 +13,20 @@
 #include "game/WorldGenerator.hpp"
 #include "game/GameEntity.hpp"
 
+struct WorldConfig {
+    int save_interval = 30;
+    int seed = 12345;
+    int view_distance = 4;
+    float chunk_size = 32.0f;
+    int max_active_chunks = 100;
+    float terrain_scale = 100.0f;
+    float max_terrain_height = 50.0f;
+    float water_level = 10.0f;
+    float unload_distance = 200.0f;
+};
+
 class LogicWorld {
 public:
-    struct WorldConfig {
-        int seed = 12345;
-        int viewDistance = 4;
-        float chunkSize = 32.0f;
-        int maxActiveChunks = 100;
-        float terrainScale = 100.0f;
-        float maxTerrainHeight = 50.0f;
-        float waterLevel = 10.0f;
-        float unloadDistance = 200.0f;
-    };
 
     static LogicWorld& GetInstance();
 
@@ -35,7 +37,7 @@ public:
     // Chunk management
     std::shared_ptr<WorldChunk> GetOrCreateChunk(int chunkX, int chunkZ);
     void UnloadDistantChunks(const glm::vec3& centerPosition, float keepRadius = 200.0f);
-    void GenerateWorldAroundPlayer(const glm::vec3& position, int viewDistance);
+    void GenerateWorldAroundPlayer(const glm::vec3& position, int view_distance);
     void PreloadWorldData(float radius);
 
     // Terrain queries
@@ -63,6 +65,7 @@ private:
     LogicWorld();
     ~LogicWorld();
 
+    std::atomic<bool> running_;
     static std::mutex instanceMutex_;
     static LogicWorld* instance_;
 

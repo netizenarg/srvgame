@@ -14,12 +14,12 @@
 #include "game/WorldChunk.hpp"
 
 struct GenerationConfig {
-    float terrainScale = 1.0f;
+    float terrain_scale = 1.0f;
     float terrainHeight = 1.0f;
     int octaves = 4;
     float persistence = 0.5f;
     float lacunarity = 2.0f;
-    float waterLevel = -0.5f;
+    float water_level = -0.5f;
     int seed = 12345;
     float forestThreshold = 0.6f;
     float mountainThreshold = 0.8f;

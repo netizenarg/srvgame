@@ -17,7 +17,10 @@ static const std::unordered_map<std::string, int> IPCMessageTypes = {
     {"heartbeat", 2},
     {"broadcast", 3},
     {"shutdown", 4},
-    {"reload_config", 5}
+    {"reload_config", 5},
+    {"player_spawn_relay", 201},
+    {"player_despawn_relay", 202},
+    {"player_position_relay", 206}
 };
 
 class IConnection {

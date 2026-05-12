@@ -2,8 +2,6 @@
 
 namespace fs = std::filesystem;
 
-// =============== PythonScripting Implementation ===============
-
 PythonScripting& PythonScripting::GetInstance() {
     static PythonScripting instance;
     return instance;
@@ -17,202 +15,124 @@ PythonScripting::~PythonScripting() {
     Shutdown();
 }
 
-bool PythonScripting::Initialize() {
-    if (initialized_) {
-        Logger::Warn("PythonScripting already initialized");
-        return true;
-    }
+std::string PythonScripting::GetCurrentDirectory() {
+    return std::filesystem::current_path().string();
+}
 
-    Logger::Info("Initializing Python scripting engine...");
-
-    // Get configuration
-    auto& config = ConfigManager::GetInstance();
-    std::string pythonHome = config.GetString("scripting.python.directory", "");
-
-    if (!pythonHome.empty()) {
-        pythonHome_ = pythonHome;
-    }
-
-    // Initialize Python
-    if (!InitializePython()) {
-        Logger::Warn("Failed to initialize Python interpreter");
+bool PythonScripting::CheckStatus(PyStatus status)
+{
+    if (PyStatus_IsError(status))
+    {
+        Logger::Error("status.exitcode = {} ({})", status.exitcode, status.err_msg ? status.err_msg : "unknown error");
         return false;
     }
-
-    // Set Python paths
-    std::vector<std::string> paths = {
-        "./scripts",
-        "./python",
-        "./lib/python",
-        "."
-    };
-
-    for (const auto& path : paths) {
-        AddPythonPath(path);
+    else if (PyStatus_Exception(status))
+    {
+        Logger::Critical("status.exitcode = {} ({})", status.exitcode, status.err_msg ? status.err_msg : "unknown error");
+        //Py_ExitStatusException(status);
+        return false;
     }
-
-    // Add additional paths from config
-    auto pythonPaths = config.GetStringArray("scripting.python.paths");
-    for (const auto& path : pythonPaths) {
-        AddPythonPath(path);
+    else if (PyStatus_IsExit(status))
+    {
+        Logger::Error("status.exitcode = {} ({})", status.exitcode, status.err_msg ? status.err_msg : "unknown error");
+        return false;
     }
+    return true;
+}
 
-    // Initialize Python API
-    PythonAPI::Initialize();
+void PythonScripting::CheckStatusConf(PyStatus status, PyConfig pyconf)
+{
+    if (!CheckStatus(status)) {
+        PyConfig_Clear(&pyconf);
+        initialized_ = false;
+    }
+}
 
-    // Load default modules
-    std::string scriptDir = config.GetString("scripting.python.directory", "./scripts");
-    if (fs::exists(scriptDir)) {
-        for (const auto& entry : fs::directory_iterator(scriptDir)) {
-            if (entry.path().extension() == ".py") {
-                std::string moduleName = entry.path().stem().string();
-                std::string filePath = entry.path().string();
-
-                if (LoadModule(moduleName, filePath)) {
-                    Logger::Info("Loaded Python module: {}", moduleName);
-                } else {
-                    Logger::Warn("Failed to load Python module: {}", moduleName);
-                }
+bool PythonScripting::Initialize() {
+    std::string curdir = GetCurrentDirectory();
+    auto& config = ConfigManager::GetInstance();
+    std::string home = config.GetString("scripting.python.home", "scripts/python", true);
+    std::string platlibdir = config.GetString("scripting.python.platlibdir", "lib", true);
+    std::string module_search_paths = config.GetString("scripting.python.module_search_paths", "/usr/lib/python;/usr/local/lib/python");
+    WArray module_search_paths_array(module_search_paths, ";", curdir+"/");
+    PyStatus status;
+    PyConfig pyconf;
+    pyconf.isolated = config.GetInt("scripting.python.isolated", 1, true);
+    if (pyconf.isolated == 1) {
+        PyConfig_InitIsolatedConfig(&pyconf);
+    }
+    else
+    {
+        PyConfig_InitPythonConfig(&pyconf);
+    }
+    pyconf.site_import = config.GetInt("scripting.python.site_import", 1);
+    pyconf.user_site_directory = config.GetInt("scripting.python.user_site_directory", 1);
+    initialized_ = true;//set before first CheckStatusConf call
+    status = PyConfig_SetBytesString(&pyconf, &pyconf.program_name, config.GetString("scripting.python.program_name", "gameserver").c_str());
+    CheckStatusConf(status, pyconf);
+    if (!home.empty()) {
+        status = PyConfig_SetBytesString(&pyconf, &pyconf.home, (curdir+"/"+home).c_str());
+        CheckStatusConf(status, pyconf);
+    }
+    if (!module_search_paths.empty()) {
+        pyconf.module_search_paths_set = 1;
+        for (size_t i = 0; i < module_search_paths_array.size(); ++i) {
+            wchar_t** paths = module_search_paths_array.get();
+            //Logger::Trace("PYTHON.MODULE_SEARCH_PATHS: {} ({})", i, wstring_to_string(std::wstring(paths[i])));
+            status = PyWideStringList_Append(&pyconf.module_search_paths, paths[i]);
+            if (!CheckStatus(status)) {
+                PyConfig_Clear(&pyconf);
+                initialized_ = false;
+                break;
             }
         }
     }
+    status = PyConfig_SetBytesString(&pyconf, &pyconf.platlibdir, (curdir+"/"+home+"/"+platlibdir).c_str());
+    CheckStatusConf(status, pyconf);
+    status = PyConfig_SetBytesString(&pyconf, &pyconf.prefix, curdir.c_str());
+    CheckStatusConf(status, pyconf);
 
-    initialized_ = true;
-    Logger::Info("Python scripting engine initialized successfully");
-    return true;
+    status = Py_InitializeFromConfig(&pyconf);
+    CheckStatusConf(status, pyconf);
+    if (!initialized_)
+    {
+        ShutdownPython();
+    }
+    else
+        Logger::Info("Python interpreter ready (version: {})", Py_GetVersion());
+    return initialized_;
 }
+
+bool PythonScripting::IsInitialized() const { return initialized_; }
 
 void PythonScripting::Shutdown() {
     if (!initialized_) {
         return;
     }
-
     Logger::Info("Shutting down Python scripting engine...");
-
     {
         std::unique_lock<std::shared_mutex> lock(modulesMutex_);
         modules_.clear();
     }
-
     {
         std::unique_lock<std::shared_mutex> lock(eventHandlersMutex_);
         eventHandlers_.clear();
     }
-
     {
         std::unique_lock<std::shared_mutex> lock(callbacksMutex_);
         callbacks_.clear();
     }
-
     ShutdownPython();
-
     initialized_ = false;
     Logger::Info("Python scripting engine shutdown complete");
 }
 
-bool PythonScripting::InitializePython() {
-    try {
-        PyConfig config;
-        PyConfig_InitPythonConfig(&config);
-
-        // Set Python home if specified
-        if (!pythonHome_.empty()) {
-            //Py_SetPythonHome(Py_DecodeLocale(pythonHome_.c_str(), nullptr));
-            config.home = Py_DecodeLocale(pythonHome_.c_str(), nullptr);
-        }
-
-        // Initialize Python
-        //Py_Initialize();
-        Py_InitializeFromConfig(&config);
-        PyConfig_Clear(&config);
-
-        if (!Py_IsInitialized()) {
-            Logger::Warn("Failed to initialize Python interpreter");
-            return false;
-        }
-
-        // Initialize threads
-        //PyEval_InitThreads(); //Py_DEPRECATED(3.9) PyAPI_FUNC(void)
-
-        // Release GIL - we'll acquire it when needed
-        PyThreadState* mainThread = PyEval_SaveThread();
-        if (!mainThread) {
-            Logger::Error("Failed to save Python thread state");
-            return false;
-        }
-
-        // Import essential modules
-        PyGILGuard gil;
-
-        PyRun_SimpleString("import sys");
-        PyRun_SimpleString("import os");
-        PyRun_SimpleString("import json");
-        PyRun_SimpleString("import math");
-        PyRun_SimpleString("import random");
-        PyRun_SimpleString("import time");
-
-        Logger::Debug("Python interpreter initialized (version: {})", Py_GetVersion());
-        return true;
-
-    } catch (const std::exception& e) {
-        Logger::Error("Exception initializing Python: {}", e.what());
-        return false;
-    }
-}
-
 void PythonScripting::ShutdownPython() {
     try {
-        PyGILGuard gil;
         Py_FinalizeEx();
         Logger::Debug("Python interpreter finalized");
-    } catch (const std::exception& e) {
-        Logger::Error("Exception finalizing Python: {}", e.what());
-    }
-}
-
-bool PythonScripting::AddPythonPath(const std::string& path) {
-    if (!initialized_) {
-        Logger::Error("Python not initialized");
-        return false;
-    }
-
-    PyGILGuard gil;
-
-    try {
-        std::string code = "import sys\n";
-        code += "if '" + path + "' not in sys.path:\n";
-        code += "    sys.path.insert(0, '" + path + "')\n";
-
-        PyRun_SimpleString(code.c_str());
-
-        pythonPaths_.push_back(path);
-        Logger::Debug("Added Python path: {}", path);
-        return true;
-
-    } catch (const std::exception& e) {
-        Logger::Error("Failed to add Python path {}: {}", path, e.what());
-        return false;
-    }
-}
-
-bool PythonScripting::ExecuteString(const std::string& code) {
-    if (!initialized_) {
-        Logger::Error("Python not initialized");
-        return false;
-    }
-
-    PyGILGuard gil;
-
-    try {
-        int result = PyRun_SimpleString(code.c_str());
-        if (result != 0) {
-            Logger::Error("Python execution failed for code: {}", code);
-            return false;
-        }
-        return true;
-    } catch (const std::exception& e) {
-        Logger::Error("Exception executing Python code: {}", e.what());
-        return false;
+    } catch (const std::exception& err) {
+        Logger::Error("Exception finalizing Python: {}", err.what());
     }
 }
 
@@ -221,37 +141,30 @@ bool PythonScripting::LoadModule(const std::string& name, const std::string& pat
         Logger::Error("Python not initialized");
         return false;
     }
-
     {
         std::unique_lock<std::shared_mutex> lock(modulesMutex_);
         if (modules_.find(name) != modules_.end()) {
             Logger::Warn("Module already loaded: {}", name);
             return true;
         }
-
         auto module = std::make_unique<PythonModule>(name, path);
         if (!module->Load()) {
             Logger::Error("Failed to load Python module {}: {}", name, module->GetLastError());
             return false;
         }
-
         modules_[name] = std::move(module);
     }
-
     Logger::Info("Python module loaded: {}", name);
     return true;
 }
 
 bool PythonScripting::UnloadModule(const std::string& name) {
     std::unique_lock<std::shared_mutex> lock(modulesMutex_);
-
     auto it = modules_.find(name);
     if (it == modules_.end()) {
         Logger::Warn("Module not found: {}", name);
         return false;
     }
-
-    // Remove any event handlers for this module
     {
         std::unique_lock<std::shared_mutex> eventLock(eventHandlersMutex_);
         for (auto& [eventName, handlers] : eventHandlers_) {
@@ -264,28 +177,23 @@ bool PythonScripting::UnloadModule(const std::string& name) {
             );
         }
     }
-
     it->second->Unload();
     modules_.erase(it);
-
     Logger::Info("Python module unloaded: {}", name);
     return true;
 }
 
 bool PythonScripting::ReloadModule(const std::string& name) {
     std::unique_lock<std::shared_mutex> lock(modulesMutex_);
-
     auto it = modules_.find(name);
     if (it == modules_.end()) {
         Logger::Warn("Module not found: {}", name);
         return false;
     }
-
     if (!it->second->Reload()) {
         Logger::Error("Failed to reload Python module {}: {}", name, it->second->GetLastError());
         return false;
     }
-
     Logger::Info("Python module reloaded: {}", name);
     return true;
 }
@@ -294,37 +202,31 @@ void PythonScripting::RegisterEventHandler(const std::string& eventName,
                                          const std::string& moduleName,
                                          const std::string& functionName) {
     std::unique_lock<std::shared_mutex> lock(eventHandlersMutex_);
-
-    // Check if module exists
     {
         std::shared_lock<std::shared_mutex> modulesLock(modulesMutex_);
         auto it = modules_.find(moduleName);
         if (it == modules_.end()) {
-            Logger::Error("Cannot register event handler: module not found: {}", moduleName);
+            Logger::Error("PythonScripting::RegisterEventHandler: module not found: {}", moduleName);
             return;
         }
-
         if (!it->second->HasFunction(functionName)) {
-            Logger::Error("Cannot register event handler: function not found: {}.{}",
+            Logger::Error("PythonScripting::RegisterEventHandler: function not found: {}.{}",
                          moduleName, functionName);
             return;
         }
     }
-
     eventHandlers_[eventName].emplace_back(moduleName, functionName);
-    Logger::Debug("Registered event handler: {} -> {}.{}",
+    Logger::Trace("PythonScripting::RegisterEventHandler: {} -> {}.{}",
                  eventName, moduleName, functionName);
 }
 
 void PythonScripting::UnregisterEventHandler(const std::string& eventName,
                                            const std::string& moduleName) {
     std::unique_lock<std::shared_mutex> lock(eventHandlersMutex_);
-
     auto it = eventHandlers_.find(eventName);
     if (it == eventHandlers_.end()) {
         return;
     }
-
     auto& handlers = it->second;
     handlers.erase(
         std::remove_if(handlers.begin(), handlers.end(),
@@ -333,11 +235,9 @@ void PythonScripting::UnregisterEventHandler(const std::string& eventName,
             }),
         handlers.end()
     );
-
     if (handlers.empty()) {
         eventHandlers_.erase(it);
     }
-
     Logger::Debug("Unregistered event handlers for {} from module {}",
                  eventName, moduleName);
 }
@@ -350,9 +250,7 @@ bool PythonScripting::FireEvent(const std::string& eventName, const nlohmann::js
     if (!initialized_) {
         return false;
     }
-
     std::vector<std::pair<std::string, std::string>> handlers;
-
     {
         std::shared_lock<std::shared_mutex> lock(eventHandlersMutex_);
         auto it = eventHandlers_.find(eventName);
@@ -361,28 +259,23 @@ bool PythonScripting::FireEvent(const std::string& eventName, const nlohmann::js
         }
         handlers = it->second;
     }
-
     if (handlers.empty()) {
         return false;
     }
-
     bool anySuccess = false;
     for (const auto& [moduleName, functionName] : handlers) {
         std::shared_lock<std::shared_mutex> modulesLock(modulesMutex_);
-
         auto moduleIt = modules_.find(moduleName);
         if (moduleIt == modules_.end()) {
             Logger::Warn("Module not found for event handler: {}", moduleName);
             continue;
         }
-
         nlohmann::json eventData = {
             {"event", eventName},
             {"data", data},
             {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count()}
         };
-
         if (moduleIt->second->CallFunction(functionName, eventData)) {
             anySuccess = true;
         } else {
@@ -390,7 +283,6 @@ bool PythonScripting::FireEvent(const std::string& eventName, const nlohmann::js
                         moduleName, functionName, eventName);
         }
     }
-
     return anySuccess;
 }
 
@@ -400,15 +292,12 @@ bool PythonScripting::CallFunction(const std::string& moduleName,
     if (!initialized_) {
         return false;
     }
-
     std::shared_lock<std::shared_mutex> lock(modulesMutex_);
-
     auto it = modules_.find(moduleName);
     if (it == modules_.end()) {
         Logger::Error("Module not found: {}", moduleName);
         return false;
     }
-
     return it->second->CallFunction(functionName, args);
 }
 
@@ -418,15 +307,12 @@ nlohmann::json PythonScripting::CallFunctionWithResult(const std::string& module
     if (!initialized_) {
         return nlohmann::json();
     }
-
     std::shared_lock<std::shared_mutex> lock(modulesMutex_);
-
     auto it = modules_.find(moduleName);
     if (it == modules_.end()) {
         Logger::Error("Module not found: {}", moduleName);
         return nlohmann::json();
     }
-
     return it->second->CallFunctionWithResult(functionName, args);
 }
 
@@ -449,33 +335,27 @@ bool PythonScripting::HasCallback(const std::string& callbackName) const {
 
 std::vector<std::string> PythonScripting::GetLoadedModules() const {
     std::vector<std::string> result;
-
     std::shared_lock<std::shared_mutex> lock(modulesMutex_);
     for (const auto& [name, module] : modules_) {
         result.push_back(name);
     }
-
     return result;
 }
 
 std::vector<std::string> PythonScripting::GetRegisteredEvents() const {
     std::vector<std::string> result;
-
     std::shared_lock<std::shared_mutex> lock(eventHandlersMutex_);
     for (const auto& [eventName, handlers] : eventHandlers_) {
         result.push_back(eventName);
     }
-
     return result;
 }
 
 std::vector<std::string> PythonScripting::GetRegisteredCallbacks() const {
     std::vector<std::string> result;
-
     std::shared_lock<std::shared_mutex> lock(callbacksMutex_);
     for (const auto& [callbackName, callback] : callbacks_) {
         result.push_back(callbackName);
     }
-
     return result;
 }

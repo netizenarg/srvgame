@@ -11,7 +11,7 @@
 #include "network/WebSocketProtocol.hpp"
 
 #include "game/GameData.hpp"
-#include "game/GameLogic.hpp"
+//#include "game/GameLogic.hpp"
 
 class WebSocketSession : public IConnection, public std::enable_shared_from_this<WebSocketSession> {
 public:

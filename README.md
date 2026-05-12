@@ -119,28 +119,31 @@ Client ↔ Server Communication\
 - **Update Rate Adjustment** for smooth gameplay
 
 ### Message Categories
-**System Messages (1-99):**
+**IPC Messages (1-99):**
 - Heartbeat, protocol negotiation, authentication, error handling
 
-**World Messages (100-199):**
-- Chunk data, terrain height, biome information, world updates
+**System Messages (100-199):**
+- Heartbeat, protocol negotiation, authentication, error handling
 
-**Entity Messages (200-299):**
-- Entity spawn/update/despawn, batch updates, state synchronization
+**World Messages (200-299):**
+- Chunk data, terrain height, biome information, world updates
 
 **Player Messages (300-399):**
 - Position, velocity, rotation, state, server corrections
 
-**NPC Messages (400-499):**
+**Entity Messages (400-499):**
+- Entity spawn/update/despawn, batch updates, state synchronization
+
+**NPC Messages (500-599):**
 - NPC spawn/update/despawn, interactions, AI commands
 
-**Combat Messages (500-599):**
+**Combat Messages (600-699):**
 - Combat events, damage calculation, health updates, status effects
 
-**Inventory Messages (600-699):**
+**Inventory Messages (700-799):**
 - Inventory updates, loot spawning, item pickup, equipment changes
 
-**Chat Messages (700-799):**
+**Chat Messages (800-899):**
 - Text chat, system messages, notifications, announcements
 
 **Custom Messages (1000+):**

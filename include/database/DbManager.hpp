@@ -18,7 +18,7 @@
 #ifdef USE_CITUS
 #include "database/CitusClient.hpp"
 #else
-#ifdef USE_POSTGRESQL // default in main.cpp
+#ifdef USE_POSTGRESQL
 #include "database/PostgreSqlClient.hpp"
 #endif
 #endif
@@ -96,7 +96,7 @@ private:
     std::unique_ptr<DatabaseBackend> backend_;
     BackendType currentType_;
     nlohmann::json config_;
-    std::atomic<bool> initialized_;
+    std::atomic<bool> running_;
     std::atomic<bool> connected_;
 
     struct Statistics {

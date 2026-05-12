@@ -310,7 +310,7 @@ void PostgreSqlClient::MaintainPool() {
     while (it != connections_.end()) {
         if (!it->inUse) {
             auto idleTime = std::chrono::duration_cast<std::chrono::seconds>(now - it->lastUsed);
-            if (idleTime > std::chrono::minutes(5) && connections_.size() > minConnections_) {
+            if (idleTime > std::chrono::minutes(1) && connections_.size() > minConnections_) {
                 CloseConnection(it->conn);
                 it = connections_.erase(it);
                 continue;
