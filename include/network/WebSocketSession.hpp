@@ -15,13 +15,12 @@
 
 class WebSocketSession : public IConnection, public std::enable_shared_from_this<WebSocketSession> {
 public:
-    WebSocketSession(WebSocketProtocol::WebSocketConnection::Pointer wsConn);
+    WebSocketSession(WebSocketProtocol::WebSocketConnection::Pointer wsConn, uint64_t sessionId=0);
     ~WebSocketSession();
 
     void SetProtocolMode(ProtocolMode mode) { protocolMode_ = mode; }
     ProtocolMode GetProtocolMode() const override { return protocolMode_; }
 
-    // IConnection implementation
     void Start() override;
     void Stop() override;
     void Disconnect() override;
@@ -79,22 +78,18 @@ private:
     int64_t playerId_{0};
     std::string authToken_;
 
-    // Groups
     mutable std::mutex groupsMutex_;
     std::set<std::string> groups_;
 
-    // Data
     mutable std::mutex dataMutex_;
     std::map<std::string, nlohmann::json> data_;
 
-    // Properties
     mutable std::mutex propertiesMutex_;
     std::map<std::string, std::string> properties_;
 
     BinaryMessageHandler binary_handler_;
     BinaryMessageHandler default_binary_handler_;
 
-    // Internal helpers
     void OnMessage(const WebSocketProtocol::WebSocketMessage& msg);
     void OnClose(uint16_t code, const std::string& reason);
 };

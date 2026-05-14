@@ -23,11 +23,12 @@
 class ConnectionManager {
 public:
     using MasterSender = std::function<void(uint32_t correlationId, uint64_t sessionId, uint16_t messageType, const std::vector<uint8_t>& body)>;
-    ConnectionManager(const WorkerGroupConfig& groupConfig, MasterSender masterSender);
+    ConnectionManager(const WorkerGroupConfig& groupConfig, MasterSender masterSender, int workerId);
     ~ConnectionManager();
     bool Start();
     void Shutdown();
     void OnMasterReply(uint32_t correlationId, const std::vector<uint8_t>& reply);
+    void OnMasterPush(uint64_t sessionId, const std::vector<uint8_t>& data);
 
 private:
     asio::io_context ioContext_;
@@ -50,6 +51,8 @@ private:
     std::string host_;
     uint16_t port_;
     bool reuse_;
+    int workerId_;
+    uint64_t nextLocalSid_ = 1;
     void initSessionFactory();
     void doAccept();
     void onClientMessage(uint64_t sessionId, uint16_t type, const std::vector<uint8_t>& data);

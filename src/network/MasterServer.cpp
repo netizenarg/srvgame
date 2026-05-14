@@ -12,25 +12,8 @@ MasterServer::MasterServer(asio::io_context& io, const std::vector<WorkerGroupCo
 
 void MasterServer::Initialize()
 {
-    assignVirtualId_ = [this](uint64_t sessionId, int workerId) -> uint64_t {
-        auto it = sessionToVirtual_.find(sessionId);
-        if (it == sessionToVirtual_.end()) {
-            uint64_t newId = (static_cast<uint64_t>(workerId) << 32) | (nextPersistentId_++);
-            sessionToVirtual_[sessionId] = newId;
-            return newId;
-        }
-        return it->second;
-    };
-    sendReplyCb_ = [this](uint64_t clientSessionId, const std::vector<uint8_t>& data) {
-        auto it = sessionToVirtual_.find(clientSessionId);
-        if (it != sessionToVirtual_.end()) {
-            uint64_t virtualId = it->second;
-            int workerId = static_cast<int>(virtualId >> 32);
-            uint32_t corrId = static_cast<uint32_t>(virtualId & 0xFFFFFFFF);
-            processPool_.SendReplyToWorker(workerId, corrId, data);
-        } else {
-            Logger::Error("No virtual mapping for session {}", clientSessionId);
-        }
+    sendReplyCb_ = [this](uint64_t sessionId, const std::vector<uint8_t>& data) {
+        processPool_.PushToWorker(static_cast<int>(sessionId >> 48), sessionId, data);
     };
     gameLogic_.SetSendReplyCallback(sendReplyCb_);
     gameLogic_.SetGetSessionIdsInRadiusCallback([](const glm::vec3& pos, float radius) -> std::vector<uint64_t> {
@@ -43,11 +26,8 @@ void MasterServer::Initialize()
         }
         return sids;
     });
-    processPool_.SetMasterMessageHandler([this](int workerId, uint32_t /*correlationId*/,
-                                               uint64_t sessionId, uint16_t messageType,
-                                               const std::vector<uint8_t>& body) {
-        uint64_t virtualId = assignVirtualId_(sessionId, workerId);
-        sessionToVirtual_[sessionId] = virtualId;
+    processPool_.SetMasterMessageHandler([this](int /*workerId*/, uint32_t /*correlationId*/,
+        uint64_t sessionId, uint16_t messageType, const std::vector<uint8_t>& body) {
         switch (messageType) {
             case BinaryProtocol::MESSAGE_TYPE_AUTHENTICATION: {
                 BinaryProtocol::BinaryReader r(body.data(), body.size());
@@ -56,6 +36,21 @@ void MasterServer::Initialize()
                 auth.password = r.ReadString();
                 auth.session_id = sessionId;
                 gameLogic_.OnAuthentication(auth);
+                break;
+            }
+            case BinaryProtocol::MESSAGE_TYPE_CHAT_MESSAGE: {
+                BinaryProtocol::BinaryReader r(body.data(), body.size());
+                std::string sender = r.ReadString();
+                std::string message = r.ReadString();
+                uint64_t timestamp = r.ReadUInt64();
+                Logger::Trace("Chat from {} (session {}): {}", sender, sessionId, message);
+                BinaryProtocol::BinaryWriter w;
+                w.WriteUInt16(BinaryProtocol::MESSAGE_TYPE_CHAT_MESSAGE);
+                w.WriteString(sender);
+                w.WriteString(message);
+                w.WriteUInt64(timestamp);
+                std::vector<uint8_t> response = w.GetBuffer();
+                processPool_.BroadcastToAllWorkers(response);
                 break;
             }
             case BinaryProtocol::MESSAGE_TYPE_CHUNK_PARAMS: {
@@ -188,27 +183,32 @@ void MasterServer::Initialize()
 
 void MasterServer::start_signal_read() {
     signal_pipe_.async_read_some(asio::buffer(signal_buffer_),
-        [this](std::error_code ec, size_t /*bytes*/) {
-            if (!ec) {
-                Logger::Trace("Master shutdown signal received");
-                Shutdown();
-            }
-            start_signal_read();
-        });
+    [this](std::error_code ec, size_t /*bytes*/) {
+        if (!ec) {
+            Logger::Trace("MasterServer::start_signal_read shutdown signal received");
+            Shutdown();
+        }
+        start_signal_read();
+        Logger::Trace("MasterServer::start_signal_read completed, ec = {}", ec.message());
+    });
 }
 
 void MasterServer::Run()
 {
     io_.run();
+    Logger::Trace("MasterServer::Run: io_context::run() returned");
 }
 
 void MasterServer::Shutdown() {
     static std::once_flag once;
     std::call_once(once, [this]{
-        Logger::Info("Master shutdown initiated");
+        Logger::Info("MasterServer::Shutdown initiated");
+        signal_pipe_.cancel();
         processPool_.Shutdown();
+        //Logger::Trace("MasterServer::Shutdown: about to call gameLogic_.Shutdown()");
         gameLogic_.Shutdown();
         io_.stop();
+        Logger::Info("MasterServer::Shutdown finished");
     });
 }
 
@@ -229,7 +229,7 @@ void MasterServer::WorkerClient(int workerId, const WorkerGroupConfig& groupConf
     Logger::AddSink(logSink);
     Logger::GetLogger()->set_pattern(config.GetString("logging.pattern", "[%Y-%m-%d %H:%M:%S.%e] [%P] [%l] [%n] %v"));
     Logger::Info("Worker {} starting for group: {} ({}:{})", workerId, groupConfig.protocol, groupConfig.host, groupConfig.port);
-    ClientListener listener(groupConfig, masterReadFd);
+    ClientListener listener(groupConfig, masterReadFd, workerId);
     listener.Start();
     asio::io_context signalIo;
     asio::signal_set signals(signalIo, SIGINT, SIGTERM);
@@ -243,20 +243,25 @@ void MasterServer::WireCallbacks()
 {
     gameLogic_.SetSendAuthenticationResponseCallback([this](uint64_t session_id, const std::string& message, uint64_t player_id) {
         BinaryProtocol::BinaryWriter w;
+        w.WriteUInt16(BinaryProtocol::MESSAGE_TYPE_AUTHENTICATION);
         w.WriteUInt64(gameLogic_.GetCurrentTimestamp());
         w.WriteUInt64(player_id);
         w.WriteString(message);
-        SendResponse(session_id, w.GetBuffer());
+        auto buf = w.GetBuffer(); if (!buf.empty()) Logger::Trace("Pushing from callback: first byte = 0x{:02x}", buf[0]);
+        processPool_.PushToWorker(static_cast<int>(session_id >> 48), session_id, buf);
     });
     gameLogic_.SetSendChunkParamsCallback([this](uint64_t session_id, const ChunkParams& data) {
         BinaryProtocol::BinaryWriter w;
+        w.WriteUInt16(BinaryProtocol::MESSAGE_TYPE_CHUNK_PARAMS);
         w.WriteUInt64(data.timestamp);
         w.WriteUInt32(static_cast<uint32_t>(data.size));
         w.WriteFloat(data.spacing);
-        SendResponse(session_id, w.GetBuffer());
+        auto buf = w.GetBuffer(); if (!buf.empty()) Logger::Trace("Pushing from callback: first byte = 0x{:02x}", buf[0]);
+        processPool_.PushToWorker(static_cast<int>(session_id >> 48), session_id, buf);
     });
     gameLogic_.SetSendChunkCallback([this](uint64_t session_id, const ChunkData& data) {
         BinaryProtocol::BinaryWriter w;
+        w.WriteUInt16(BinaryProtocol::MESSAGE_TYPE_CHUNK_DATA);
         w.WriteUInt64(data.timestamp);
         w.WriteInt32(data.x);
         w.WriteInt32(data.z);
@@ -267,19 +272,22 @@ void MasterServer::WireCallbacks()
         w.WriteUInt32(idxSize);
         w.WriteBytes(reinterpret_cast<const uint8_t*>(data.indices.data()), idxSize);
         w.WriteUInt32(data.lod);
-        SendResponse(session_id, w.GetBuffer());
+        auto buf = w.GetBuffer(); if (!buf.empty()) Logger::Trace("Pushing from callback: first byte = 0x{:02x}", buf[0]);
+        processPool_.PushToWorker(static_cast<int>(session_id >> 48), session_id, buf);
     });
     gameLogic_.SetSendCollisionResponseCallback([this](uint64_t session_id, const CollisionResult& result) {
         BinaryProtocol::BinaryWriter w;
+        w.WriteUInt16(BinaryProtocol::MESSAGE_TYPE_COLLISION_CHECK);
         w.WriteUInt64(gameLogic_.GetCurrentTimestamp());
         w.WriteUInt8(result.collided ? 1 : 0);
         w.WriteUInt64(result.collided_id);
         w.WriteFloat(result.penetration);
         w.WriteVector3(result.resolution);
-        SendResponse(session_id, w.GetBuffer());
+        processPool_.PushToWorker(static_cast<int>(session_id >> 48), session_id, w.GetBuffer());
     });
-    gameLogic_.SetPlayerStateCallback([this](const PlayerStateData& state) {
+    gameLogic_.SetPlayerStateCallback([this](const PlayerStateData& state) {//broadcast
         BinaryProtocol::BinaryWriter w;
+        w.WriteUInt16(BinaryProtocol::MESSAGE_TYPE_PLAYER_STATE);
         w.WriteUInt64(state.timestamp);
         w.WriteUInt64(state.player_id);
         w.WriteVector3(state.position);
@@ -289,11 +297,12 @@ void MasterServer::WireCallbacks()
         auto sids = gameLogic_.GetSessionsInRadius(state.position);
         for (auto sid : sids) {
             if (sid == state.session_id) continue;
-            SendResponse(sid, w.GetBuffer());
+            processPool_.PushToWorker(static_cast<int>(sid >> 48), sid, w.GetBuffer());
         }
     });
-    gameLogic_.SetBroadcastPlayerPositionCallback([this](const PlayerPositionData& data, float /*radius*/) {
+    gameLogic_.SetBroadcastPlayerPositionCallback([this](const PlayerPositionData& data, float /*radius*/) {//broadcast
         BinaryProtocol::BinaryWriter w;
+        w.WriteUInt16(BinaryProtocol::MESSAGE_TYPE_PLAYER_POSITION);
         w.WriteUInt64(data.timestamp);
         w.WriteUInt64(data.player_id);
         w.WriteVector3(data.position);
@@ -301,28 +310,32 @@ void MasterServer::WireCallbacks()
         auto sids = gameLogic_.GetSessionsInRadius(data.position);
         for (auto sid : sids) {
             if (sid == data.session_id) continue;
-            SendResponse(sid, w.GetBuffer());
+            processPool_.PushToWorker(static_cast<int>(sid >> 48), sid, w.GetBuffer());
         }
     });
     gameLogic_.SetSendPlayerSpawnCallback([this](uint64_t session_id, const PlayerSpawnData& data) {
         BinaryProtocol::BinaryWriter w;
-        w.WriteUInt64(data.timestamp);
+        w.WriteUInt16(BinaryProtocol::MESSAGE_TYPE_PLAYER_SPAWN);
+        w.WriteUInt64(gameLogic_.GetCurrentTimestamp());
         w.WriteUInt64(data.player_id);
         w.WriteString(data.name);
         w.WriteVector3(data.position);
         w.WriteFloat(data.yaw);
         w.WriteFloat(data.health);
         w.WriteFloat(data.max_health);
-        SendResponse(session_id, w.GetBuffer());
+        int workerId = static_cast<int>(session_id >> 48);
+        processPool_.PushToWorker(workerId, session_id, w.GetBuffer());
     });
     gameLogic_.SetSendPlayerDespawnCallback([this](uint64_t session_id, const PlayerDespawnData& data) {
         BinaryProtocol::BinaryWriter w;
+        w.WriteUInt16(BinaryProtocol::MESSAGE_TYPE_PLAYER_DESPAWN);
         w.WriteUInt64(data.timestamp);
         w.WriteUInt64(data.player_id);
-        SendResponse(session_id, w.GetBuffer());
+        processPool_.PushToWorker(static_cast<int>(session_id >> 48), session_id, w.GetBuffer());
     });
     gameLogic_.SetSendPlayerUpdateCallback([this](uint64_t session_id, const PlayerUpdateData& data) {
         BinaryProtocol::BinaryWriter w;
+        w.WriteUInt16(BinaryProtocol::MESSAGE_TYPE_PLAYER_UPDATE);
         w.WriteUInt64(data.timestamp);
         w.WriteUInt64(data.player_id);
         w.WriteVector3(data.position);
@@ -330,10 +343,11 @@ void MasterServer::WireCallbacks()
         w.WriteFloat(data.health);
         w.WriteFloat(data.max_health);
         w.WriteString(data.name);
-        SendResponse(session_id, w.GetBuffer());
+        processPool_.PushToWorker(static_cast<int>(session_id >> 48), session_id, w.GetBuffer());
     });
-    gameLogic_.SetSendPlayersUpdateCallback([this](uint64_t session_id, const PlayerUpdateData& data) {
+    gameLogic_.SetSendPlayersUpdateCallback([this](uint64_t session_id, const PlayerUpdateData& data) {//broadcast
         BinaryProtocol::BinaryWriter w;
+        w.WriteUInt16(BinaryProtocol::MESSAGE_TYPE_PLAYERS_UPDATE);
         w.WriteUInt64(data.timestamp);
         w.WriteUInt64(data.player_id);
         w.WriteVector3(data.position);
@@ -344,7 +358,7 @@ void MasterServer::WireCallbacks()
         auto sids = gameLogic_.GetSessionsInRadius(data.position);
         for (auto sid : sids) {
             if (sid != session_id) {
-                SendResponse(sid, w.GetBuffer());
+                processPool_.PushToWorker(static_cast<int>(sid >> 48), sid, w.GetBuffer());
             }
         }
     });
@@ -357,16 +371,16 @@ void MasterServer::WireCallbacks()
             w.WriteFloat(response.damage);
             w.WriteFloat(response.health);
             w.WriteUInt8(response.is_dead ? 1 : 0);
-            SendResponse(session_id, w.GetBuffer());
+            processPool_.PushToWorker(static_cast<int>(session_id >> 48), session_id, w.GetBuffer());
         } else if (response.type == "dialogue") {
             w.WriteUInt64(response.npc_id);
             w.WriteJson(response.quests);
             w.WriteUInt64(response.timestamp);
-            SendResponse(session_id, w.GetBuffer());
+            processPool_.PushToWorker(static_cast<int>(session_id >> 48), session_id, w.GetBuffer());
         } else {
             w.WriteUInt64(0);
             w.WriteString("NPC interaction failed");
-            SendResponse(session_id, w.GetBuffer());
+            processPool_.PushToWorker(static_cast<int>(session_id >> 48), session_id, w.GetBuffer());
         }
     });
     gameLogic_.SetSendFamiliarCommandResponseCallback([this](uint64_t session_id, const FamiliarData& response) {
@@ -375,7 +389,7 @@ void MasterServer::WireCallbacks()
         w.WriteUInt64(response.familiar_id);
         w.WriteUInt64(response.target_id);
         w.WriteString(response.command);
-        SendResponse(session_id, w.GetBuffer());
+        processPool_.PushToWorker(static_cast<int>(session_id >> 48), session_id, w.GetBuffer());
     });
     gameLogic_.SetSendEntitySpawnResponseCallback([this](uint64_t session_id, const EntitySpawnData& response) {
         BinaryProtocol::BinaryWriter w;
@@ -383,14 +397,14 @@ void MasterServer::WireCallbacks()
         w.WriteUInt64(response.entity_id);
         w.WriteInt32(response.type);
         w.WriteVector3(response.position);
-        SendResponse(session_id, w.GetBuffer());
+        processPool_.PushToWorker(static_cast<int>(session_id >> 48), session_id, w.GetBuffer());
     });
     gameLogic_.SetSendLootPickupResponseCallback([this](uint64_t session_id, const LootPickupData& response) {
         BinaryProtocol::BinaryWriter w;
         w.WriteUInt64(response.timestamp);
         w.WriteUInt64(response.loot_id);
         w.WriteUInt16(response.quantity);
-        SendResponse(session_id, w.GetBuffer());
+        processPool_.PushToWorker(static_cast<int>(session_id >> 48), session_id, w.GetBuffer());
     });
     gameLogic_.SetSendInventoryResponseCallback([this](uint64_t session_id, const InventoryData& response) {
         BinaryProtocol::BinaryWriter w;
@@ -401,7 +415,7 @@ void MasterServer::WireCallbacks()
         w.WriteInt32(response.inv_slot_id);
         w.WriteInt32(response.use_slot_id);
         w.WriteUInt16(response.quantity);
-        SendResponse(session_id, w.GetBuffer());
+        processPool_.PushToWorker(static_cast<int>(session_id >> 48), session_id, w.GetBuffer());
     });
 }
 

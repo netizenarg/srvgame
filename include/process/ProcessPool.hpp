@@ -12,7 +12,26 @@
 #include <unistd.h>
 
 #include <asio.hpp>
+#include <asio/awaitable.hpp>
+#include <asio/detached.hpp>
+#include <asio/co_spawn.hpp>
+#include <asio/io_context.hpp>
+#include <asio/ip/tcp.hpp>
+#include <asio/read_until.hpp>
+#include <asio/redirect_error.hpp>
+#include <asio/signal_set.hpp>
+#include <asio/steady_timer.hpp>
+#include <asio/use_awaitable.hpp>
+#include <asio/write.hpp>
 #include <asio/local/connect_pair.hpp>
+
+using asio::ip::tcp;
+using asio::awaitable;
+using asio::co_spawn;
+using asio::detached;
+using asio::redirect_error;
+using asio::use_awaitable;
+
 #include <nlohmann/json.hpp>
 
 #include "logging/Logger.hpp"
@@ -46,6 +65,9 @@ public:
     )>;
     asio::posix::stream_descriptor& GetMasterStream();
     void SendAsync(const std::vector<uint8_t>& binaryData);
+    void StartWriterThread();
+    void StopWriter();
+    void JoinWriterThread();
 
 private:
     int workerId_;
@@ -59,7 +81,11 @@ private:
     std::mutex writeMutex_;
     std::deque<std::vector<uint8_t>> sendQueue_;
     std::mutex sendMutex_;
+    std::condition_variable sendCv_;
     bool writing_ = false;
+    std::thread writerThread_;
+    bool writerRunning_{true};
+    void writerLoop();
     void doWrite();
 };
 
@@ -71,14 +97,15 @@ public:
     void Shutdown();
     void SetWorker(std::function<void(int, const WorkerGroupConfig&, int)> func);
     bool SendToWorker(int workerId, const std::vector<uint8_t>& message);
-    void BroadcastToOtherWorkers(const nlohmann::json& msg, int senderId);
-    void BroadcastToAllWorkers(const nlohmann::json& msg);
+    void BroadcastToOtherWorkers(const std::vector<uint8_t>& msg, int owner_id);
+    void BroadcastToAllWorkers(const std::vector<uint8_t>& msg);
     size_t GetTotalWorkerCount() const;
     bool IsWorkerAlive(int workerId) const;
     bool IsWorkersReady() const;
     void WaitForWorkers();
     void SetMasterMessageHandler(ProcessWorker::MasterMessageHandler handler);
     bool SendReplyToWorker(int workerId, uint32_t correlationId, const std::vector<uint8_t>& binaryData);
+    bool PushToWorker(int workerId, uint64_t sessionId, const std::vector<uint8_t>& binaryData);
 
 private:
     asio::io_context& io_;
@@ -86,9 +113,11 @@ private:
     std::vector<std::shared_ptr<ProcessWorker>> workers_;
     std::function<void(int, const WorkerGroupConfig&, int)> worker_;
     int workerId_ = -1;
-    bool running_ = false;
+    std::atomic<bool> running_{false};
     std::atomic<bool> ready_{false};
     ProcessWorker::MasterMessageHandler masterHandler_;
+    std::vector<std::thread> readerThreads_;
+    std::unordered_map<int, std::shared_ptr<std::atomic<bool>>> readerRunningFlags_;
     void doSpawnWorkers();
     void StartReadingFromWorker(std::shared_ptr<ProcessWorker> worker);
 };

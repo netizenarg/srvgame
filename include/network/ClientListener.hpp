@@ -12,11 +12,12 @@
 
 class ClientListener {
 public:
-    ClientListener(const WorkerGroupConfig& groupConfig, int masterFd);
+    ClientListener(const WorkerGroupConfig& groupConfig, int masterFd, int workerId);
     ~ClientListener();
     void Start();
     void Shutdown();
 private:
+    int workerId_;
     asio::io_context io_;
     asio::posix::stream_descriptor pipe_;
     std::thread ioThread_;

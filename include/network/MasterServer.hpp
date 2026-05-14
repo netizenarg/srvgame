@@ -22,7 +22,10 @@
 #include "network/ClientListener.hpp"
 #include "game/GameLogic.hpp"
 
-class DatabaseService;
+struct PendingRequest {
+    int workerId;
+    uint32_t correlationId;
+};
 
 class MasterServer {
 public:
@@ -53,6 +56,7 @@ private:
     std::function<void(uint64_t, const std::vector<uint8_t>&)> sendReplyCb_;
     std::function<uint64_t(uint64_t, int)> assignVirtualId_;
     std::atomic<uint32_t> nextPersistentId_{1};
+    std::unordered_map<uint64_t, PendingRequest> pendingReplies_;
 
     void start_signal_read();
     void WireCallbacks();
