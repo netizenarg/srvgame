@@ -144,7 +144,7 @@
     "file": "logs/server.log",
     "max_file_size": 1048576,
     "max_files": 10,
-    "pattern": "[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] [%P] [%n] %v"
+    "pattern": "[%Y-%m-%d %H:%M:%S.%e] [%P] [%^%l%$] [%n] %v"
   },
 
   "scripting": {
