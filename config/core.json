@@ -1,8 +1,11 @@
 {
-  "process": {
+  "workers": {
     "max_message_size": 1048576,
-    "receive_timeout_ms": 1000,
-    "workers": [
+    "game_logic": {
+      "check_interval_ms": 100,
+      "max_restart_attempts": 5
+    },
+    "clients": [
       {
         "protocol": "binary",
         "host": "127.0.0.1",
