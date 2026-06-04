@@ -260,7 +260,12 @@ void ConnectionManager::OnMasterReply(uint32_t correlationId, const std::vector<
     }
     if (!session) return;
     if (session->GetProtocolMode() == ProtocolMode::Binary) {
-        session->SendRaw(std::string(reply.begin(), reply.end()));
+        if (reply.size() >= 2) {
+            BinaryProtocol::BinaryReader r(reply.data(), reply.size());
+            uint16_t type = r.ReadUInt16();
+            std::vector<uint8_t> body(reply.begin() + 2, reply.end());
+            session->Send(type, body);
+        }
         if (entry.messageType == BinaryProtocol::MESSAGE_TYPE_AUTHENTICATION && reply.size() >= 16) {
             BinaryProtocol::BinaryReader r(reply.data(), reply.size());
             r.ReadUInt64();
@@ -436,20 +441,27 @@ void ConnectionManager::OnMasterPush(uint64_t sessionId, const std::vector<uint8
         Logger::Trace("First 4 bytes: {:02x} {:02x} {:02x} {:02x}",
                       data[0], data[1], data[2], data[3]);
     }
+    auto sendToSession = [&](const std::shared_ptr<IConnection>& session, const std::vector<uint8_t>& payload) {
+        if (session->GetProtocolMode() == ProtocolMode::Binary) {
+            if (payload.size() >= 2) {
+                BinaryProtocol::BinaryReader r(payload.data(), payload.size());
+                uint16_t type = r.ReadUInt16();
+                std::vector<uint8_t> body(payload.begin() + 2, payload.end());
+                session->Send(type, body);
+            }
+        } else {
+            if (payload.size() >= 2) {
+                BinaryProtocol::BinaryReader r(payload.data(), payload.size());
+                uint16_t type = r.ReadUInt16();
+                std::vector<uint8_t> body(payload.begin() + 2, payload.end());
+                session->SendJson(binaryToJson(type, body));
+            }
+        }
+    };
     if (sessionId == 0) {// Broadcast to all sessions on this worker
         std::shared_lock<std::shared_mutex> lock(sessionsMutex_);
         for (auto& [id, session] : sessions_) {
-            if (session->GetProtocolMode() == ProtocolMode::Binary) {
-                session->SendRaw(std::string(data.begin(), data.end()));
-            } else {
-                if (data.size() >= 2) {
-                    BinaryProtocol::BinaryReader r(data.data(), data.size());
-                    uint16_t type = r.ReadUInt16();
-                    Logger::Trace("Parsed binary message type: {}", type);
-                    std::vector<uint8_t> body(data.begin() + 2, data.end());
-                    session->SendJson(binaryToJson(type, body));
-                }
-            }
+            sendToSession(session, data);
         }
     } else {
         std::shared_ptr<IConnection> session;
@@ -462,18 +474,7 @@ void ConnectionManager::OnMasterPush(uint64_t sessionId, const std::vector<uint8
         if (!session)
             Logger::Warn("ConnectionManager::OnMasterPush: session for ID {} not exists", sessionId);
         else
-        {
-            if (session->GetProtocolMode() == ProtocolMode::Binary) {
-                session->SendRaw(std::string(data.begin(), data.end()));
-            } else {
-                if (data.size() >= 2) {
-                    BinaryProtocol::BinaryReader r(data.data(), data.size());
-                    uint16_t type = r.ReadUInt16();
-                    std::vector<uint8_t> body(data.begin() + 2, data.end());
-                    session->SendJson(binaryToJson(type, body));
-                }
-            }
-        }
+            sendToSession(session, data);
         Logger::Trace("ConnectionManager::OnMasterPush: Sending to session {}", sessionId);
     }
 }

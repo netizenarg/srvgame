@@ -58,7 +58,6 @@ void MasterRouter::RouteToGameLogic(uint64_t sessionId, uint16_t msgType, const 
             w.WriteString(message);
             w.WriteUInt64(timestamp);
             std::vector<uint8_t> response = w.GetBuffer();
-            pool_.PushToWorker(static_cast<int>(sessionId >> 48), sessionId, response);
             pool_.BroadcastToAllWorkers(response);
             break;
         }

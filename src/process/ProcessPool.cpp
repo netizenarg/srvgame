@@ -24,8 +24,6 @@ void ProcessWorker::Start() {
         socket1.close();
         masterFd_ = socket0.native_handle();
         socket0.release();
-        channel_ = std::make_shared<IPCChannel>(io_, masterFd_);
-        io_.notify_fork(asio::execution_context::fork_event::fork_parent);
     } else {
         socket0.close();
         socket1.close();
@@ -107,9 +105,6 @@ void ProcessPool::doSpawnWorkers() {
             try {
                 worker->Start();
                 workers_.push_back(worker);
-                worker->GetChannel()->Start([this, globalId](const IPCEnvelope& env) {
-                    onWorkerMessage(globalId, env);
-                });
             } catch (const std::exception& err) {
                 if (std::string(err.what()) == "worker_function") {
                     int fd = worker->GetMasterFd();
@@ -120,6 +115,18 @@ void ProcessPool::doSpawnWorkers() {
                     Logger::Error("ProcessPool::doSpawnWorkers: worker start failed: {}", err.what());
                 }
             }
+        }
+    }
+    io_.notify_fork(asio::execution_context::fork_event::fork_parent);
+    for (auto& w : workers_) {
+        if (w->GetType() == WorkerType::Child) {
+            int fd = w->GetMasterFd();
+            auto channel = std::make_shared<IPCChannel>(io_, fd);
+            int wid = w->GetId();
+            channel->Start([this, wid](const IPCEnvelope& env) {
+                onWorkerMessage(wid, env);
+            });
+            w->SetChannel(channel);
         }
     }
 }
@@ -137,9 +144,13 @@ int ProcessPool::SpawnGameLogicWorker() {
         worker->Start();
         workers_.push_back(worker);
         gameLogicWorkerId_ = globalId;
-        worker->GetChannel()->Start([this](const IPCEnvelope& env) {
+        io_.notify_fork(asio::execution_context::fork_event::fork_parent);
+        int fd = worker->GetMasterFd();
+        auto channel = std::make_shared<IPCChannel>(io_, fd);
+        channel->Start([this](const IPCEnvelope& env) {
             onGameLogicMessage(env);
         });
+        worker->SetChannel(channel);
         return globalId;
     } catch (const std::exception& err) {
         if (std::string(err.what()) == "worker_function") {

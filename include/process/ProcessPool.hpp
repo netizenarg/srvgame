@@ -52,6 +52,7 @@ public:
     WorkerType GetType() const;
 
     std::shared_ptr<IPCChannel> GetChannel() { return channel_; }
+    void SetChannel(std::shared_ptr<IPCChannel> ch) { channel_ = std::move(ch); }
     int GetMasterFd() const { return masterFd_; }
 
     using MasterMessageHandler = std::function<void(

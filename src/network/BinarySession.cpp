@@ -68,10 +68,18 @@ void BinarySession::Start() {
         return;
     }
     Logger::Debug("Starting BinarySession {}", sessionId_);
-    if (ssl_stream_) {
-        StartTLSHandshake();
-    } else {
-        StartProtocolNegotiation();
+    try {
+        if (ssl_stream_) {
+            StartTLSHandshake();
+        } else {
+            StartProtocolNegotiation();
+        }
+    } catch (const std::exception& e) {
+        Logger::Error("BinarySession {} Start() failed: {}", sessionId_, e.what());
+        Stop();
+    } catch (...) {
+        Logger::Error("BinarySession {} Start() failed with unknown exception", sessionId_);
+        Stop();
     }
 }
 
@@ -92,9 +100,13 @@ void BinarySession::StartTLSHandshake() {
 }
 
 void BinarySession::StartProtocolNegotiation() {
+    Logger::Debug("BinarySession {} StartProtocolNegotiation: sending capabilities", sessionId_);
     SendProtocolCapabilities();
+    Logger::Debug("BinarySession {} StartProtocolNegotiation: setting up handlers", sessionId_);
     SetupDefaultHandlers();
+    Logger::Debug("BinarySession {} StartProtocolNegotiation: starting DoBinaryRead", sessionId_);
     DoBinaryRead();
+    Logger::Debug("BinarySession {} StartProtocolNegotiation: starting heartbeat", sessionId_);
     StartHeartbeat();
     StartNetworkAdaptation();
     Logger::Info("BinarySession {} started", sessionId_);
@@ -218,9 +230,9 @@ void BinarySession::DoBinaryRead() {
                 self->Stop();
             }
         });
-        std::vector<uint8_t> body(header->length);
+        auto body = std::make_shared<std::vector<uint8_t>>(header->length);
         asio::async_read(self->GetSocket(),
-        asio::buffer(body),
+        asio::buffer(*body),
         [self, header, body, deadline](std::error_code ec, std::size_t length) mutable {
             deadline->cancel();
             if (ec) {
@@ -228,7 +240,7 @@ void BinarySession::DoBinaryRead() {
                 return;
             }
             Logger::Debug("BinarySession::DoBinaryRead asio::async_read length = {}", length);
-            uint32_t calculated = BinaryProtocol::CalculateCRC32(body.data(), body.size());
+            uint32_t calculated = BinaryProtocol::CalculateCRC32(body->data(), body->size());
             if (calculated != header->checksum) {
                 Logger::Error("Session {}: checksum mismatch", self->sessionId_);
                 self->SendError(BinaryProtocol::MESSAGE_TYPE_ERROR,
@@ -236,10 +248,10 @@ void BinarySession::DoBinaryRead() {
                 self->DoBinaryRead();
                 return;
             }
-            std::vector<uint8_t> processed_body = body;
+            std::vector<uint8_t> processed_body = *body;
             if (header->flags & BinaryProtocol::FLAG_COMPRESSED) {
                 try {
-                    processed_body = BinaryProtocol::DecompressData(body);
+                    processed_body = BinaryProtocol::DecompressData(*body);
                 } catch (const std::exception& e) {
                     Logger::Error("Session {}: decompression failed: {}",
                                 self->sessionId_, e.what());
@@ -343,9 +355,13 @@ void BinarySession::Send(uint16_t message_type, const std::vector<uint8_t>& data
         message.data.data(), message.data.size());
     auto serialized = message.Serialize();
     network_monitor_.RecordPacketSent(message.header.sequence, serialized.size());
-    std::lock_guard<std::mutex> lock(write_mutex_);
-    write_queue_.push(serialized);
-    if (write_queue_.size() == 1) {
+    bool should_write = false;
+    {
+        std::lock_guard<std::mutex> lock(write_mutex_);
+        write_queue_.push(serialized);
+        should_write = (write_queue_.size() == 1);
+    }
+    if (should_write) {
         DoBinaryWrite();
     }
 }
