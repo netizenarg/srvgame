@@ -181,32 +181,32 @@ asio::ip::tcp::endpoint BinarySession::GetRemoteEndpoint() const {
 void BinarySession::DoBinaryRead() {
     if (!connected_ || closing_) return;
     auto self = shared_from_this();
-    BinaryProtocol::NetworkHeader header;
+    auto header = std::make_shared<BinaryProtocol::NetworkHeader>();
     asio::async_read(GetSocket(),
-    asio::buffer(&header, sizeof(BinaryProtocol::NetworkHeader)),
+    asio::buffer(header.get(), sizeof(BinaryProtocol::NetworkHeader)),
     [self, header](std::error_code ec, std::size_t length) mutable {
         Logger::Debug("BinarySession::DoBinaryRead asio::async_read length = {}", length);
         if (ec) {
             self->HandleNetworkError(ec);
             return;
         }
-        if (header.version > BinaryProtocol::CURRENT_PROTOCOL_VERSION) {
+        if (header->version > BinaryProtocol::CURRENT_PROTOCOL_VERSION) {
             Logger::Warn("Session {}: incompatible protocol version {}",
-                        self->sessionId_, header.version);
+                        self->sessionId_, header->version);
             self->SendError(BinaryProtocol::MESSAGE_TYPE_ERROR,
                                     "Incompatible protocol version", 400);
             self->DoBinaryRead();
             return;
         }
-        if (header.length > BinaryProtocol::MAX_MESSAGE_SIZE) {
+        if (header->length > BinaryProtocol::MAX_MESSAGE_SIZE) {
             Logger::Error("Session {}: message too large: {} bytes",
-                        self->sessionId_, header.length);
+                        self->sessionId_, header->length);
             self->Stop();
             return;
         }
-        if (header.length == 0) {
+        if (header->length == 0) {
             BinaryProtocol::BinaryMessage message;
-            message.header = header;
+            message.header = *header;
             self->HandleBinaryMessage(message);
             self->DoBinaryRead();
             return;
@@ -219,7 +219,7 @@ void BinarySession::DoBinaryRead() {
                 self->Stop();
             }
         });
-        std::vector<uint8_t> body(header.length);
+        std::vector<uint8_t> body(header->length);
         asio::async_read(self->GetSocket(),
         asio::buffer(body),
         [self, header, body, deadline](std::error_code ec, std::size_t length) mutable {
@@ -230,7 +230,7 @@ void BinarySession::DoBinaryRead() {
             }
             Logger::Debug("BinarySession::DoBinaryRead asio::async_read length = {}", length);
             uint32_t calculated = BinaryProtocol::CalculateCRC32(body.data(), body.size());
-            if (calculated != header.checksum) {
+            if (calculated != header->checksum) {
                 Logger::Error("Session {}: checksum mismatch", self->sessionId_);
                 self->SendError(BinaryProtocol::MESSAGE_TYPE_ERROR,
                                         "Checksum error", 400);
@@ -238,7 +238,7 @@ void BinarySession::DoBinaryRead() {
                 return;
             }
             std::vector<uint8_t> processed_body = body;
-            if (header.flags & BinaryProtocol::FLAG_COMPRESSED) {
+            if (header->flags & BinaryProtocol::FLAG_COMPRESSED) {
                 try {
                     processed_body = BinaryProtocol::DecompressData(body);
                 } catch (const std::exception& e) {
@@ -250,13 +250,13 @@ void BinarySession::DoBinaryRead() {
                     return;
                 }
             }
-            self->network_monitor_.RecordPacketReceived(header.sequence, processed_body.size());
+            self->network_monitor_.RecordPacketReceived(header->sequence, processed_body.size());
             BinaryProtocol::BinaryMessage message;
-            message.header = header;
+            message.header = *header;
             message.data = processed_body;
             self->HandleBinaryMessage(message);
-            if (header.flags & BinaryProtocol::FLAG_RELIABLE) {
-                self->SendAcknowledgment(header.sequence);
+            if (header->flags & BinaryProtocol::FLAG_RELIABLE) {
+                self->SendAcknowledgment(header->sequence);
             }
             if (self->connected_ && !self->closing_) {
                 self->DoBinaryRead();
@@ -450,7 +450,6 @@ void BinarySession::DoBinaryWrite() {
     asio::async_write(GetSocket(),
     asio::buffer(data),
     [self](std::error_code ec, std::size_t length) {
-        std::lock_guard<std::mutex> lock(self->write_mutex_);
         if (ec) {
             Logger::Error("Session {} write error: {}",
                         self->sessionId_, ec.message());
@@ -458,10 +457,15 @@ void BinarySession::DoBinaryWrite() {
             return;
         }
         self->RecordMessageSent(length);
-        if (!self->write_queue_.empty()) {
-            self->write_queue_.pop();
+        bool needs_write = false;
+        {
+            std::lock_guard<std::mutex> lock(self->write_mutex_);
+            if (!self->write_queue_.empty()) {
+                self->write_queue_.pop();
+            }
+            needs_write = !self->write_queue_.empty();
         }
-        if (!self->write_queue_.empty()) {
+        if (needs_write) {
             self->DoBinaryWrite();
         }
     });

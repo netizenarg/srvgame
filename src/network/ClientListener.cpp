@@ -112,6 +112,8 @@ void ClientListener::doRead() {
             uint64_t sessionId = r.ReadUInt64();(void)sessionId;
             uint16_t msgType  = r.ReadUInt16();(void)msgType;
             uint32_t bodyLen  = r.ReadUInt32();
+            Logger::Trace("ClientListener::doRead: worker received message from master corrId={}, sessionId={}, msgType={}, bodySize={}",
+                          corrId, sessionId, msgType, bodyLen);
             std::vector<uint8_t> body;
             if (bodyLen > 0 && r.Remaining() >= bodyLen) {
                 body = r.ReadBytes(bodyLen);

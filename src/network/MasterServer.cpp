@@ -50,7 +50,9 @@ void MasterServer::Initialize()
                 w.WriteString(message);
                 w.WriteUInt64(timestamp);
                 std::vector<uint8_t> response = w.GetBuffer();
+                processPool_.PushToWorker(static_cast<int>(sessionId >> 48), sessionId, response);
                 processPool_.BroadcastToAllWorkers(response);
+                //processPool_.BroadcastToOtherWorkers(response, static_cast<int>(sessionId >> 48));
                 break;
             }
             case BinaryProtocol::MESSAGE_TYPE_CHUNK_PARAMS: {
@@ -242,12 +244,14 @@ void MasterServer::WorkerClient(int workerId, const WorkerGroupConfig& groupConf
 void MasterServer::WireCallbacks()
 {
     gameLogic_.SetSendAuthenticationResponseCallback([this](uint64_t session_id, const std::string& message, uint64_t player_id) {
+        Logger::Trace("MasterServer::WireCallbacks auth response: session={}, player={}, message={}", session_id, player_id, message);
         BinaryProtocol::BinaryWriter w;
         w.WriteUInt16(BinaryProtocol::MESSAGE_TYPE_AUTHENTICATION);
         w.WriteUInt64(gameLogic_.GetCurrentTimestamp());
         w.WriteUInt64(player_id);
         w.WriteString(message);
-        auto buf = w.GetBuffer(); if (!buf.empty()) Logger::Trace("Pushing from callback: first byte = 0x{:02x}", buf[0]);
+        auto buf = w.GetBuffer();
+        Logger::Trace("MasterServer::WireCallbacks auth response buffer size: {} bytes", buf.size());
         processPool_.PushToWorker(static_cast<int>(session_id >> 48), session_id, buf);
     });
     gameLogic_.SetSendChunkParamsCallback([this](uint64_t session_id, const ChunkParams& data) {
@@ -256,7 +260,7 @@ void MasterServer::WireCallbacks()
         w.WriteUInt64(data.timestamp);
         w.WriteUInt32(static_cast<uint32_t>(data.size));
         w.WriteFloat(data.spacing);
-        auto buf = w.GetBuffer(); if (!buf.empty()) Logger::Trace("Pushing from callback: first byte = 0x{:02x}", buf[0]);
+        auto buf = w.GetBuffer();
         processPool_.PushToWorker(static_cast<int>(session_id >> 48), session_id, buf);
     });
     gameLogic_.SetSendChunkCallback([this](uint64_t session_id, const ChunkData& data) {
@@ -272,7 +276,7 @@ void MasterServer::WireCallbacks()
         w.WriteUInt32(idxSize);
         w.WriteBytes(reinterpret_cast<const uint8_t*>(data.indices.data()), idxSize);
         w.WriteUInt32(data.lod);
-        auto buf = w.GetBuffer(); if (!buf.empty()) Logger::Trace("Pushing from callback: first byte = 0x{:02x}", buf[0]);
+        auto buf = w.GetBuffer();
         processPool_.PushToWorker(static_cast<int>(session_id >> 48), session_id, buf);
     });
     gameLogic_.SetSendCollisionResponseCallback([this](uint64_t session_id, const CollisionResult& result) {

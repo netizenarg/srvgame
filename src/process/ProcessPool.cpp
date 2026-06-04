@@ -1,7 +1,5 @@
 #include "process/ProcessPool.hpp"
 
-//extern std::atomic<bool> g_shutdown;
-
 ProcessWorker::ProcessWorker(asio::io_context& io, int globalId, const WorkerGroupConfig& cfg)
     : workerId_(globalId), config_(cfg), io_(io), pid_(-1),
       masterReadFd_(-1), masterWriteFd_(-1), masterStream_(io_) {}
@@ -51,32 +49,41 @@ void ProcessWorker::SendAsync(const std::vector<uint8_t>& binaryData) {
     std::vector<uint8_t> frame(sizeof(len) + binaryData.size());
     memcpy(frame.data(), &len, sizeof(len));
     memcpy(frame.data() + sizeof(len), binaryData.data(), binaryData.size());
-    {
-        std::lock_guard<std::mutex> lock(sendMutex_);
-        sendQueue_.push_back(std::move(frame));
-    }
-    sendCv_.notify_one();
+    asio::post(io_, [this, frame = std::move(frame)]() {
+        bool start_write;
+        {
+            std::lock_guard<std::mutex> lock(write_mutex_);
+            write_queue_.push_back(std::move(frame));
+            start_write = !writing_;
+            if (start_write) writing_ = true;
+        }
+        if (start_write) {
+            doWrite();
+        }
+    });
 }
 
 void ProcessWorker::doWrite() {
-    auto self = shared_from_this();
     std::vector<uint8_t> data;
     {
-        std::lock_guard<std::mutex> lock(sendMutex_);
-        if (sendQueue_.empty()) {
+        std::lock_guard<std::mutex> lock(write_mutex_);
+        if (write_queue_.empty()) {
             writing_ = false;
             return;
         }
-        data = std::move(sendQueue_.front());
-        sendQueue_.pop_front();
+        data = std::move(write_queue_.front());
+        write_queue_.pop_front();
+        writing_ = true;
     }
+    auto self = shared_from_this();
     asio::async_write(masterStream_, asio::buffer(data),
     [self, data](std::error_code ec, size_t /*bytes*/) {
         if (ec) {
-            Logger::Error("Master async_write to worker {} failed: {}",
+            Logger::Error("ProcessWorker::doWrite: master async_write to worker {} failed: {}",
                             self->workerId_, ec.message());
         }
-        self->doWrite();
+        else
+            self->doWrite();
     });
 }
 
@@ -102,41 +109,42 @@ void ProcessWorker::Shutdown() {
     pid_ = -1;
 }
 
-void ProcessWorker::writerLoop() {
-    while (true) {
-        Logger::Trace("ProcessWorker::writerLoop ID {}", workerId_);
-        std::vector<uint8_t> data;
-        {
-            std::unique_lock<std::mutex> lock(sendMutex_);
-            sendCv_.wait(lock, [this] {return !writerRunning_ || !sendQueue_.empty();});
-            if (!writerRunning_ && sendQueue_.empty()) return;
-            data = std::move(sendQueue_.front());
-            sendQueue_.pop_front();
-        }
-        Logger::Trace("ProcessWorker::writerLoop {} writing {} bytes", workerId_, data.size());
-        std::error_code ec;
-        asio::write(masterStream_, asio::buffer(data), ec);
-        Logger::Trace("ProcessWorker::writerLoop {} write completed: ec = {}", workerId_, ec.message());
-        if (ec) {
-            Logger::Error("ProcessWorker::writerLoop for worker {} failed: {}", workerId_, ec.message());
-            break;
-        }
-    }
-}
+// void ProcessWorker::writerLoop() {
+//     while (true) {
+//         Logger::Trace("ProcessWorker::writerLoop ID {}", workerId_);
+//         std::vector<uint8_t> data;
+//         {
+//             std::unique_lock<std::mutex> lock(sendMutex_);
+//             sendCv_.wait(lock, [this] {return !writerRunning_ || !sendQueue_.empty();});
+//             if (!writerRunning_ && sendQueue_.empty()) return;
+//             data = std::move(sendQueue_.front());
+//             sendQueue_.pop_front();
+//         }
+//         Logger::Trace("ProcessWorker::writerLoop {} writing {} bytes", workerId_, data.size());
+//         std::error_code ec;
+//         asio::write(masterStream_, asio::buffer(data), ec);
+//         Logger::Trace("ProcessWorker::writerLoop {} write completed: ec = {}", workerId_, ec.message());
+//         if (ec) {
+//             Logger::Error("ProcessWorker::writerLoop for worker {} failed: {}", workerId_, ec.message());
+//             break;
+//         }
+//     }
+// }
 
-void ProcessWorker::StartWriterThread() {
-    writerThread_ = std::thread(&ProcessWorker::writerLoop, this);
-}
+// void ProcessWorker::StartWriterThread() {
+//     writerRunning_ = true;
+//     writerThread_ = std::thread(&ProcessWorker::writerLoop, this);
+// }
 
-void ProcessWorker::StopWriter() {
-    writerRunning_ = false;
-    sendCv_.notify_all();
-}
+// void ProcessWorker::StopWriter() {
+//     writerRunning_ = false;
+//     sendCv_.notify_all();
+// }
 
-void ProcessWorker::JoinWriterThread() {
-    if (writerThread_.joinable())
-        writerThread_.join();
-}
+// void ProcessWorker::JoinWriterThread() {
+//     if (writerThread_.joinable())
+//         writerThread_.join();
+// }
 
 ProcessPool::ProcessPool(asio::io_context& io, const std::vector<WorkerGroupConfig>& groups)
     : io_(io), groups_(groups) {}
@@ -144,6 +152,7 @@ ProcessPool::ProcessPool(asio::io_context& io, const std::vector<WorkerGroupConf
 void ProcessPool::Initialize() {
     doSpawnWorkers();
     for (auto& w : workers_) {
+        //w->StartWriterThread();
         StartReadingFromWorker(w);
     }
     ready_.store(true);
@@ -157,14 +166,14 @@ void ProcessPool::Shutdown() {
     Logger::Trace("ProcessPool::Shutdown: running...");
     for (auto& w : workers_) w->Shutdown();
     Logger::Trace("ProcessPool::Shutdown: workers_->Shutdown() finished");
-    for (auto& w : workers_) w->StopWriter();
-    Logger::Trace("ProcessPool::Shutdown: workers_->StopWriter() finished");
+    // for (auto& w : workers_) w->StopWriter();
+    // Logger::Trace("ProcessPool::Shutdown: workers_->StopWriter() finished");
     for (auto& pair : readerRunningFlags_) *pair.second = false;
     Logger::Trace("ProcessPool::Shutdown: readerRunningFlags_ finished");
     io_.stop();
     Logger::Trace("ProcessPool::Shutdown: io_.stop finished");
-    for (auto& w : workers_) w->JoinWriterThread();
-    Logger::Trace("ProcessPool::Shutdown: workers_->JoinWriterThread() finished");
+    // for (auto& w : workers_) w->JoinWriterThread();
+    // Logger::Trace("ProcessPool::Shutdown: workers_->JoinWriterThread() finished");
 }
 
 void ProcessPool::SetWorker(std::function<void(int, const WorkerGroupConfig&, int)> func) {

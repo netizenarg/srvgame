@@ -225,12 +225,14 @@ namespace BinaryProtocol {
     std::vector<uint8_t> CompressData(const std::vector<uint8_t>& data, int level) {
         if (data.empty()) return {};
         uLongf compressed_size = compressBound(data.size());
-        std::vector<uint8_t> compressed(compressed_size);
-        if (compress2(compressed.data(), &compressed_size,
+        std::vector<uint8_t> compressed(4 + compressed_size);
+        uint32_t original_size = static_cast<uint32_t>(data.size());
+        memcpy(compressed.data(), &original_size, sizeof(original_size));
+        if (compress2(compressed.data() + 4, &compressed_size,
                      data.data(), data.size(), level) != Z_OK) {
             throw std::runtime_error("Compression failed");
         }
-        compressed.resize(compressed_size);
+        compressed.resize(4 + compressed_size);
         return compressed;
     }
 

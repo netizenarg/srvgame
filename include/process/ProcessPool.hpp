@@ -65,9 +65,10 @@ public:
     )>;
     asio::posix::stream_descriptor& GetMasterStream();
     void SendAsync(const std::vector<uint8_t>& binaryData);
-    void StartWriterThread();
-    void StopWriter();
-    void JoinWriterThread();
+    // void StartWriterThread();
+    // void StopWriter();
+    // void JoinWriterThread();
+    //Delete writerLoop(), StartWriterThread(), StopWriter(), JoinWriterThread(), and the writerRunning_ flag
 
 private:
     int workerId_;
@@ -78,14 +79,13 @@ private:
     int masterWriteFd_;
     int masterFd_;
     asio::posix::stream_descriptor masterStream_;
-    std::mutex writeMutex_;
-    std::deque<std::vector<uint8_t>> sendQueue_;
-    std::mutex sendMutex_;
+    std::deque<std::vector<uint8_t>> write_queue_;
+    std::mutex write_mutex_;
     std::condition_variable sendCv_;
     bool writing_ = false;
-    std::thread writerThread_;
-    bool writerRunning_{true};
-    void writerLoop();
+    //std::thread writerThread_;
+    //bool writerRunning_{true};
+    //void writerLoop();
     void doWrite();
 };
 
