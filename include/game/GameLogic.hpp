@@ -127,7 +127,7 @@ public:
     void SetDatabaseBackend(std::unique_ptr<DatabaseBackend> backend);
     DatabaseBackend* GetDatabaseBackend() const;
 
-private:
+public:
     GameLogic();
     ~GameLogic();
 

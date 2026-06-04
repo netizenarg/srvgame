@@ -1,15 +1,13 @@
 #include "process/ProcessPool.hpp"
 
-ProcessWorker::ProcessWorker(asio::io_context& io, int globalId, const WorkerGroupConfig& cfg)
-    : workerId_(globalId), config_(cfg), io_(io), pid_(-1),
-      masterReadFd_(-1), masterWriteFd_(-1), masterStream_(io_) {}
+ProcessWorker::ProcessWorker(asio::io_context& io, int globalId, const WorkerGroupConfig& cfg, WorkerType type)
+    : workerId_(globalId), config_(cfg), type_(type), io_(io), pid_(-1) {}
 
 ProcessWorker::~ProcessWorker() { Shutdown(); }
 
 int ProcessWorker::GetId() const { return workerId_; }
 pid_t ProcessWorker::GetPid() const { return pid_; }
-int ProcessWorker::GetMasterReadFd() const { return masterReadFd_; }
-asio::posix::stream_descriptor& ProcessWorker::GetMasterStream() { return masterStream_; }
+WorkerType ProcessWorker::GetType() const { return type_; }
 
 void ProcessWorker::Start() {
     asio::local::stream_protocol::socket socket0(io_);
@@ -20,71 +18,19 @@ void ProcessWorker::Start() {
         socket0.close();
         masterFd_ = socket1.native_handle();
         socket1.release();
-        masterReadFd_ = masterFd_;
         io_.notify_fork(asio::execution_context::fork_event::fork_child);
         throw std::runtime_error("worker_function");
     } else if (pid_ > 0) {
         socket1.close();
         masterFd_ = socket0.native_handle();
         socket0.release();
-        masterStream_.assign(masterFd_);
+        channel_ = std::make_shared<IPCChannel>(io_, masterFd_);
         io_.notify_fork(asio::execution_context::fork_event::fork_parent);
     } else {
         socket0.close();
         socket1.close();
         throw std::runtime_error("fork failed");
     }
-}
-
-void ProcessWorker::Send(const std::vector<uint8_t>& binaryData) {
-    uint32_t len = htonl(static_cast<uint32_t>(binaryData.size()));
-    std::vector<asio::const_buffer> buffers;
-    buffers.emplace_back(&len, sizeof(len));
-    buffers.emplace_back(binaryData.data(), binaryData.size());
-    asio::write(masterStream_, buffers);
-}
-
-void ProcessWorker::SendAsync(const std::vector<uint8_t>& binaryData) {
-    uint32_t len = htonl(static_cast<uint32_t>(binaryData.size()));
-    std::vector<uint8_t> frame(sizeof(len) + binaryData.size());
-    memcpy(frame.data(), &len, sizeof(len));
-    memcpy(frame.data() + sizeof(len), binaryData.data(), binaryData.size());
-    asio::post(io_, [this, frame = std::move(frame)]() {
-        bool start_write;
-        {
-            std::lock_guard<std::mutex> lock(write_mutex_);
-            write_queue_.push_back(std::move(frame));
-            start_write = !writing_;
-            if (start_write) writing_ = true;
-        }
-        if (start_write) {
-            doWrite();
-        }
-    });
-}
-
-void ProcessWorker::doWrite() {
-    std::vector<uint8_t> data;
-    {
-        std::lock_guard<std::mutex> lock(write_mutex_);
-        if (write_queue_.empty()) {
-            writing_ = false;
-            return;
-        }
-        data = std::move(write_queue_.front());
-        write_queue_.pop_front();
-        writing_ = true;
-    }
-    auto self = shared_from_this();
-    asio::async_write(masterStream_, asio::buffer(data),
-    [self, data](std::error_code ec, size_t /*bytes*/) {
-        if (ec) {
-            Logger::Error("ProcessWorker::doWrite: master async_write to worker {} failed: {}",
-                            self->workerId_, ec.message());
-        }
-        else
-            self->doWrite();
-    });
 }
 
 void ProcessWorker::Shutdown() {
@@ -103,58 +49,17 @@ void ProcessWorker::Shutdown() {
             waitpid(pid_, nullptr, 0);
         }
     }
-    if (masterReadFd_ != -1) close(masterReadFd_);
-    if (masterWriteFd_ != -1) close(masterWriteFd_);
-    masterReadFd_ = masterWriteFd_ = -1;
+    if (channel_) channel_->Stop();
+    if (masterFd_ != -1) close(masterFd_);
+    masterFd_ = -1;
     pid_ = -1;
 }
-
-// void ProcessWorker::writerLoop() {
-//     while (true) {
-//         Logger::Trace("ProcessWorker::writerLoop ID {}", workerId_);
-//         std::vector<uint8_t> data;
-//         {
-//             std::unique_lock<std::mutex> lock(sendMutex_);
-//             sendCv_.wait(lock, [this] {return !writerRunning_ || !sendQueue_.empty();});
-//             if (!writerRunning_ && sendQueue_.empty()) return;
-//             data = std::move(sendQueue_.front());
-//             sendQueue_.pop_front();
-//         }
-//         Logger::Trace("ProcessWorker::writerLoop {} writing {} bytes", workerId_, data.size());
-//         std::error_code ec;
-//         asio::write(masterStream_, asio::buffer(data), ec);
-//         Logger::Trace("ProcessWorker::writerLoop {} write completed: ec = {}", workerId_, ec.message());
-//         if (ec) {
-//             Logger::Error("ProcessWorker::writerLoop for worker {} failed: {}", workerId_, ec.message());
-//             break;
-//         }
-//     }
-// }
-
-// void ProcessWorker::StartWriterThread() {
-//     writerRunning_ = true;
-//     writerThread_ = std::thread(&ProcessWorker::writerLoop, this);
-// }
-
-// void ProcessWorker::StopWriter() {
-//     writerRunning_ = false;
-//     sendCv_.notify_all();
-// }
-
-// void ProcessWorker::JoinWriterThread() {
-//     if (writerThread_.joinable())
-//         writerThread_.join();
-// }
 
 ProcessPool::ProcessPool(asio::io_context& io, const std::vector<WorkerGroupConfig>& groups)
     : io_(io), groups_(groups) {}
 
 void ProcessPool::Initialize() {
     doSpawnWorkers();
-    for (auto& w : workers_) {
-        //w->StartWriterThread();
-        StartReadingFromWorker(w);
-    }
     ready_.store(true);
     running_.store(true);
 }
@@ -165,100 +70,32 @@ void ProcessPool::Shutdown() {
     if (!running_.exchange(false)) return;
     Logger::Trace("ProcessPool::Shutdown: running...");
     for (auto& w : workers_) w->Shutdown();
-    Logger::Trace("ProcessPool::Shutdown: workers_->Shutdown() finished");
-    // for (auto& w : workers_) w->StopWriter();
-    // Logger::Trace("ProcessPool::Shutdown: workers_->StopWriter() finished");
-    for (auto& pair : readerRunningFlags_) *pair.second = false;
-    Logger::Trace("ProcessPool::Shutdown: readerRunningFlags_ finished");
+    Logger::Trace("ProcessPool::Shutdown: workers shutdown finished");
     io_.stop();
     Logger::Trace("ProcessPool::Shutdown: io_.stop finished");
-    // for (auto& w : workers_) w->JoinWriterThread();
-    // Logger::Trace("ProcessPool::Shutdown: workers_->JoinWriterThread() finished");
 }
 
 void ProcessPool::SetWorker(std::function<void(int, const WorkerGroupConfig&, int)> func) {
     worker_ = std::move(func);
 }
 
+void ProcessPool::SetGameLogicWorker(std::function<void(int, int)> func) {
+    gameLogicWorkerFunc_ = std::move(func);
+}
+
 void ProcessPool::SetMasterMessageHandler(ProcessWorker::MasterMessageHandler handler) {
     masterHandler_ = std::move(handler);
 }
 
-void ProcessPool::StartReadingFromWorker(std::shared_ptr<ProcessWorker> worker) {
-    auto running = std::make_shared<std::atomic<bool>>(true);
-    readerRunningFlags_[worker->GetId()] = running;
-    asio::co_spawn(io_, [this, worker, running]() -> asio::awaitable<void> {
-        auto& stream = worker->GetMasterStream();
-        while (running->load())
-        {
-            uint32_t netLen = 0;
-            std::error_code ec;
-            co_await asio::async_read(stream,
-                                      asio::buffer(&netLen, sizeof(netLen)),
-                                      asio::redirect_error(asio::use_awaitable, ec));
-            if (ec == asio::error::eof || ec == asio::error::connection_reset)
-                break;
-            if (ec) {
-                Logger::Error("ProcessPool::StartReadingFromWorker: ID {} read error: {}", worker->GetId(), ec.message());
-                break;
-            }
-            uint32_t msgLen = ntohl(netLen);
-            if (msgLen == 0 || msgLen > BinaryProtocol::MAX_MESSAGE_SIZE)
-                continue;
-            std::vector<uint8_t> msg(msgLen);
-            co_await asio::async_read(stream,
-                                      asio::buffer(msg),
-                                      asio::redirect_error(asio::use_awaitable, ec));
-            if (ec) {
-                Logger::Error("ProcessPool::StartReadingFromWorker: ID {} message read error: {}", worker->GetId(), ec.message());
-                break;
-            }
-            BinaryProtocol::BinaryReader r(msg.data(), msg.size());
-            uint32_t corrId   = r.ReadUInt32();
-            uint64_t sessionId = r.ReadUInt64();
-            uint16_t msgType  = r.ReadUInt16();
-            uint32_t bodyLen  = r.ReadUInt32();
-            std::vector<uint8_t> body;
-            if (bodyLen > 0 && r.Remaining() >= bodyLen)
-                body = r.ReadBytes(bodyLen);
-            if (masterHandler_)
-                masterHandler_(worker->GetId(), corrId, sessionId, msgType, std::move(body));
-        }
-        Logger::Trace("ProcessPool::StartReadingFromWorker coroutine finished ID {}", worker->GetId());
-    }, asio::detached);
-}
-
-bool ProcessPool::SendToWorker(int workerId, const std::vector<uint8_t>& message) {
-    if (workerId >= 0 && workerId < static_cast<int>(workers_.size())) {
-        workers_[workerId]->SendAsync(message);
-        return true;
+void ProcessPool::onWorkerMessage(int workerId, const IPCEnvelope& env) {
+    if (masterHandler_) {
+        masterHandler_(workerId, env.correlationId, env.sessionId, env.messageType, env.payload);
     }
-    return false;
 }
 
-void ProcessPool::BroadcastToOtherWorkers(const std::vector<uint8_t>& msg, int owner_id) {
-    BinaryProtocol::BinaryWriter w;
-    w.WriteUInt32(0); // correlationId = 0 (broadcast)
-    w.WriteUInt64(0); // sessionId = 0 → worker‑side broadcast
-    w.WriteUInt16(0);
-    w.WriteUInt32(static_cast<uint32_t>(msg.size()));
-    w.WriteRaw(msg.data(), msg.size());
-    auto frame = w.GetBuffer();
-    for (auto& w : workers_)
-        if (w->GetId() != owner_id)
-            w->SendAsync(frame);
-}
-
-void ProcessPool::BroadcastToAllWorkers(const std::vector<uint8_t>& msg) {
-    BinaryProtocol::BinaryWriter w;
-    w.WriteUInt32(0); // correlationId = 0 (broadcast)
-    w.WriteUInt64(0); // sessionId = 0 → worker‑side broadcast
-    w.WriteUInt16(0);
-    w.WriteUInt32(static_cast<uint32_t>(msg.size()));
-    w.WriteRaw(msg.data(), msg.size());
-    auto frame = w.GetBuffer();
-    for (auto& worker : workers_) {
-        worker->SendAsync(frame);
+void ProcessPool::onGameLogicMessage(const IPCEnvelope& env) {
+    if (masterHandler_) {
+        masterHandler_(gameLogicWorkerId_, env.correlationId, env.sessionId, env.messageType, env.payload);
     }
 }
 
@@ -266,13 +103,19 @@ void ProcessPool::doSpawnWorkers() {
     int globalId = 0;
     for (size_t gi = 0; gi < groups_.size(); ++gi) {
         for (int i = 0; i < groups_[gi].count; ++i, ++globalId) {
-            auto worker = std::make_shared<ProcessWorker>(io_, globalId, groups_[gi]);
+            auto worker = std::make_shared<ProcessWorker>(io_, globalId, groups_[gi], WorkerType::Child);
             try {
                 worker->Start();
                 workers_.push_back(worker);
+                worker->GetChannel()->Start([this, globalId](const IPCEnvelope& env) {
+                    onWorkerMessage(globalId, env);
+                });
             } catch (const std::exception& err) {
                 if (std::string(err.what()) == "worker_function") {
-                    int fd = worker->GetMasterReadFd();
+                    int fd = worker->GetChannel() ? worker->GetChannel()->GetFd() : -1;
+                    if (fd == -1) {
+                        fd = worker->GetId();
+                    }
                     worker_(globalId, groups_[gi], fd);
                     Logger::Trace("ProcessPool::doSpawnWorkers: worker {} exiting cleanly", globalId);
                     _exit(0);
@@ -284,35 +127,145 @@ void ProcessPool::doSpawnWorkers() {
     }
 }
 
+int ProcessPool::SpawnGameLogicWorker() {
+    int globalId = static_cast<int>(workers_.size());
+    WorkerGroupConfig emptyCfg;
+    emptyCfg.protocol = "internal";
+    emptyCfg.host = "127.0.0.1";
+    emptyCfg.port = 0;
+    emptyCfg.count = 1;
+    emptyCfg.threads = 1;
+    auto worker = std::make_shared<ProcessWorker>(io_, globalId, emptyCfg, WorkerType::GameLogic);
+    try {
+        worker->Start();
+        workers_.push_back(worker);
+        gameLogicWorkerId_ = globalId;
+        worker->GetChannel()->Start([this](const IPCEnvelope& env) {
+            onGameLogicMessage(env);
+        });
+        return globalId;
+    } catch (const std::exception& err) {
+        if (std::string(err.what()) == "worker_function") {
+            int fd = worker->GetChannel() ? worker->GetChannel()->GetFd() : -1;
+            if (fd == -1) {
+                fd = worker->GetId();
+            }
+            if (gameLogicWorkerFunc_) {
+                gameLogicWorkerFunc_(globalId, fd);
+            }
+            _exit(0);
+        } else {
+            Logger::Error("ProcessPool::SpawnGameLogicWorker failed: {}", err.what());
+        }
+    }
+    return -1;
+}
+
+bool ProcessPool::RespawnGameLogicWorker() {
+    if (gameLogicWorkerId_ >= 0 && gameLogicWorkerId_ < static_cast<int>(workers_.size())) {
+        auto& old = workers_[gameLogicWorkerId_];
+        old->Shutdown();
+    }
+    int newId = SpawnGameLogicWorker();
+    return newId >= 0;
+}
+
+bool ProcessPool::IsGameLogicWorkerAlive() const {
+    if (gameLogicWorkerId_ < 0 || gameLogicWorkerId_ >= static_cast<int>(workers_.size())) return false;
+    pid_t pid = workers_[gameLogicWorkerId_]->GetPid();
+    if (pid <= 0) return false;
+    return (kill(pid, 0) == 0);
+}
+
+std::shared_ptr<IPCChannel> ProcessPool::GetGameLogicChannel() const {
+    if (gameLogicWorkerId_ >= 0 && gameLogicWorkerId_ < static_cast<int>(workers_.size())) {
+        return workers_[gameLogicWorkerId_]->GetChannel();
+    }
+    return nullptr;
+}
+
+bool ProcessPool::SendToWorker(int workerId, const std::vector<uint8_t>& message) {
+    if (workerId >= 0 && workerId < static_cast<int>(workers_.size())) {
+        auto channel = workers_[workerId]->GetChannel();
+        if (channel && channel->IsOpen()) {
+            IPCEnvelope env;
+            env.correlationId = 0;
+            env.sessionId = 0;
+            env.messageType = 0;
+            env.payload = message;
+            channel->SendAsync(env);
+            return true;
+        }
+    }
+    return false;
+}
+
+void ProcessPool::BroadcastToOtherWorkers(const std::vector<uint8_t>& msg, int owner_id) {
+    IPCEnvelope env;
+    env.correlationId = 0;
+    env.sessionId = 0;
+    env.messageType = 0;
+    env.payload = msg;
+    for (auto& w : workers_) {
+        if (w->GetId() != owner_id && w->GetType() == WorkerType::Child) {
+            auto channel = w->GetChannel();
+            if (channel && channel->IsOpen()) {
+                channel->SendAsync(env);
+            }
+        }
+    }
+}
+
+void ProcessPool::BroadcastToAllWorkers(const std::vector<uint8_t>& msg) {
+    IPCEnvelope env;
+    env.correlationId = 0;
+    env.sessionId = 0;
+    env.messageType = 0;
+    env.payload = msg;
+    for (auto& w : workers_) {
+        if (w->GetType() == WorkerType::Child) {
+            auto channel = w->GetChannel();
+            if (channel && channel->IsOpen()) {
+                channel->SendAsync(env);
+            }
+        }
+    }
+}
+
 size_t ProcessPool::GetTotalWorkerCount() const { return workers_.size(); }
+
 bool ProcessPool::IsWorkerAlive(int workerId) const {
     if (workerId < 0 || workerId >= static_cast<int>(workers_.size())) return false;
     pid_t pid = workers_[workerId]->GetPid();
     if (pid <= 0) return false;
     return (kill(pid, 0) == 0);
 }
+
 bool ProcessPool::IsWorkersReady() const { return ready_; }
 void ProcessPool::WaitForWorkers() {}
 
 bool ProcessPool::SendReplyToWorker(int workerId, uint32_t correlationId, const std::vector<uint8_t>& binaryData) {
-    BinaryProtocol::BinaryWriter w;
-    w.WriteUInt32(correlationId);
-    w.WriteUInt64(0);
-    w.WriteUInt16(0);
-    w.WriteUInt32(static_cast<uint32_t>(binaryData.size()));
-    w.WriteRaw(binaryData.data(), binaryData.size());
-    return SendToWorker(workerId, w.GetBuffer());
+    if (workerId < 0 || workerId >= static_cast<int>(workers_.size())) return false;
+    auto channel = workers_[workerId]->GetChannel();
+    if (!channel || !channel->IsOpen()) return false;
+    IPCEnvelope env;
+    env.correlationId = correlationId;
+    env.sessionId = 0;
+    env.messageType = 0;
+    env.payload = binaryData;
+    channel->SendAsync(env);
+    return true;
 }
 
 bool ProcessPool::PushToWorker(int workerId, uint64_t sessionId, const std::vector<uint8_t>& binaryData) {
-    if (workerId < 0 || workerId >= static_cast<int>(workers_.size()))
-        return false;
-    BinaryProtocol::BinaryWriter w;
-    w.WriteUInt32(0);           // corrId = 0  → push marker
-    w.WriteUInt64(sessionId);   // target session
-    w.WriteUInt16(0);           // unused
-    w.WriteUInt32(static_cast<uint32_t>(binaryData.size()));
-    w.WriteRaw(binaryData.data(), binaryData.size());
-    workers_[workerId]->SendAsync(w.GetBuffer());
+    if (workerId < 0 || workerId >= static_cast<int>(workers_.size())) return false;
+    auto channel = workers_[workerId]->GetChannel();
+    if (!channel || !channel->IsOpen()) return false;
+    IPCEnvelope env;
+    env.correlationId = 0;
+    env.sessionId = sessionId;
+    env.messageType = 0;
+    env.payload = binaryData;
+    channel->SendAsync(env);
     return true;
 }

@@ -1,4 +1,3 @@
-#include "game/GameLogic.hpp"
 #include "network/BinarySession.hpp"
 
 std::atomic<uint64_t> BinarySession::nextSessionId_{1};
@@ -279,19 +278,6 @@ void BinarySession::HandleBinaryMessage(const BinaryProtocol::BinaryMessage& mes
         case BinaryProtocol::MESSAGE_TYPE_PROTOCOL_NEGOTIATION:
             HandleProtocolNegotiation(message.data);
             return;
-        case BinaryProtocol::MESSAGE_TYPE_CHUNK_DATA: {
-            BinaryProtocol::BinaryReader reader(message.data.data(), message.data.size());
-            ChunkData req;
-            req.x = reader.ReadInt32();
-            req.z = reader.ReadInt32();
-            req.lod = reader.ReadUInt8();
-            req.player_x = reader.ReadFloat();
-            req.player_y = reader.ReadFloat();
-            req.player_z = reader.ReadFloat();
-            req.session_id = sessionId_;
-            GameLogic::GetInstance().OnChunkData(req);
-            break;
-        }
         case BinaryProtocol::MESSAGE_TYPE_ERROR:
             Logger::Warn("Session {} received error from client", sessionId_);
             return;
