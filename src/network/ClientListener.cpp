@@ -3,7 +3,7 @@
 ClientListener::ClientListener(const WorkerGroupConfig& groupConfig, int masterFd, int workerId)
     : workerId_(workerId)
     , io_()
-    , channel_(std::make_unique<IPCChannel>(io_, masterFd))
+    , channel_(std::make_shared<IPCChannel>(io_, masterFd))
     , manager_(std::make_shared<ConnectionManager>(groupConfig,
         [this](uint32_t corrId, uint64_t sessId, uint16_t msgType, const std::vector<uint8_t>& body) {
             sendToMaster(corrId, sessId, msgType, body);
@@ -41,6 +41,7 @@ void ClientListener::onMasterMessage(const IPCEnvelope& env) {
 }
 
 void ClientListener::sendToMaster(uint32_t correlationId, uint64_t sessionId, uint16_t messageType, const std::vector<uint8_t>& body) {
+    Logger::Trace("ClientListener::sendToMaster: corrId={}, session={}, type={}, bodySize={}", correlationId, sessionId, messageType, body.size());
     IPCEnvelope env;
     env.correlationId = correlationId;
     env.sessionId = sessionId;

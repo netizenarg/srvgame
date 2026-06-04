@@ -234,6 +234,7 @@ void ConnectionManager::doAccept() {
 void ConnectionManager::onClientMessage(uint64_t sessionId, uint16_t type, const std::vector<uint8_t>& data) {
     uint32_t corrId = nextCorrelationId_++;
     pendingReplies_[corrId] = {sessionId, type};
+    Logger::Trace("ConnectionManager::onClientMessage: sessionId={}, type={}, corrId={}, dataSize={}", sessionId, type, corrId, data.size());
     masterSender_(corrId, sessionId, type, data);
 }
 

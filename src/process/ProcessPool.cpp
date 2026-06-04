@@ -112,10 +112,7 @@ void ProcessPool::doSpawnWorkers() {
                 });
             } catch (const std::exception& err) {
                 if (std::string(err.what()) == "worker_function") {
-                    int fd = worker->GetChannel() ? worker->GetChannel()->GetFd() : -1;
-                    if (fd == -1) {
-                        fd = worker->GetId();
-                    }
+                    int fd = worker->GetMasterFd();
                     worker_(globalId, groups_[gi], fd);
                     Logger::Trace("ProcessPool::doSpawnWorkers: worker {} exiting cleanly", globalId);
                     _exit(0);
@@ -146,10 +143,7 @@ int ProcessPool::SpawnGameLogicWorker() {
         return globalId;
     } catch (const std::exception& err) {
         if (std::string(err.what()) == "worker_function") {
-            int fd = worker->GetChannel() ? worker->GetChannel()->GetFd() : -1;
-            if (fd == -1) {
-                fd = worker->GetId();
-            }
+            int fd = worker->GetMasterFd();
             if (gameLogicWorkerFunc_) {
                 gameLogicWorkerFunc_(globalId, fd);
             }

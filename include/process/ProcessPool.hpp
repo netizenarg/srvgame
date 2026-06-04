@@ -52,6 +52,7 @@ public:
     WorkerType GetType() const;
 
     std::shared_ptr<IPCChannel> GetChannel() { return channel_; }
+    int GetMasterFd() const { return masterFd_; }
 
     using MasterMessageHandler = std::function<void(
         int workerId,
@@ -71,7 +72,7 @@ private:
     std::shared_ptr<IPCChannel> channel_;
 };
 
-class ProcessPool : public std::enable_shared_from_this<ProcessPool> {
+class ProcessPool {
 public:
     ProcessPool(asio::io_context& io, const std::vector<WorkerGroupConfig>& groups);
     void Initialize();

@@ -68,9 +68,13 @@ void IPCChannel::doRead() {
     if (stopped_) return;
     auto self = shared_from_this();
     auto lengthBuf = std::make_shared<uint32_t>(0);
+    Logger::Trace("IPCChannel::doRead: starting async_read on fd={}, stopped={}", stream_.native_handle(), stopped_.load());
     asio::async_read(stream_, asio::buffer(lengthBuf.get(), sizeof(uint32_t)),
     [self, lengthBuf](std::error_code ec, std::size_t) {
-        if (ec || self->stopped_) return;
+        if (ec || self->stopped_) {
+            Logger::Trace("IPCChannel::doRead: async_read error ec={}, stopped={}", ec.value(), self->stopped_.load());
+            return;
+        }
         uint32_t msgLen = ntohl(*lengthBuf);
         if (msgLen == 0 || msgLen > BinaryProtocol::MAX_MESSAGE_SIZE) {
             self->doRead();
@@ -81,6 +85,7 @@ void IPCChannel::doRead() {
         [self, msgBuffer](std::error_code ec, std::size_t) {
             if (ec || self->stopped_) return;
             IPCEnvelope env = decodeFrame(msgBuffer->data(), msgBuffer->size());
+            Logger::Trace("IPCChannel::doRead: received envelope, corrId={}, session={}, type={}, payloadSize={}", env.correlationId, env.sessionId, env.messageType, env.payload.size());
             if (self->onMessage_) {
                 self->onMessage_(env);
             }
@@ -107,6 +112,7 @@ void IPCChannel::doWrite() {
             Logger::Error("IPCChannel::doWrite failed: {}", ec.message());
             return;
         }
+        Logger::Trace("IPCChannel::doWrite: wrote {} bytes", data.size());
         self->doWrite();
     });
 }
@@ -122,6 +128,7 @@ void IPCChannel::SendAsync(const IPCEnvelope& envelope) {
             return;
         }
     }
+    Logger::Trace("IPCChannel::SendAsync: posting doWrite, frameSize={}, fd={}", frame.size(), stream_.native_handle());
     asio::post(io_, [self = shared_from_this()]() {
         self->doWrite();
     });

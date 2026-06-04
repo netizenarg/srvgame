@@ -20,7 +20,7 @@ public:
 private:
     int workerId_;
     asio::io_context io_;
-    std::unique_ptr<IPCChannel> channel_;
+    std::shared_ptr<IPCChannel> channel_;
     std::thread ioThread_;
     std::atomic<bool> stopping_{false};
     std::shared_ptr<ConnectionManager> manager_;
