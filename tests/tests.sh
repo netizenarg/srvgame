@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 #
-# tests.sh - Build, start server, run all chat broadcast tests, collect results.
+# tests.sh - Start server and run all chat broadcast tests.
 #
 # Usage:
-#   ./tests.sh                  # full run
-#   ./tests.sh --build-only     # build only, skip tests
-#   ./tests.sh --skip-build     # skip build, run tests only
+#   ./tests.sh                  # run tests (no build)
+#   ./tests.sh --rebuild        # rebuild via build.sh, then run tests
 #   ./tests.sh --clients 5      # custom client count (default 3)
 #   ./tests.sh --messages 4     # custom message count (default 2)
 #
@@ -19,7 +18,6 @@ TESTS_DIR="$ROOT_DIR/tests"
 SERVER_BIN="$BUILD_DIR/gameserver"
 LOG_DIR="$ROOT_DIR/logs"
 SERVER_LOG="$LOG_DIR/server_test.log"
-RESULTS_DIR="$TESTS_DIR"
 
 HOST="127.0.0.1"
 BINARY_PORT=9999
@@ -27,8 +25,7 @@ WEBSOCKET_PORT=8080
 NUM_CLIENTS=3
 NUM_MESSAGES=2
 SERVER_PID=0
-BUILD_ONLY=false
-SKIP_BUILD=false
+DO_REBUILD=false
 SERVER_TIMEOUT=10
 PASS=0
 FAIL=0
@@ -68,21 +65,18 @@ trap cleanup EXIT INT TERM
 parse_args() {
     while [ $# -gt 0 ]; do
         case "$1" in
-            --build-only)  BUILD_ONLY=true; shift ;;
-            --skip-build)  SKIP_BUILD=true; shift ;;
-            --clients)     NUM_CLIENTS="$2"; shift 2 ;;
-            --messages)    NUM_MESSAGES="$2"; shift 2 ;;
-            -h|--help)     usage ;;
-            *)             echo "Unknown option: $1"; usage ;;
+            --rebuild)   DO_REBUILD=true; shift ;;
+            --clients)   NUM_CLIENTS="$2"; shift 2 ;;
+            --messages)  NUM_MESSAGES="$2"; shift 2 ;;
+            -h|--help)   usage ;;
+            *)           echo "Unknown option: $1"; usage ;;
         esac
     done
 }
 
-do_build() {
-    log "Building gameserver..."
-    mkdir -p "$BUILD_DIR"
-    cmake -S "$ROOT_DIR" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release 2>&1 | tail -3
-    cmake --build "$BUILD_DIR" --target gameserver -- -j"$(nproc)" 2>&1 | tail -3
+do_rebuild() {
+    log "Rebuilding gameserver via build.sh..."
+    "$ROOT_DIR/build.sh" --with-sqlite
     if [ ! -x "$SERVER_BIN" ]; then
         fail "Build failed: $SERVER_BIN not found"
         exit 1
@@ -91,15 +85,16 @@ do_build() {
 }
 
 start_server() {
-    log "Starting gameserver..."
+    log "Starting gameserver from $BUILD_DIR..."
     mkdir -p "$LOG_DIR"
-    "$SERVER_BIN" > "$SERVER_LOG" 2>&1 &
+    rsync -a --delete "$ROOT_DIR/config/" "$BUILD_DIR/config/"
+    (cd "$BUILD_DIR" && "./gameserver") > "$SERVER_LOG" 2>&1 &
     SERVER_PID=$!
 
     for i in $(seq 1 "$SERVER_TIMEOUT"); do
         if ! kill -0 "$SERVER_PID" 2>/dev/null; then
             fail "Server crashed on startup (see $SERVER_LOG)"
-            cat "$SERVER_LOG" | tail -20
+            tail -20 "$SERVER_LOG"
             exit 1
         fi
         if ss -tlnp 2>/dev/null | grep -q ":${BINARY_PORT} " && \
@@ -111,7 +106,7 @@ start_server() {
     done
 
     fail "Server did not start within ${SERVER_TIMEOUT}s"
-    cat "$SERVER_LOG" | tail -20
+    tail -20 "$SERVER_LOG"
     exit 1
 }
 
@@ -139,7 +134,7 @@ run_binary_test() {
     if [ "$sent_count" -gt 0 ] && [ "$recv_count" -gt 0 ]; then
         pass "Binary chat: sent=$sent_count received=$recv_count"
     elif [ "$sent_count" -gt 0 ]; then
-        warn "Binary chat: sent=$sent_count but no broadcasts received (server may not route in single-process mode)"
+        warn "Binary chat: sent=$sent_count but no broadcasts received"
     else
         fail "Binary chat: no messages sent"
     fi
@@ -158,7 +153,7 @@ run_websocket_test() {
     if [ "$sent_count" -gt 0 ] && [ "$recv_count" -gt 0 ]; then
         pass "WebSocket chat: sent=$sent_count received=$recv_count"
     elif [ "$sent_count" -gt 0 ]; then
-        warn "WebSocket chat: sent=$sent_count but no broadcasts received (server may not route in single-process mode)"
+        warn "WebSocket chat: sent=$sent_count but no broadcasts received"
     else
         fail "WebSocket chat: no messages sent"
     fi
@@ -195,18 +190,18 @@ echo "  Binary:      port $BINARY_PORT"
 echo "  WebSocket:   port $WEBSOCKET_PORT"
 echo "  Clients:     $NUM_CLIENTS"
 echo "  Messages:    $NUM_MESSAGES"
+echo "  Rebuild:     $DO_REBUILD"
 echo "========================================="
 echo ""
 
-if [ "$SKIP_BUILD" = false ]; then
-    do_build
-else
-    log "Skipping build (--skip-build)"
+if [ "$DO_REBUILD" = true ]; then
+    do_rebuild
 fi
 
-if [ "$BUILD_ONLY" = true ]; then
-    log "Build-only mode, skipping tests"
-    exit 0
+if [ ! -x "$SERVER_BIN" ]; then
+    fail "Server binary not found: $SERVER_BIN"
+    echo "  Run with --rebuild to build, or run build.sh first"
+    exit 1
 fi
 
 start_server
