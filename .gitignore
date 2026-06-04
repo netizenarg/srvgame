@@ -41,9 +41,10 @@
 *.dwo
 
 .github/workflow
-build/
 CMakeFiles/
 thirdparty/
+build/
+logs/
 
 CMakeCache.txt
 add-*-repo.sh

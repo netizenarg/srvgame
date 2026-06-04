@@ -13,7 +13,6 @@
 
 namespace BinaryProtocol {
 
-    // Message types
     enum MessageType : uint16_t {
         MESSAGE_TYPE_INVALID = 0,
 
@@ -101,28 +100,23 @@ namespace BinaryProtocol {
         uint32_t timestamp;
         uint32_t length;
         uint32_t checksum;
-
-        NetworkHeader(uint16_t type = 0, uint32_t seq = 0, uint8_t ver = 1, uint8_t flgs = 0)
-            : version(ver), flags(flgs), message_type(type),
-              sequence(seq), timestamp(0), length(0), checksum(0) {}
+        NetworkHeader(uint16_t type = 0, uint32_t seq = 0, uint8_t ver = 1, uint8_t flgs = 0);
     };
 
     struct BinaryMessage {
         NetworkHeader header;
         std::vector<uint8_t> data;
-
         std::vector<uint8_t> Serialize() const;
         static BinaryMessage Deserialize(const uint8_t* buffer, size_t length);
-
-        bool IsCompressed() const { return (header.flags & FLAG_COMPRESSED) != 0; }
-        bool IsEncrypted() const { return (header.flags & FLAG_ENCRYPTED) != 0; }
-        bool IsReliable() const { return (header.flags & FLAG_RELIABLE) != 0; }
+        bool IsCompressed() const;
+        bool IsEncrypted() const;
+        bool IsReliable() const;
     };
 
     class BinaryWriter {
     public:
         BinaryWriter();
-
+        void WriteRaw(const uint8_t* data, size_t length);
         void WriteUInt8(uint8_t value);
         void WriteUInt16(uint16_t value);
         void WriteUInt32(uint32_t value);
@@ -136,10 +130,8 @@ namespace BinaryProtocol {
         void WriteVector3(const glm::vec3& vec);
         void WriteQuaternion(const glm::quat& quaternion);
         void WriteJson(const nlohmann::json& json);
-
-        const std::vector<uint8_t>& GetBuffer() const { return buffer_; }
-        size_t GetSize() const { return buffer_.size(); }
-
+        const std::vector<uint8_t>& GetBuffer() const;
+        size_t GetSize() const;
         void Clear();
 
     private:
@@ -149,7 +141,6 @@ namespace BinaryProtocol {
     class BinaryReader {
     public:
         BinaryReader(const uint8_t* data, size_t length);
-
         uint8_t ReadUInt8();
         uint16_t ReadUInt16();
         uint32_t ReadUInt32();
@@ -163,11 +154,9 @@ namespace BinaryProtocol {
         glm::vec3 ReadVector3();
         glm::quat ReadQuaternion();
         nlohmann::json ReadJson();
-
-        size_t Remaining() const { return length_ - position_; }
-        bool CanRead(size_t size) const { return position_ + size <= length_; }
-
-        size_t GetPosition() const { return position_; }
+        size_t Remaining() const;
+        bool CanRead(size_t size) const;
+        size_t GetPosition() const;
 
     private:
         const uint8_t* data_;

@@ -1,8 +1,11 @@
 {
-  "process": {
+  "workers": {
     "max_message_size": 1048576,
-    "receive_timeout_ms": 1000,
-    "workers": [
+    "game_logic": {
+      "check_interval_ms": 100,
+      "max_restart_attempts": 5
+    },
+    "clients": [
       {
         "protocol": "binary",
         "host": "127.0.0.1",
@@ -144,7 +147,7 @@
     "file": "logs/server.log",
     "max_file_size": 1048576,
     "max_files": 10,
-    "pattern": "[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] [%P] [%n] %v"
+    "pattern": "[%Y-%m-%d %H:%M:%S.%e] [%P] [%^%l%$] [%n] %v"
   },
 
   "scripting": {

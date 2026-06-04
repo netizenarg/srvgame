@@ -12,17 +12,6 @@
 
 enum class ProtocolMode { Binary, Json, Unknown };
 
-static const std::unordered_map<std::string, int> IPCMessageTypes = {
-    {"welcome", 1},
-    {"heartbeat", 2},
-    {"broadcast", 3},
-    {"shutdown", 4},
-    {"reload_config", 5},
-    {"player_spawn_relay", 201},
-    {"player_despawn_relay", 202},
-    {"player_position_relay", 206}
-};
-
 class IConnection {
 public:
     virtual ~IConnection() = default;

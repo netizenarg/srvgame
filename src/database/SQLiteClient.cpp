@@ -135,9 +135,9 @@ size_t SQLiteClient::GetIdleConnections() const {
 
 bool SQLiteClient::ExecuteSql(const std::string& sql, std::vector<std::vector<std::string>>* results) {
     std::lock_guard<std::mutex> lock(dbMutex_);
-    Logger::Trace("SQLite ExecuteSql start: {}", sql.substr(0, 100));
+    //Logger::Trace("SQLiteClient::ExecuteSql start: {}", sql.substr(0, 100));
     if (!db_) {
-        Logger::Error("ExecuteSql: database not connected");
+        Logger::Error("SQLiteClient::ExecuteSql: database not connected");
         stats_.failedQueries++;
         stats_.connectionErrors++;
         return false;
@@ -170,7 +170,7 @@ bool SQLiteClient::ExecuteSql(const std::string& sql, std::vector<std::vector<st
     }
 
     if (stepResult != SQLITE_DONE) {
-        Logger::Error("SQL step error: {} (SQL: {})", sqlite3_errmsg(db_), sql);
+        Logger::Error("SQLiteClient::ExecuteSql step error: {} (SQL: {})", sqlite3_errmsg(db_), sql);
         success = false;
         stats_.failedQueries++;
     } else {
@@ -183,7 +183,7 @@ bool SQLiteClient::ExecuteSql(const std::string& sql, std::vector<std::vector<st
     }
 
     sqlite3_finalize(stmt);
-    Logger::Trace("SQLite ExecuteSql end");
+    //Logger::Trace("SQLiteClient::ExecuteSql end");
     return success;
 }
 

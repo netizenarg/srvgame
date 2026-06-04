@@ -50,9 +50,47 @@ fi
 
 cd ..
 
-# Install system dependencies (NO Boost packages)
-sudo apt-get update
-sudo apt-get install -y \
+# Parse command line arguments
+USE_CITUS=OFF
+USE_SQLITE=OFF
+ENABLE_ASAN=OFF
+CLEAR_PREVIOUS=OFF
+APT_UPDATE=OFF
+
+for arg in "$@"; do
+    case $arg in
+        --with-citus)
+            echo "Installing Citus extension..."
+            USE_CITUS=ON
+            ;;
+        --with-sqlite)
+            echo "Installing SQLite3 development libraries..."
+            USE_SQLITE=ON
+            ;;
+        --with-asan)
+            echo "Enabling AddressSanitizer and UndefinedBehaviorSanitizer"
+            ENABLE_ASAN=ON
+            ;;
+        --apt-update)
+            echo "Enabling linux apt update"
+            APT_UPDATE=ON
+            ;;
+        --clear)
+            echo "Enabling clear previous compilations"
+            CLEAR_PREVIOUS=ON
+            ;;
+        *)
+            ;;
+    esac
+done
+
+# Build configuration
+echo "Building with Citus: $USE_CITUS, SQLite: $USE_SQLITE, ASan: $ENABLE_ASAN, apt update: $APT_UPDATE"
+
+# Install system dependencies
+if [ $APT_UPDATE == ON ]; then
+sudo apt update
+sudo apt install -y \
     build-essential \
     cmake \
     libpq-dev \
@@ -73,40 +111,15 @@ sudo apt-get install -y \
     uuid-dev \
     libcrypt-dev \
     libfmt-dev
+    if [ $USE_CITUS == ON ]; then
+        sudo apt install -y postgresql-citus
+    fi
 
-# Parse command line arguments
-USE_CITUS=OFF
-USE_SQLITE=OFF
-ENABLE_ASAN=OFF
-CLEAR_PREVIOUS=OFF
+    if [ $USE_SQLITE == ON ]; then
+        sudo apt install -y libsqlite3-dev
+    fi
+fi
 
-for arg in "$@"; do
-    case $arg in
-        --with-citus)
-            echo "Installing Citus extension..."
-            sudo apt-get install -y postgresql-citus
-            USE_CITUS=ON
-            ;;
-        --with-sqlite)
-            echo "Installing SQLite3 development libraries..."
-            sudo apt-get install -y libsqlite3-dev
-            USE_SQLITE=ON
-            ;;
-        --with-asan)
-            echo "Enabling AddressSanitizer and UndefinedBehaviorSanitizer"
-            ENABLE_ASAN=ON
-            ;;
-        --clear)
-            echo "Enabling clear previous compilations"
-            CLEAR_PREVIOUS=ON
-            ;;
-        *)
-            ;;
-    esac
-done
-
-# Build configuration
-echo "Building with Citus: $USE_CITUS, SQLite: $USE_SQLITE, ASan: $ENABLE_ASAN"
 
 # Clean previous build artifacts
 rm -f CMakeCache.txt Makefile cmake_install.cmake
@@ -115,7 +128,7 @@ rm -rf CMakeFiles
 # Create build directory and copy related folders
 mkdir -p build
 cd build
-if [ "$CLEAR_PREVIOUS" = true ]; then
+if [ "$CLEAR_PREVIOUS" == ON ]; then
     echo "Clearing previous compilations..."
     find . -mindepth 1 -maxdepth 1 ! -name "certs" -exec rm -rf {} +
 fi

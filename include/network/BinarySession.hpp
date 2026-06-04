@@ -142,7 +142,7 @@ public:
     using Pointer = std::shared_ptr<BinarySession>;
 
     explicit BinarySession(asio::ip::tcp::socket socket,
-                         std::shared_ptr<asio::ssl::context> ssl_context = nullptr);
+        std::shared_ptr<asio::ssl::context> ssl_context=nullptr, uint64_t sessionId=0);
     ~BinarySession();
 
     ProtocolMode GetProtocolMode() const override;
