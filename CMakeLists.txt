@@ -95,6 +95,7 @@ set(LOGGING_SOURCES
 
 # Process system
 set(PROCESS_SOURCES
+    src/process/IPCChannel.cpp
     src/process/ProcessPool.cpp
 )
 
@@ -112,6 +113,7 @@ set(NETWORK_SOURCES
     src/network/BinarySession.cpp
     src/network/ConnectionManager.cpp
     src/network/ClientListener.cpp
+    src/network/MasterRouter.cpp
     src/network/MasterServer.cpp
     src/network/NetworkQualityMonitor.cpp
     src/network/PredictionSystem.cpp
