@@ -16,7 +16,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_DIR="$ROOT_DIR/build"
 TESTS_DIR="$ROOT_DIR/tests"
 SERVER_BIN="$BUILD_DIR/gameserver"
-LOG_DIR="$ROOT_DIR/logs"
+LOG_DIR="$BUILD_DIR/logs"
 SERVER_LOG="$LOG_DIR/server_test.log"
 
 HOST="127.0.0.1"
@@ -84,6 +84,12 @@ do_rebuild() {
     pass "Build succeeded"
 }
 
+copy_tests_to_build() {
+    mkdir -p "$BUILD_DIR"
+    cp "$TESTS_DIR"/client_binary.py "$BUILD_DIR/"
+    cp "$TESTS_DIR"/client_websocket.py "$BUILD_DIR/"
+}
+
 start_server() {
     log "Starting gameserver from $BUILD_DIR..."
     mkdir -p "$LOG_DIR"
@@ -124,7 +130,7 @@ wait_for_server_ready() {
 run_binary_test() {
     log "Running binary protocol chat test (${NUM_CLIENTS} clients, ${NUM_MESSAGES} msgs)..."
     local output
-    output=$(python3 "$TESTS_DIR/client_binary.py" "$HOST" "$BINARY_PORT" "$NUM_CLIENTS" "$NUM_MESSAGES" 2>&1) || true
+    output=$(cd "$BUILD_DIR" && python3 client_binary.py "$HOST" "$BINARY_PORT" "$NUM_CLIENTS" "$NUM_MESSAGES" 2>&1) || true
     echo "$output"
 
     local sent_count recv_count
@@ -143,7 +149,7 @@ run_binary_test() {
 run_websocket_test() {
     log "Running WebSocket protocol chat test (${NUM_CLIENTS} clients, ${NUM_MESSAGES} msgs)..."
     local output
-    output=$(python3 "$TESTS_DIR/client_websocket.py" "$HOST" "$WEBSOCKET_PORT" "$NUM_CLIENTS" "$NUM_MESSAGES" 2>&1) || true
+    output=$(cd "$BUILD_DIR" && python3 client_websocket.py "$HOST" "$WEBSOCKET_PORT" "$NUM_CLIENTS" "$NUM_MESSAGES" 2>&1) || true
     echo "$output"
 
     local sent_count recv_count
@@ -204,6 +210,7 @@ if [ ! -x "$SERVER_BIN" ]; then
     exit 1
 fi
 
+copy_tests_to_build
 start_server
 wait_for_server_ready
 sleep 1

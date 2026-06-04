@@ -43,7 +43,7 @@ def decode_string(data: bytes, offset: int) -> tuple:
 
 def build_header(msg_type: int, seq: int, payload_len: int, checksum: int) -> bytes:
     return struct.pack(
-        "!BBHIII I",
+        "<BBHIIII",
         PROTOCOL_VERSION,  # version
         0,                 # flags
         msg_type,          # message_type
@@ -85,21 +85,19 @@ def recv_exact(sock: socket.socket, n: int) -> bytes:
 
 
 def recv_message(sock: socket.socket) -> tuple:
-    raw_len = recv_exact(sock, 4)
-    msg_len = struct.unpack("!I", raw_len)[0]
-    if msg_len == 0 or msg_len > 10 * 1024 * 1024:
+    header_data = recv_exact(sock, HEADER_SIZE)
+    version = header_data[0]
+    flags = header_data[1]
+    msg_type = struct.unpack_from("<H", header_data, 2)[0]
+    seq = struct.unpack_from("<I", header_data, 4)[0]
+    ts = struct.unpack_from("<I", header_data, 8)[0]
+    length = struct.unpack_from("<I", header_data, 12)[0]
+    checksum = struct.unpack_from("<I", header_data, 16)[0]
+    if length == 0:
+        return msg_type, b""
+    if length > 10 * 1024 * 1024:
         return None, None
-    data = recv_exact(sock, msg_len)
-    if len(data) < HEADER_SIZE:
-        return None, None
-    version = data[0]
-    flags = data[1]
-    msg_type = struct.unpack_from("!H", data, 2)[0]
-    seq = struct.unpack_from("!I", data, 4)[0]
-    ts = struct.unpack_from("!I", data, 8)[0]
-    length = struct.unpack_from("!I", data, 12)[0]
-    checksum = struct.unpack_from("!I", data, 16)[0]
-    body = data[HEADER_SIZE:]
+    body = recv_exact(sock, length)
     return msg_type, body
 
 
@@ -114,16 +112,18 @@ def client_worker(host: str, port: int, client_id: int, messages: list, ready_ev
 
         # Protocol negotiation
         neg = build_protocol_negotiation(seq)
-        sock.sendall(struct.pack("!I", len(neg)) + neg)
+        sock.sendall(neg)
         seq += 1
 
-        # Read negotiation response
+        # Read negotiation response (non-blocking, server may not respond)
+        sock.settimeout(1.0)
         try:
             msg_type, body = recv_message(sock)
             if msg_type is not None:
                 print(f"[Client {client_id}] Protocol negotiation response: type={msg_type}")
-        except Exception:
+        except (socket.timeout, Exception):
             pass
+        sock.settimeout(None)
 
         ready_event.set()
         all_ready.wait()
@@ -133,7 +133,7 @@ def client_worker(host: str, port: int, client_id: int, messages: list, ready_ev
         for msg_text in messages:
             full_msg = f"Client{client_id}: {msg_text}"
             packet = build_chat_message(f"User{client_id}", full_msg, seq)
-            sock.sendall(struct.pack("!I", len(packet)) + packet)
+            sock.sendall(packet)
             print(f"[Client {client_id}] Sent: {full_msg}")
             seq += 1
             time.sleep(0.3)
