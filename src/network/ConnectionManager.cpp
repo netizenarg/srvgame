@@ -46,11 +46,7 @@ bool ConnectionManager::Start() {
 }
 
 void ConnectionManager::Shutdown() {
-    if (!running_.exchange(false))
-    {
-        Logger::Trace("ConnectionManager::Shutdown already executed, wait finish...");
-        return;
-    }
+    if (!running_.exchange(false)) return;
     acceptor_.close();
     std::vector<std::shared_ptr<IConnection>> sessions;
     {
@@ -63,7 +59,6 @@ void ConnectionManager::Shutdown() {
     ioContext_.stop();
     ioContext_.poll();
     for (auto& t : workerThreads_) if (t.joinable()) t.join();
-    Logger::Trace("ConnectionManager::Shutdown complete");
 }
 
 void ConnectionManager::initSessionFactory()
@@ -234,7 +229,6 @@ void ConnectionManager::doAccept() {
 void ConnectionManager::onClientMessage(uint64_t sessionId, uint16_t type, const std::vector<uint8_t>& data) {
     uint32_t corrId = nextCorrelationId_++;
     pendingReplies_[corrId] = {sessionId, type};
-    Logger::Trace("ConnectionManager::onClientMessage: sessionId={}, type={}, corrId={}, dataSize={}", sessionId, type, corrId, data.size());
     masterSender_(corrId, sessionId, type, data);
 }
 
@@ -436,11 +430,6 @@ nlohmann::json ConnectionManager::binaryToJson(uint16_t type, const std::vector<
 }
 
 void ConnectionManager::OnMasterPush(uint64_t sessionId, const std::vector<uint8_t>& data) {
-    Logger::Trace("ConnectionManager::OnMasterPush: sessionId={}, dataSize={}", sessionId, data.size());
-    if (data.size() >= 4) {
-        Logger::Trace("First 4 bytes: {:02x} {:02x} {:02x} {:02x}",
-                      data[0], data[1], data[2], data[3]);
-    }
     auto sendToSession = [&](const std::shared_ptr<IConnection>& session, const std::vector<uint8_t>& payload) {
         if (session->GetProtocolMode() == ProtocolMode::Binary) {
             if (payload.size() >= 2) {
@@ -475,6 +464,5 @@ void ConnectionManager::OnMasterPush(uint64_t sessionId, const std::vector<uint8
             Logger::Warn("ConnectionManager::OnMasterPush: session for ID {} not exists", sessionId);
         else
             sendToSession(session, data);
-        Logger::Trace("ConnectionManager::OnMasterPush: Sending to session {}", sessionId);
     }
 }
