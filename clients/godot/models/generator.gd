@@ -218,7 +218,7 @@ func generate_river_model(data: Dictionary) -> MeshInstance3D:
 	mesh_instance.mesh = plane_mesh
 	
 	var material = ShaderMaterial.new()
-	var shader = preload("res://shaders/water.shader")
+	var shader = preload("res://shaders/water.gdshader")
 	material.shader = shader
 	
 	if data.has("color"):

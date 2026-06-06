@@ -12,7 +12,7 @@ class_name UIManager
 @onready var debug_info = $DebugInfo
 
 # Game references
-var network_manager: NetworkManager
+var network_manager
 var player_node: Node3D
 
 # UI state
@@ -40,7 +40,7 @@ func _input(event):
 			elif event.keycode == KEY_TAB:
 				toggle_minimap()
 
-func setup_references(network: NetworkManager, player: Node3D):
+func setup_references(network, player: Node3D):
 	network_manager = network
 	player_node = player
 	

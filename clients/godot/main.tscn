@@ -1,0 +1,36 @@
+[gd_scene load_steps=2 format=3 uid="uid://c1234"]
+
+[ext_resource type="Script" path="res://main.gd" id="1"]
+
+[node name="GameClient" type="Node3D"]
+script = ExtResource("1")
+
+[node name="World" type="Node3D" parent="."]
+
+[node name="Player" type="CharacterBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Player"]
+
+[node name="CameraPivot" type="Node3D" parent="Player"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6, 0)
+
+[node name="Camera3D" type="Camera3D" parent="Player/CameraPivot"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 3)
+fov = 70.0
+
+[node name="UI" type="Control" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="NetworkManager" type="Node" parent="."]
+
+[node name="ModelGenerator" type="Node" parent="."]
+
+[node name="EntityManager" type="Node" parent="."]
+
+[node name="ConfigLoader" type="Node" parent="."]

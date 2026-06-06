@@ -1,0 +1,21 @@
+# Godot 4 specific
+.godot/
+*.import
+
+# Builds
+build/
+
+# User-specific
+*.user
+*.userprefs
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
