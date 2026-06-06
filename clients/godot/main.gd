@@ -29,6 +29,11 @@ var chunk_height: int = 64
 var lod_distances: Array = [20.0, 40.0, 80.0]
 var max_entities: int = 100
 
+func setup_input():
+	# Input is already configured via project settings.
+	# Additional runtime input setup can go here.
+	pass
+
 func _ready():
 	load_settings()
 	setup_network_signals()

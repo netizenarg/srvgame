@@ -66,11 +66,8 @@ void ProcessPool::Run() { io_.run(); }
 
 void ProcessPool::Shutdown() {
     if (!running_.exchange(false)) return;
-    Logger::Trace("ProcessPool::Shutdown: running...");
     for (auto& w : workers_) w->Shutdown();
-    Logger::Trace("ProcessPool::Shutdown: workers shutdown finished");
     io_.stop();
-    Logger::Trace("ProcessPool::Shutdown: io_.stop finished");
 }
 
 void ProcessPool::SetWorker(std::function<void(int, const WorkerGroupConfig&, int)> func) {
@@ -109,7 +106,6 @@ void ProcessPool::doSpawnWorkers() {
                 if (std::string(err.what()) == "worker_function") {
                     int fd = worker->GetMasterFd();
                     worker_(globalId, groups_[gi], fd);
-                    Logger::Trace("ProcessPool::doSpawnWorkers: worker {} exiting cleanly", globalId);
                     _exit(0);
                 } else {
                     Logger::Error("ProcessPool::doSpawnWorkers: worker start failed: {}", err.what());

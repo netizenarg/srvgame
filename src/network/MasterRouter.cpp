@@ -51,7 +51,6 @@ void MasterRouter::RouteToGameLogic(uint64_t sessionId, uint16_t msgType, const 
             std::string sender = r.ReadString();
             std::string message = r.ReadString();
             uint64_t timestamp = r.ReadUInt64();
-            Logger::Trace("Chat from {} (session {}): {}", sender, sessionId, message);
             BinaryProtocol::BinaryWriter w;
             w.WriteUInt16(BinaryProtocol::MESSAGE_TYPE_CHAT_MESSAGE);
             w.WriteString(sender);
@@ -189,7 +188,6 @@ void MasterRouter::BroadcastToChildWorkers(const std::vector<uint8_t>& data) {
 
 void MasterRouter::WireCallbacks() {
     gameLogic_.SetSendAuthenticationResponseCallback([this](uint64_t session_id, const std::string& message, uint64_t player_id) {
-        Logger::Trace("MasterRouter auth response: session={}, player={}, message={}", session_id, player_id, message);
         BinaryProtocol::BinaryWriter w;
         w.WriteUInt16(BinaryProtocol::MESSAGE_TYPE_AUTHENTICATION);
         w.WriteUInt64(gameLogic_.GetCurrentTimestamp());

@@ -17,9 +17,7 @@ void ClientListener::Start() {
     std::thread([this]() { manager_->Start(); }).detach();
     channel_->Start([this](const IPCEnvelope& env) { onMasterMessage(env); });
     ioThread_ = std::thread([this]() {
-        Logger::Trace("ClientListener::Start: worker {} entering io_context::run()", workerId_);
         io_.run();
-        Logger::Trace("ClientListener::Start: worker {} exiting io_context::run()", workerId_);
     });
 }
 
@@ -41,7 +39,6 @@ void ClientListener::onMasterMessage(const IPCEnvelope& env) {
 }
 
 void ClientListener::sendToMaster(uint32_t correlationId, uint64_t sessionId, uint16_t messageType, const std::vector<uint8_t>& body) {
-    Logger::Trace("ClientListener::sendToMaster: corrId={}, session={}, type={}, bodySize={}", correlationId, sessionId, messageType, body.size());
     IPCEnvelope env;
     env.correlationId = correlationId;
     env.sessionId = sessionId;

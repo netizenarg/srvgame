@@ -1,18 +1,15 @@
 extends Node3D
 
-class_name ChunkLoader
-
-func load_chunk(chunk_x: int, chunk_z: int, chunk_size: int) -> Dictionary:
-	# This would load chunk data from disk or network
-	# For now, return empty data
-	return {
-		"chunk_x": chunk_x,
-		"chunk_z": chunk_z,
-		"heightmap": [],
-		"biomes": []
-	}
-
-class_name GameWorld
+class ChunkLoader:
+	func load_chunk(chunk_x: int, chunk_z: int, chunk_size: int) -> Dictionary:
+		# This would load chunk data from disk or network
+		# For now, return empty data
+		return {
+			"chunk_x": chunk_x,
+			"chunk_z": chunk_z,
+			"heightmap": [],
+			"biomes": []
+		}
 
 # World parameters
 @export var chunk_size: int = 16

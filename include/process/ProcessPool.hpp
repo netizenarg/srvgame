@@ -7,32 +7,12 @@
 #include <string>
 #include <vector>
 #include <sys/wait.h>
-#include <sys/prctl.h>
-#include <fcntl.h>
 #include <unistd.h>
 
 #include <asio.hpp>
-#include <asio/awaitable.hpp>
-#include <asio/detached.hpp>
-#include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
-#include <asio/ip/tcp.hpp>
-#include <asio/read_until.hpp>
-#include <asio/redirect_error.hpp>
-#include <asio/signal_set.hpp>
-#include <asio/steady_timer.hpp>
-#include <asio/use_awaitable.hpp>
 #include <asio/write.hpp>
 #include <asio/local/connect_pair.hpp>
-
-using asio::ip::tcp;
-using asio::awaitable;
-using asio::co_spawn;
-using asio::detached;
-using asio::redirect_error;
-using asio::use_awaitable;
-
-#include <nlohmann/json.hpp>
 
 #include "logging/Logger.hpp"
 #include "config/ConfigManager.hpp"
