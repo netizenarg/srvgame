@@ -2,53 +2,45 @@
 
 namespace BinaryProtocol {
 
-    // BinaryMessage implementation
+    NetworkHeader::NetworkHeader(uint16_t type, uint32_t seq, uint8_t ver, uint8_t flgs)
+    : version(ver), flags(flgs), message_type(type),
+    sequence(seq), timestamp(0), length(0), checksum(0) {}
+
     std::vector<uint8_t> BinaryMessage::Serialize() const {
         std::vector<uint8_t> buffer(sizeof(NetworkHeader) + data.size());
-        
-        // Copy header
         memcpy(buffer.data(), &header, sizeof(NetworkHeader));
-        
-        // Copy data
         if (!data.empty()) {
             memcpy(buffer.data() + sizeof(NetworkHeader), data.data(), data.size());
         }
-        
         return buffer;
     }
-
     BinaryMessage BinaryMessage::Deserialize(const uint8_t* buffer, size_t length) {
         if (length < sizeof(NetworkHeader)) {
             throw std::runtime_error("Buffer too small for message header");
         }
-        
         BinaryMessage msg;
-        
-        // Read header
         memcpy(&msg.header, buffer, sizeof(NetworkHeader));
-        
-        // Validate length
         if (length != sizeof(NetworkHeader) + msg.header.length) {
             throw std::runtime_error("Message length mismatch");
         }
-        
-        // Copy data
         if (msg.header.length > 0) {
             msg.data.resize(msg.header.length);
             memcpy(msg.data.data(), buffer + sizeof(NetworkHeader), msg.header.length);
         }
-        
         return msg;
     }
+    bool BinaryMessage::IsCompressed() const { return (header.flags & FLAG_COMPRESSED) != 0; }
+    bool BinaryMessage::IsEncrypted() const { return (header.flags & FLAG_ENCRYPTED) != 0; }
+    bool BinaryMessage::IsReliable() const { return (header.flags & FLAG_RELIABLE) != 0; }
 
-    // BinaryWriter implementation
-    BinaryWriter::BinaryWriter() {
-        buffer_.reserve(1024); // Initial capacity
+
+    BinaryWriter::BinaryWriter() { buffer_.reserve(1024); }
+
+    void BinaryWriter::WriteRaw(const uint8_t* data, size_t length) {
+        buffer_.insert(buffer_.end(), data, data + length);
     }
 
-    void BinaryWriter::WriteUInt8(uint8_t value) {
-        buffer_.push_back(value);
-    }
+    void BinaryWriter::WriteUInt8(uint8_t value) { buffer_.push_back(value); }
 
     void BinaryWriter::WriteUInt16(uint16_t value) {
         buffer_.push_back(static_cast<uint8_t>(value >> 8));
@@ -116,11 +108,11 @@ namespace BinaryProtocol {
         WriteString(json_str);
     }
 
-    void BinaryWriter::Clear() {
-        buffer_.clear();
-    }
+    const std::vector<uint8_t>& BinaryWriter::GetBuffer() const { return buffer_; }
+    size_t BinaryWriter::GetSize() const { return buffer_.size(); }
 
-    // BinaryReader implementation
+    void BinaryWriter::Clear() { buffer_.clear(); }
+
     BinaryReader::BinaryReader(const uint8_t* data, size_t length)
         : data_(data), length_(length) {}
 
@@ -213,11 +205,13 @@ namespace BinaryProtocol {
         return nlohmann::json::parse(json_str);
     }
 
-    // Utility functions
+    size_t BinaryReader::Remaining() const { return length_ - position_; }
+    bool BinaryReader::CanRead(size_t size) const { return position_ + size <= length_; }
+    size_t BinaryReader::GetPosition() const { return position_; }
+
     uint32_t CalculateCRC32(const void* data, size_t length) {
         uint32_t crc = 0xFFFFFFFF;
         const uint8_t* bytes = static_cast<const uint8_t*>(data);
-        
         for (size_t i = 0; i < length; ++i) {
             crc ^= bytes[i];
             for (int j = 0; j < 8; ++j) {
@@ -225,46 +219,38 @@ namespace BinaryProtocol {
                 crc = (crc >> 1) ^ (0xEDB88320 & mask);
             }
         }
-        
         return ~crc;
     }
 
     std::vector<uint8_t> CompressData(const std::vector<uint8_t>& data, int level) {
         if (data.empty()) return {};
-        
         uLongf compressed_size = compressBound(data.size());
-        std::vector<uint8_t> compressed(compressed_size);
-        
-        if (compress2(compressed.data(), &compressed_size, 
+        std::vector<uint8_t> compressed(4 + compressed_size);
+        uint32_t original_size = static_cast<uint32_t>(data.size());
+        memcpy(compressed.data(), &original_size, sizeof(original_size));
+        if (compress2(compressed.data() + 4, &compressed_size,
                      data.data(), data.size(), level) != Z_OK) {
             throw std::runtime_error("Compression failed");
         }
-        
-        compressed.resize(compressed_size);
+        compressed.resize(4 + compressed_size);
         return compressed;
     }
 
     std::vector<uint8_t> DecompressData(const std::vector<uint8_t>& compressed) {
         if (compressed.empty()) return {};
-        
-        // For simplicity, assume original size is stored in first 4 bytes
         if (compressed.size() < 4) {
             throw std::runtime_error("Invalid compressed data");
         }
-        
         uint32_t original_size = *reinterpret_cast<const uint32_t*>(compressed.data());
         std::vector<uint8_t> decompressed(original_size);
         uLongf decompressed_size = original_size;
-        
         if (uncompress(decompressed.data(), &decompressed_size,
                       compressed.data() + 4, compressed.size() - 4) != Z_OK) {
             throw std::runtime_error("Decompression failed");
         }
-        
         return decompressed;
     }
 
-    // ProtocolCapabilities implementation
     std::vector<uint8_t> ProtocolCapabilities::Serialize() const {
         BinaryWriter writer;
         writer.WriteUInt8(version);
@@ -272,30 +258,24 @@ namespace BinaryProtocol {
         writer.WriteUInt8(supports_encryption ? 1 : 0);
         writer.WriteUInt32(max_message_size);
         writer.WriteUInt16(static_cast<uint16_t>(supported_message_types.size()));
-        
         for (uint16_t type : supported_message_types) {
             writer.WriteUInt16(type);
         }
-        
         return writer.GetBuffer();
     }
 
     ProtocolCapabilities ProtocolCapabilities::Deserialize(const uint8_t* data, size_t length) {
         BinaryReader reader(data, length);
         ProtocolCapabilities caps;
-        
         caps.version = reader.ReadUInt8();
         caps.supports_compression = reader.ReadUInt8() != 0;
         caps.supports_encryption = reader.ReadUInt8() != 0;
         caps.max_message_size = reader.ReadUInt32();
-        
         uint16_t type_count = reader.ReadUInt16();
         caps.supported_message_types.reserve(type_count);
-        
         for (uint16_t i = 0; i < type_count; ++i) {
             caps.supported_message_types.push_back(reader.ReadUInt16());
         }
-        
         return caps;
     }
 

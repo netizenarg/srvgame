@@ -1,6 +1,6 @@
 #include "network/ConnectionManager.hpp"
 
-ConnectionManager::ConnectionManager(const WorkerGroupConfig& groupConfig, MasterSender masterSender)
+ConnectionManager::ConnectionManager(const WorkerGroupConfig& groupConfig, MasterSender masterSender, int workerId)
     : ioContext_(groupConfig.threads)
     , acceptor_(ioContext_)
     , masterSender_(std::move(masterSender))
@@ -8,6 +8,7 @@ ConnectionManager::ConnectionManager(const WorkerGroupConfig& groupConfig, Maste
     , host_(groupConfig.host)
     , port_(groupConfig.port)
     , reuse_(groupConfig.reuse)
+    , workerId_(workerId)
 {
     if (groupConfig.ssl.has_value()) {
         sslContext_ = std::make_shared<asio::ssl::context>(asio::ssl::context::tls_server);
@@ -31,22 +32,21 @@ bool ConnectionManager::Start() {
         }
         acceptor_.bind(endpoint);
         acceptor_.listen(1000);
-        running_ = true;
+        running_.store(true);
         doAccept();
         for (int i = 0; i < groupConfig_.threads - 1; ++i)
             workerThreads_.emplace_back([this]() { ioContext_.run(); });
         Logger::Info("ConnectionManager started on {}:{}", host_, port_);
         ioContext_.run();
-    } catch (const std::exception& e) {
-        Logger::Error("ConnectionManager start failed: {}", e.what());
+    } catch (const std::exception& err) {
+        Logger::Error("ConnectionManager start failed: {}", err.what());
         return false;
     }
     return true;
 }
 
 void ConnectionManager::Shutdown() {
-    if (!running_) return;
-    running_ = false;
+    if (!running_.exchange(false)) return;
     acceptor_.close();
     std::vector<std::shared_ptr<IConnection>> sessions;
     {
@@ -54,16 +54,19 @@ void ConnectionManager::Shutdown() {
         for (auto& [id, s] : sessions_) sessions.push_back(s);
         sessions_.clear();
     }
-    for (auto& s : sessions) s->Stop();
+    for (auto& s : sessions)
+        s->Stop();
     ioContext_.stop();
+    ioContext_.poll();
     for (auto& t : workerThreads_) if (t.joinable()) t.join();
-    Logger::Info("ConnectionManager shut down");
 }
 
-void ConnectionManager::initSessionFactory() {
+void ConnectionManager::initSessionFactory()
+{
     if (groupConfig_.protocol == "binary") {
         sessionFactory_ = [this](asio::ip::tcp::socket socket, std::shared_ptr<asio::ssl::context> sslCtx) -> std::shared_ptr<IConnection> {
-            auto session = std::make_shared<BinarySession>(std::move(socket), sslCtx);
+            uint64_t unique_session_id = (static_cast<uint64_t>(workerId_) << 48) | nextLocalSid_++;
+            auto session = std::make_shared<BinarySession>(std::move(socket), sslCtx, unique_session_id);
             uint64_t id = session->GetSessionId();
             {
                 std::unique_lock<std::shared_mutex> lock(sessionsMutex_);
@@ -77,8 +80,9 @@ void ConnectionManager::initSessionFactory() {
         };
     } else if (groupConfig_.protocol == "websocket") {
         webSocketFactory_ = [this](asio::ip::tcp::socket socket, std::shared_ptr<asio::ssl::context>) -> std::shared_ptr<IConnection> {
+            uint64_t unique_session_id = (static_cast<uint64_t>(workerId_) << 48) | nextLocalSid_++;
             auto wsConn = std::make_shared<WebSocketProtocol::WebSocketConnection>(std::move(socket));
-            auto session = std::make_shared<WebSocketSession>(wsConn);
+            auto session = std::make_shared<WebSocketSession>(wsConn, unique_session_id);
             uint64_t id = session->GetSessionId();
             {
                 std::unique_lock<std::shared_mutex> lock(sessionsMutex_);
@@ -93,6 +97,14 @@ void ConnectionManager::initSessionFactory() {
                         BinaryProtocol::BinaryWriter w;
                         w.WriteString(msg.value("login",""));
                         w.WriteString(msg.value("password",""));
+                        body = w.GetBuffer();
+                        break;
+                    }
+                    case BinaryProtocol::MESSAGE_TYPE_CHAT_MESSAGE: {
+                        BinaryProtocol::BinaryWriter w;
+                        w.WriteString(msg.value("sender", ""));
+                        w.WriteString(msg.value("message", ""));
+                        w.WriteUInt64(msg.value("timestamp", 0ULL));
                         body = w.GetBuffer();
                         break;
                     }
@@ -180,7 +192,14 @@ void ConnectionManager::initSessionFactory() {
 
 void ConnectionManager::doAccept() {
     acceptor_.async_accept([this](std::error_code ec, asio::ip::tcp::socket socket) {
-        if (!ec) {
+        if (ec == asio::error::operation_aborted){
+            Logger::Warn("ConnectionManager::doAccept: {}", ec.message());
+            return;
+        }
+        else if (ec)
+            Logger::Error("ConnectionManager::doAccept: {}", ec.message());
+        else
+        {
             if (groupConfig_.tcp_nodelay) {
                 asio::ip::tcp::no_delay option(true);
                 socket.set_option(option);
@@ -193,12 +212,17 @@ void ConnectionManager::doAccept() {
                 asio::socket_base::receive_buffer_size option(groupConfig_.receive_buffer_size);
                 socket.set_option(option);
             }
+            std::shared_ptr<IConnection> session;
             if (groupConfig_.protocol == "binary" && sessionFactory_)
-                sessionFactory_(std::move(socket), sslContext_);
+                session = sessionFactory_(std::move(socket), sslContext_);
             else if (groupConfig_.protocol == "websocket" && webSocketFactory_)
-                webSocketFactory_(std::move(socket), sslContext_);
+                session = webSocketFactory_(std::move(socket), sslContext_);
+            if (session) {
+                session->Start();
+            }
         }
-        if (running_) doAccept();
+        if (running_.load())
+            doAccept();
     });
 }
 
@@ -229,8 +253,13 @@ void ConnectionManager::OnMasterReply(uint32_t correlationId, const std::vector<
         if (sIt != sessions_.end()) session = sIt->second;
     }
     if (!session) return;
-    if (groupConfig_.protocol == "binary") {
-        session->SendRaw(std::string(reply.begin(), reply.end()));
+    if (session->GetProtocolMode() == ProtocolMode::Binary) {
+        if (reply.size() >= 2) {
+            BinaryProtocol::BinaryReader r(reply.data(), reply.size());
+            uint16_t type = r.ReadUInt16();
+            std::vector<uint8_t> body(reply.begin() + 2, reply.end());
+            session->Send(type, body);
+        }
         if (entry.messageType == BinaryProtocol::MESSAGE_TYPE_AUTHENTICATION && reply.size() >= 16) {
             BinaryProtocol::BinaryReader r(reply.data(), reply.size());
             r.ReadUInt64();
@@ -261,6 +290,7 @@ void ConnectionManager::OnMasterReply(uint32_t correlationId, const std::vector<
 uint16_t ConnectionManager::jsonMsgType(const std::string& msg) {
     static const std::unordered_map<std::string, uint16_t> map = {
         {"authentication", BinaryProtocol::MESSAGE_TYPE_AUTHENTICATION},
+        {"chat_message", BinaryProtocol::MESSAGE_TYPE_CHAT_MESSAGE},
         {"chunk_params", BinaryProtocol::MESSAGE_TYPE_CHUNK_PARAMS},
         {"get_chunk", BinaryProtocol::MESSAGE_TYPE_CHUNK_DATA},
         {"collision", BinaryProtocol::MESSAGE_TYPE_COLLISION_CHECK},
@@ -284,6 +314,12 @@ nlohmann::json ConnectionManager::binaryToJson(uint16_t type, const std::vector<
             uint64_t player_id = r.ReadUInt64();
             std::string message = r.ReadString();
             return {{"msg","authentication"},{"timestamp",timestamp},{"desc",message},{"player_id",player_id}};
+        }
+        case BinaryProtocol::MESSAGE_TYPE_CHAT_MESSAGE: {
+            std::string sender = r.ReadString();
+            std::string message = r.ReadString();
+            uint64_t timestamp = r.ReadUInt64();
+            return {{"msg","chat_message"},{"sender",sender},{"message",message},{"timestamp",timestamp}};
         }
         case BinaryProtocol::MESSAGE_TYPE_CHUNK_PARAMS: {
             uint64_t timestamp = r.ReadUInt64();
@@ -389,6 +425,44 @@ nlohmann::json ConnectionManager::binaryToJson(uint16_t type, const std::vector<
             return {{"msg","inventory"},{"timestamp",timestamp},{"loot_id",loot_id},{"target_id",target_id},{"move_type",move_type},{"inv_slot_id",inv_slot},{"use_slot_id",use_slot},{"quantity",quantity}};
         }
         default:
-            return {{"msg","error"},{"desc","Unknown binary message type"}};
+            return {{"msg","error"},{"desc","Unknown binary message type " + std::to_string(type)}};//0x7b22=31522
+    }
+}
+
+void ConnectionManager::OnMasterPush(uint64_t sessionId, const std::vector<uint8_t>& data) {
+    auto sendToSession = [&](const std::shared_ptr<IConnection>& session, const std::vector<uint8_t>& payload) {
+        if (session->GetProtocolMode() == ProtocolMode::Binary) {
+            if (payload.size() >= 2) {
+                BinaryProtocol::BinaryReader r(payload.data(), payload.size());
+                uint16_t type = r.ReadUInt16();
+                std::vector<uint8_t> body(payload.begin() + 2, payload.end());
+                session->Send(type, body);
+            }
+        } else {
+            if (payload.size() >= 2) {
+                BinaryProtocol::BinaryReader r(payload.data(), payload.size());
+                uint16_t type = r.ReadUInt16();
+                std::vector<uint8_t> body(payload.begin() + 2, payload.end());
+                session->SendJson(binaryToJson(type, body));
+            }
+        }
+    };
+    if (sessionId == 0) {// Broadcast to all sessions on this worker
+        std::shared_lock<std::shared_mutex> lock(sessionsMutex_);
+        for (auto& [id, session] : sessions_) {
+            sendToSession(session, data);
+        }
+    } else {
+        std::shared_ptr<IConnection> session;
+        {
+            std::shared_lock<std::shared_mutex> lock(sessionsMutex_);
+            auto it = sessions_.find(sessionId);
+            if (it != sessions_.end())
+                session = it->second;
+        }
+        if (!session)
+            Logger::Warn("ConnectionManager::OnMasterPush: session for ID {} not exists", sessionId);
+        else
+            sendToSession(session, data);
     }
 }

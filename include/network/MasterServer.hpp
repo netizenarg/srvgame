@@ -20,9 +20,8 @@
 #include "process/ProcessPool.hpp"
 #include "network/BinaryProtocol.hpp"
 #include "network/ClientListener.hpp"
+#include "network/MasterRouter.hpp"
 #include "game/GameLogic.hpp"
-
-class DatabaseService;
 
 class MasterServer {
 public:
@@ -39,6 +38,8 @@ public:
     static void WorkerClient(int workerId, const WorkerGroupConfig& groupConfig,
                            int masterReadFd, const std::string& configPath);
 
+    static void GameLogicClient(int workerId, int masterFd, const std::string& configPath);
+
 private:
     asio::io_context& io_;
     asio::posix::stream_descriptor signal_pipe_;
@@ -46,15 +47,9 @@ private:
 
     GameLogic& gameLogic_;
     ProcessPool processPool_;
+    MasterRouter router_;
     const ConfigManager& config_;
     std::string configPath_;
 
-    std::unordered_map<uint64_t, uint64_t> sessionToVirtual_;
-    std::function<void(uint64_t, const std::vector<uint8_t>&)> sendReplyCb_;
-    std::function<uint64_t(uint64_t, int)> assignVirtualId_;
-    std::atomic<uint32_t> nextPersistentId_{1};
-
     void start_signal_read();
-    void WireCallbacks();
-    void SendResponse(uint64_t sessionId, const std::vector<uint8_t>& buffer);
 };

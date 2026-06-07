@@ -1,11 +1,12 @@
-cmake_minimum_required(VERSION 3.15)
+cmake_minimum_required(VERSION 3.21)
 project(GameServer)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(fmt REQUIRED)
 
+find_package(asio::asio QUIET)
 if(NOT TARGET asio::asio)
     message(STATUS "ASIO not found via find_package, using manual configuration")
     set(ASIO_DIR "${CMAKE_SOURCE_DIR}/thirdparty/asio")
@@ -23,21 +24,20 @@ set(GLM_DIR "${CMAKE_SOURCE_DIR}/thirdparty/glm")
 set(GLM_INCLUDE_DIRS "${GLM_DIR}")
 include_directories(${GLM_INCLUDE_DIRS})
 
-find_package(nlohmann_json 3.2.0 QUIET)
+find_package(nlohmann_json QUIET)
 if(NOT nlohmann_json_FOUND)
     message(WARNING "nlohmann_json not found, using FetchContent...")
     include(FetchContent)
     FetchContent_Declare(
         nlohmann_json
         GIT_REPOSITORY https://github.com/nlohmann/json.git
-        GIT_TAG v3.11.2
+        GIT_TAG develop
     )
     FetchContent_MakeAvailable(nlohmann_json)
 endif()
 
-find_package(spdlog 1.13.0 QUIET)
+find_package(spdlog QUIET)
 if(NOT spdlog_FOUND)
-    # Fall back to cloned version
     message(STATUS "System spdlog not found, using local clone")
     set(SPDLOG_DIR "${CMAKE_SOURCE_DIR}/thirdparty/spdlog")
     add_subdirectory(${SPDLOG_DIR} EXCLUDE_FROM_ALL)
@@ -95,6 +95,7 @@ set(LOGGING_SOURCES
 
 # Process system
 set(PROCESS_SOURCES
+    src/process/IPCChannel.cpp
     src/process/ProcessPool.cpp
 )
 
@@ -112,6 +113,7 @@ set(NETWORK_SOURCES
     src/network/BinarySession.cpp
     src/network/ConnectionManager.cpp
     src/network/ClientListener.cpp
+    src/network/MasterRouter.cpp
     src/network/MasterServer.cpp
     src/network/NetworkQualityMonitor.cpp
     src/network/PredictionSystem.cpp
@@ -195,6 +197,10 @@ add_executable(gameserver
     ${WORLD_SOURCES}
     ${DATABASE_SOURCES}
 )
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(gameserver PRIVATE -fcoroutines)
+endif()
 
 if(ENABLE_ASAN)
     message(STATUS "Enabling AddressSanitizer and UndefinedBehaviorSanitizer")

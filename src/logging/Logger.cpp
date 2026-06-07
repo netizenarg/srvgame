@@ -16,13 +16,16 @@ void LogSink::sink_it_(const spdlog::details::log_msg& msg) {
     formatter_->format(msg, formatted);
     std::string line(formatted.data(), formatted.size());
     if (!line.empty() && line.back() == '\n') line.pop_back();
-    if(service_)
+    if (service_) {
         service_->EnqueueLog(std::move(line));
-    else
-    {
+    } else if (socket_ && socket_->is_open()) {
         line += '\n';
-        std::lock_guard<std::mutex> lock(writeMutex_);
-        asio::write(*socket_, asio::buffer(line));
+        try {
+            std::lock_guard<std::mutex> lock(writeMutex_);
+            asio::write(*socket_, asio::buffer(line));
+        } catch (const std::exception& err) {
+            socket_->close();
+        }
     }
 }
 
@@ -156,9 +159,13 @@ void LogService::rotateFileIfNeeded() {
             for (int i = static_cast<int>(maxFiles_) - 1; i > 0; --i) {
                 auto oldName = logFilePath_ + "." + std::to_string(i);
                 auto newName = logFilePath_ + "." + std::to_string(i + 1);
-                std::filesystem::rename(oldName, newName);
+                if (std::filesystem::exists(oldName)) {
+                    std::filesystem::rename(oldName, newName);
+                }
             }
-            std::filesystem::rename(logFilePath_, logFilePath_ + ".1");
+            if (std::filesystem::exists(logFilePath_)) {
+                std::filesystem::rename(logFilePath_, logFilePath_ + ".1");
+            }
         }
         logFile_.open(logFilePath_, std::ios::out | std::ios::trunc);
         currentFileSize_ = 0;
@@ -210,7 +217,8 @@ void Logger::SetupLogger(const std::string& loggerName, nlohmann::json config) {
     spdlog::level::level_enum logLevel = spdlog::level::from_str(logLevelStr);
     std::string pattern = config.at("pattern").get<std::string>();
     if (pattern.empty()) {pattern = "[%Y-%m-%d %H:%M:%S.%e] [%P] [%^%l%$] [%n] %v";}
-    if (sinks.empty() && !g_logService) {
+    //if (sinks.empty() && !g_logService) {
+    if (config.at("console").get<bool>()) {
         auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
         console_sink->set_level(spdlog::level::info);
         console_sink->set_pattern(pattern);

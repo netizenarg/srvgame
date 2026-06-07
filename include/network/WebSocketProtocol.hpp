@@ -239,7 +239,7 @@ namespace WebSocketProtocol {
         void ReadFrame();
         void HandleFrame(const WebSocketFrame& frame);
         void SendFrame(const WebSocketFrame& frame);
-        void SendFrameAsync(const WebSocketFrame& frame);
+        //void SendFrameAsync(const WebSocketFrame& frame);
 
         // Message assembly
         void ProcessMessageData(const WebSocketFrame& frame);

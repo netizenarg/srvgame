@@ -271,7 +271,7 @@ func add_interaction_area(entity_node: Node3D, entity_type: int, data: Dictionar
 func add_health_display(entity_node: Node3D, data: Dictionary):
 	# Create health bar UI
 	var health_bar = Sprite3D.new()
-	health_bar.texture = preload("res://textures/health_bar.png")
+	health_bar.texture = preload("res://textures/health_bar.svg")
 	health_bar.pixel_size = 0.01
 	health_bar.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	health_bar.position = Vector3(0, 1.5, 0)

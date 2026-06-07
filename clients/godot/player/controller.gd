@@ -29,7 +29,7 @@ var move_input: Vector2 = Vector2.ZERO
 var look_input: Vector2 = Vector2.ZERO
 
 # Network
-var network_manager: NetworkManager
+var network_manager
 var last_sent_position: Vector3 = Vector3.ZERO
 var position_update_rate: float = 0.1  # 10 times per second
 var last_update_time: float = 0.0
@@ -68,7 +68,7 @@ func _input(event):
 				toggle_mouse_capture()
 			elif event.keycode == KEY_SHIFT:
 				is_sprinting = true
-			elif event.keycode == KEY_CONTROL:
+			elif event.keycode == KEY_CTRL:
 				toggle_crouch()
 
 func process_movement(delta):
@@ -222,7 +222,7 @@ func send_position_update():
 			)
 			last_sent_position = current_position
 
-func set_network_manager(manager: NetworkManager):
+func set_network_manager(manager):
 	network_manager = manager
 
 func apply_position_correction(corrected_position: Vector3):

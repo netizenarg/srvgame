@@ -55,8 +55,8 @@ const std::string& ConfigManager::GetConfigPath() const { return configPath_; }
 bool ConfigManager::HasProcessConfig() const {
     //ATTENTION: RECURSIVELY CALL MUTEX LOCK, DO NOT USE LINE BELOW
     //std::lock_guard<std::mutex> lock(configMutex_);
-    return config_.contains("process") && config_["process"].contains("workers") &&
-    config_["process"]["workers"].is_array() && !config_["process"]["workers"].empty();
+    return config_.contains("workers") && config_["workers"].contains("clients") &&
+    config_["workers"]["clients"].is_array() && !config_["workers"]["clients"].empty();
 }
 
 std::vector<WorkerGroupConfig> ConfigManager::GetWorkerGroups() const {
@@ -66,7 +66,7 @@ std::vector<WorkerGroupConfig> ConfigManager::GetWorkerGroups() const {
     if (!HasProcessConfig())//ATTENTION: RECURSIVELY CALL MUTEX LOCK
         return groups;
 
-    for (const auto& w : config_["process"]["workers"]) {
+    for (const auto& w : config_["workers"]["clients"]) {
         WorkerGroupConfig g;
         g.protocol = w.value("protocol", "binary");
         g.host = w.value("host", "0.0.0.0");
@@ -114,12 +114,12 @@ int ConfigManager::GetTotalThreadCount() const {
 bool ConfigManager::ValidateConfig(const nlohmann::json& config) const {
     Logger::Info("Validate config started...");
     try {
-        if (!config.contains("process") || !config["process"].contains("workers") ||
-            !config["process"]["workers"].is_array() || config["process"]["workers"].empty()) {
-            throw std::runtime_error("Missing 'process.workers' array section");
+        if (!config.contains("workers") || !config["workers"].contains("clients") ||
+            !config["workers"]["clients"].is_array() || config["workers"]["clients"].empty()) {
+            throw std::runtime_error("Missing 'workers.clients' array section");
         }
 
-        const auto& workers = config["process"]["workers"];
+        const auto& workers = config["workers"]["clients"];
         for (size_t i = 0; i < workers.size(); ++i) {
             const auto& w = workers[i];
             std::string proto = w.value("protocol", "binary");

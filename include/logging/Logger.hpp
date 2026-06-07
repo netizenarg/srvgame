@@ -13,17 +13,17 @@
 #include <thread>
 #include <vector>
 
-#include <asio.hpp>
 #include <spdlog/spdlog.h>
+#include <spdlog/fmt/fmt.h>
 #include <spdlog/sinks/base_sink.h>
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/daily_file_sink.h>
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
+#include <asio.hpp>
+
 #include <nlohmann/json.hpp>
-//#include "config/ConfigManager.hpp"
-//#include "network/BinaryProtocol.hpp"
 
 template<typename Mutex>
 class null_sink : public spdlog::sinks::base_sink<Mutex> {
@@ -103,34 +103,28 @@ public:
     static std::shared_ptr<spdlog::logger> GetLogger(const std::string& name="WorkerMain");
     static void AddSink(spdlog::sink_ptr sink);
 
-    // template<typename... Args> static void Trace(const std::string& fmt, Args... args);
-    // template<typename... Args> static void Debug(const std::string& fmt, Args... args);
-    // template<typename... Args> static void Info(const std::string& fmt, Args... args);
-    // template<typename... Args> static void Warn(const std::string& fmt, Args... args);
-    // template<typename... Args> static void Error(const std::string& fmt, Args... args);
-    // template<typename... Args> static void Critical(const std::string& fmt, Args... args);
     template<typename... Args> static void Trace(const std::string& fmt, Args... args) {
-        GetLogger()->trace(fmt, args...);
+        GetLogger()->trace(fmt::runtime(fmt), args...);
     }
 
     template<typename... Args> static void Debug(const std::string& fmt, Args... args) {
-        GetLogger()->debug(fmt, args...);
+        GetLogger()->debug(fmt::runtime(fmt), args...);
     }
 
     template<typename... Args> static void Info(const std::string& fmt, Args... args) {
-        GetLogger()->info(fmt, args...);
+        GetLogger()->info(fmt::runtime(fmt), args...);
     }
 
     template<typename... Args> static void Warn(const std::string& fmt, Args... args) {
-        GetLogger()->warn(fmt, args...);
+        GetLogger()->warn(fmt::runtime(fmt), args...);
     }
 
     template<typename... Args> static void Error(const std::string& fmt, Args... args) {
-        GetLogger()->error(fmt, args...);
+        GetLogger()->error(fmt::runtime(fmt), args...);
     }
 
     template<typename... Args> static void Critical(const std::string& fmt, Args... args) {
-        GetLogger()->critical(fmt, args...);
+        GetLogger()->critical(fmt::runtime(fmt), args...);
     }
 
     static void Flush();

@@ -3,8 +3,10 @@
 
 std::atomic<uint64_t> WebSocketSession::nextSessionId_{1};
 
-WebSocketSession::WebSocketSession(WebSocketProtocol::WebSocketConnection::Pointer wsConn)
-    : protocolMode_(ProtocolMode::Json), wsConn_(std::move(wsConn)), sessionId_(nextSessionId_++) {
+WebSocketSession::WebSocketSession(WebSocketProtocol::WebSocketConnection::Pointer wsConn, uint64_t sessionId)
+    : protocolMode_(ProtocolMode::Json), wsConn_(std::move(wsConn))
+    , sessionId_(sessionId > 0 ? sessionId : nextSessionId_.fetch_add(1))
+{
     wsConn_->SetMessageHandler([this](const WebSocketProtocol::WebSocketMessage& msg) {
         OnMessage(msg);
     });
@@ -40,6 +42,9 @@ void WebSocketSession::SendRaw(const std::string& data) {
 }
 
 void WebSocketSession::SendJson(const nlohmann::json& message) {
+    std::string msg_type = message.value("msg", "UNKNOWN");
+    if (msg_type == "get_chunk") Logger::Trace("WebSocketSession::SendJson: msg={}", msg_type);
+    else Logger::Trace("WebSocketSession::SendJson: {}", message.dump());
     wsConn_->SendJson(message);
 }
 
@@ -183,14 +188,15 @@ void WebSocketSession::OnMessage(const WebSocketProtocol::WebSocketMessage& msg)
                 Logger::Trace("WebSocketSession {} parsed JSON: {}", sessionId_, json.dump());
                 std::string msgType = json.value("msg", "");
                 if (msgType == "protocol_negotiation") {
-                    protocolMode_ = ProtocolMode::Binary;
-                    std::string protocol = json.value("protocol", "");
                     int version = json.value("version", 0);
-                    Logger::Info("WebSocketSession {} client negotiated protocol: {} v{}", sessionId_, protocol, version);
+                    std::string protocol = json.value("protocol", "");
+                    if (protocol == "binary")
+                        protocolMode_ = ProtocolMode::Binary;
+                    Logger::Trace("WebSocketSession {} client negotiated protocol: {} v{}", sessionId_, protocol, version);
                     nlohmann::json response = {
                         {"msg", "protocol_negotiation"},
-                        {"protocol", "binary"},
-                        {"version", 1},
+                        {"protocol", protocol},
+                        {"version", version},
                         {"status", "ok"}
                     };
                     wsConn_->SendJson(response);

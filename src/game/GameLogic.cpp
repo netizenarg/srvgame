@@ -658,22 +658,6 @@ void GameLogic::OnChunkData(const ChunkData& req) {
     } else {
         Logger::Error("No sendChunkCb_ set in GameLogic");
     }
-    if (sendReplyCb_) {
-        nlohmann::json msg = {
-            {"msg", "get_chunk"},
-            {"timestamp", resp.timestamp},
-            {"x", resp.x},
-            {"z", resp.z},
-            {"lod", resp.lod},
-            {"vertices", resp.vertices},
-            {"indices", resp.indices}
-        };
-        std::string jsonStr = msg.dump();
-        std::vector<uint8_t> data(jsonStr.begin(), jsonStr.end());
-        sendReplyCb_(req.session_id, data);
-    } else {
-        Logger::Error("No sendReplyCb_ set in GameLogic");
-    }
 }
 
 void GameLogic::OnPlayerState(const PlayerStateData& data) {
@@ -1070,6 +1054,7 @@ void GameLogic::SaveLoop() {
         std::unique_lock<std::mutex> lock(saveMutex_);
         saveCV_.wait_for(lock, std::chrono::seconds(GetWorldConfig().save_interval), [this]
         { return !running_.load(); });
+        Logger::Trace("GameLogic::SaveLoop tick, running_ = {}", running_.load());
         if (!running_.load()) break;
         SaveGameState();
         if (!running_.load()) break;
@@ -1079,7 +1064,7 @@ void GameLogic::SaveLoop() {
 }
 
 void GameLogic::GameLoop() {
-    Logger::Info("Game loop started");
+    Logger::Trace("GameLogic::GameLoop started");
     auto lastUpdate = std::chrono::steady_clock::now();
     //while (!instanceMutex_.try_lock()) {
     while (running_.load()) {
