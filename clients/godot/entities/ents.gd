@@ -221,7 +221,7 @@ func create_entity_model(entity_type: int, data: Dictionary) -> MeshInstance3D:
 	
 	return model
 
-func add_collision_to_entity(entity_node: Node3D, entity_type: int, data: Dictionary):
+func add_collision_to_entity(entity_node: Node3D, entity_type: int, _data: Dictionary):
 	var collision_shape = CollisionShape3D.new()
 	
 	match entity_type:
@@ -251,7 +251,7 @@ func add_collision_to_entity(entity_node: Node3D, entity_type: int, data: Dictio
 	
 	entity_node.add_child(collision_shape)
 
-func add_interaction_area(entity_node: Node3D, entity_type: int, data: Dictionary):
+func add_interaction_area(entity_node: Node3D, _entity_type: int, _data: Dictionary):
 	var area = Area3D.new()
 	area.collision_layer = 2  # Interaction layer
 	area.collision_mask = 1   # Player layer
@@ -269,14 +269,15 @@ func add_interaction_area(entity_node: Node3D, entity_type: int, data: Dictionar
 	entity_node.add_child(area)
 
 func add_health_display(entity_node: Node3D, data: Dictionary):
-	# Create health bar UI
 	var health_bar = Sprite3D.new()
-	health_bar.texture = preload("res://textures/health_bar.svg")
 	health_bar.pixel_size = 0.01
 	health_bar.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	health_bar.position = Vector3(0, 1.5, 0)
 	
-	# Store health data
+	var material = StandardMaterial3D.new()
+	material.albedo_color = Color(0.8, 0.2, 0.2)
+	health_bar.material_override = material
+	
 	entity_node.set_meta("health", data.get("health", 100))
 	entity_node.set_meta("max_health", data.get("max_health", 100))
 	
@@ -305,11 +306,11 @@ func update_health_display(entity_node: Node3D, data: Dictionary):
 		var health_ratio = float(health) / max_health
 		health_bar.scale.x = health_ratio
 
-func update_entity_animation(entity_node: Node3D, state: String):
+func update_entity_animation(_entity_node: Node3D, _state: String):
 	# This would typically control animation player
 	pass
 
-func _on_entity_interacted(camera, event, position, normal, shape_idx, entity_node):
+func _on_entity_interacted(_camera, event, _position, _normal, _shape_idx, entity_node):
 	if event is InputEventMouseButton and event.pressed:
 		# Find entity ID from node
 		var entity_name = entity_node.name
@@ -347,7 +348,7 @@ func _process(delta):
 
 # Network message handlers
 func handle_spawn_message(data: Dictionary):
-	var entity_id = data.get("entity_id")
+	var _entity_id = data.get("entity_id")
 	var entity_type = data.get("entity_type")
 	var position = Vector3(
 		data.position.x,
@@ -366,5 +367,3 @@ func handle_despawn_message(data: Dictionary):
 	despawn_entity(entity_id)
 
 signal entity_interacted(entity_id: int)
-signal entity_spawned(entity_id: int, entity_type: int)
-signal entity_despawned(entity_id: int)

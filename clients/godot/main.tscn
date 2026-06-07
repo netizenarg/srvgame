@@ -1,16 +1,38 @@
-[gd_scene load_steps=2 format=3 uid="uid://c1234"]
+[gd_scene load_steps=11 format=3 uid="uid://c1234"]
 
 [ext_resource type="Script" path="res://main.gd" id="1"]
+[ext_resource type="Script" path="res://ui/menu.gd" id="2"]
+[ext_resource type="Script" path="res://ui/login_menu.gd" id="3"]
+[ext_resource type="Script" path="res://ui/settings_menu.gd" id="4"]
+[ext_resource type="Script" path="res://ui/hud.gd" id="5"]
+[ext_resource type="Script" path="res://ui/pause_menu.gd" id="6"]
+[ext_resource type="Script" path="res://world/world.gd" id="7"]
+[ext_resource type="Script" path="res://player/controller.gd" id="8"]
+[ext_resource type="Script" path="res://network/networks.gd" id="9"]
+[ext_resource type="Script" path="res://models/generator.gd" id="10"]
+[ext_resource type="Script" path="res://entities/ents.gd" id="11"]
+[ext_resource type="Script" path="res://config/loader.gd" id="12"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_player"]
+radius = 0.3
+height = 1.8
 
 [node name="GameClient" type="Node3D"]
 script = ExtResource("1")
 
 [node name="World" type="Node3D" parent="."]
+script = ExtResource("7")
 
 [node name="Player" type="CharacterBody3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0)
+script = ExtResource("8")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Player"]
+shape = SubResource("CapsuleShape3D_player")
+
+[node name="PlayerModel" type="MeshInstance3D" parent="Player"]
+
+[node name="AnimationPlayer" type="AnimationPlayer" parent="Player"]
 
 [node name="CameraPivot" type="Node3D" parent="Player"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6, 0)
@@ -27,10 +49,642 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 
+[node name="MainMenu" type="Control" parent="UI"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("2")
+
+[node name="Background" type="ColorRect" parent="UI/MainMenu"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.1, 0.12, 0.15, 1)
+
+[node name="VBoxContainer" type="VBoxContainer" parent="UI/MainMenu"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -150.0
+offset_top = -150.0
+offset_right = 150.0
+offset_bottom = 150.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 20
+
+[node name="TitleLabel" type="Label" parent="UI/MainMenu/VBoxContainer"]
+layout_mode = 2
+text = "GAME CLIENT"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="LocalPlayButton" type="Button" parent="UI/MainMenu/VBoxContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(200, 50)
+text = "PLAY"
+
+[node name="PlayButton" type="Button" parent="UI/MainMenu/VBoxContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(200, 50)
+text = "CONNECT TO SERVER"
+
+[node name="SettingsButton" type="Button" parent="UI/MainMenu/VBoxContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(200, 50)
+text = "SETTINGS"
+
+[node name="QuitButton" type="Button" parent="UI/MainMenu/VBoxContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(200, 50)
+text = "QUIT"
+
+[node name="VersionLabel" type="Label" parent="UI/MainMenu"]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -100.0
+offset_top = -30.0
+grow_horizontal = 0
+grow_vertical = 0
+text = "v0.1.0"
+horizontal_alignment = 2
+
+[node name="StatusLabel" type="Label" parent="UI/MainMenu"]
+layout_mode = 1
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -100.0
+offset_top = -80.0
+offset_right = 100.0
+offset_bottom = -50.0
+grow_horizontal = 2
+text = ""
+horizontal_alignment = 1
+
+[node name="LoginMenu" type="Control" parent="UI"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("3")
+
+[node name="Background" type="ColorRect" parent="UI/LoginMenu"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.1, 0.12, 0.15, 1)
+
+[node name="VBoxContainer" type="VBoxContainer" parent="UI/LoginMenu"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -150.0
+offset_top = -150.0
+offset_right = 150.0
+offset_bottom = 150.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 15
+
+[node name="TitleLabel" type="Label" parent="UI/LoginMenu/VBoxContainer"]
+layout_mode = 2
+text = "LOGIN"
+horizontal_alignment = 1
+
+[node name="ServerAddressInput" type="LineEdit" parent="UI/LoginMenu/VBoxContainer"]
+layout_mode = 2
+placeholder_text = "Server Address"
+
+[node name="ServerPortInput" type="LineEdit" parent="UI/LoginMenu/VBoxContainer"]
+layout_mode = 2
+placeholder_text = "Server Port"
+
+[node name="UsernameInput" type="LineEdit" parent="UI/LoginMenu/VBoxContainer"]
+layout_mode = 2
+placeholder_text = "Username"
+
+[node name="PasswordInput" type="LineEdit" parent="UI/LoginMenu/VBoxContainer"]
+layout_mode = 2
+placeholder_text = "Password"
+secret = true
+
+[node name="LoginButton" type="Button" parent="UI/LoginMenu/VBoxContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(200, 40)
+text = "LOGIN"
+
+[node name="BackButton" type="Button" parent="UI/LoginMenu/VBoxContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(200, 40)
+text = "BACK"
+
+[node name="StatusLabel" type="Label" parent="UI/LoginMenu/VBoxContainer"]
+layout_mode = 2
+text = ""
+horizontal_alignment = 1
+
+[node name="SettingsMenu" type="Control" parent="UI"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("4")
+
+[node name="Background" type="ColorRect" parent="UI/SettingsMenu"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.1, 0.12, 0.15, 1)
+
+[node name="VBox" type="VBoxContainer" parent="UI/SettingsMenu"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 40.0
+offset_top = 20.0
+offset_right = -40.0
+offset_bottom = -20.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 10
+
+[node name="TitleLabel" type="Label" parent="UI/SettingsMenu/VBox"]
+layout_mode = 2
+text = "SETTINGS"
+horizontal_alignment = 1
+
+[node name="TabContainer" type="TabContainer" parent="UI/SettingsMenu/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Network" type="VBoxContainer" parent="UI/SettingsMenu/VBox/TabContainer"]
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="UI/SettingsMenu/VBox/TabContainer/Network"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 10
+
+[node name="HostRow" type="HBoxContainer" parent="UI/SettingsMenu/VBox/TabContainer/Network/VBox"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="UI/SettingsMenu/VBox/TabContainer/Network/VBox/HostRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(120, 0)
+text = "Host"
+
+[node name="HostInput" type="LineEdit" parent="UI/SettingsMenu/VBox/TabContainer/Network/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder_text = "127.0.0.1"
+
+[node name="PortRow" type="HBoxContainer" parent="UI/SettingsMenu/VBox/TabContainer/Network/VBox"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="UI/SettingsMenu/VBox/TabContainer/Network/VBox/PortRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(120, 0)
+text = "Port"
+
+[node name="PortInput" type="LineEdit" parent="UI/SettingsMenu/VBox/TabContainer/Network/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder_text = "8080"
+
+[node name="ProtocolRow" type="HBoxContainer" parent="UI/SettingsMenu/VBox/TabContainer/Network/VBox"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="UI/SettingsMenu/VBox/TabContainer/Network/VBox/ProtocolRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(120, 0)
+text = "Protocol"
+
+[node name="ProtocolOption" type="OptionButton" parent="UI/SettingsMenu/VBox/TabContainer/Network/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="Account" type="VBoxContainer" parent="UI/SettingsMenu/VBox/TabContainer"]
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="UI/SettingsMenu/VBox/TabContainer/Account"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 10
+
+[node name="LoginRow" type="HBoxContainer" parent="UI/SettingsMenu/VBox/TabContainer/Account/VBox"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="UI/SettingsMenu/VBox/TabContainer/Account/VBox/LoginRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(120, 0)
+text = "Login"
+
+[node name="LoginInput" type="LineEdit" parent="UI/SettingsMenu/VBox/TabContainer/Account/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder_text = "Username"
+
+[node name="PasswordRow" type="HBoxContainer" parent="UI/SettingsMenu/VBox/TabContainer/Account/VBox"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="UI/SettingsMenu/VBox/TabContainer/Account/VBox/PasswordRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(120, 0)
+text = "Password"
+
+[node name="PasswordInput" type="LineEdit" parent="UI/SettingsMenu/VBox/TabContainer/Account/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder_text = "Password"
+secret = true
+
+[node name="Graphics" type="VBoxContainer" parent="UI/SettingsMenu/VBox/TabContainer"]
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="UI/SettingsMenu/VBox/TabContainer/Graphics"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 10
+
+[node name="RenderDistance" type="HBoxContainer" parent="UI/SettingsMenu/VBox/TabContainer/Graphics/VBox"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="UI/SettingsMenu/VBox/TabContainer/Graphics/VBox/RenderDistance"]
+layout_mode = 2
+custom_minimum_size = Vector2(120, 0)
+text = "Render Distance"
+
+[node name="Slider" type="HSlider" parent="UI/SettingsMenu/VBox/TabContainer/Graphics/VBox/RenderDistance"]
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 1.0
+max_value = 10.0
+value = 3.0
+
+[node name="Value" type="Label" parent="UI/SettingsMenu/VBox/TabContainer/Graphics/VBox/RenderDistance"]
+layout_mode = 2
+custom_minimum_size = Vector2(40, 0)
+text = "3"
+
+[node name="VSync" type="HBoxContainer" parent="UI/SettingsMenu/VBox/TabContainer/Graphics/VBox"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="UI/SettingsMenu/VBox/TabContainer/Graphics/VBox/VSync"]
+layout_mode = 2
+custom_minimum_size = Vector2(120, 0)
+text = "VSync"
+
+[node name="CheckBox" type="CheckBox" parent="UI/SettingsMenu/VBox/TabContainer/Graphics/VBox/VSync"]
+layout_mode = 2
+button_pressed = true
+
+[node name="MSAA" type="HBoxContainer" parent="UI/SettingsMenu/VBox/TabContainer/Graphics/VBox"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="UI/SettingsMenu/VBox/TabContainer/Graphics/VBox/MSAA"]
+layout_mode = 2
+custom_minimum_size = Vector2(120, 0)
+text = "MSAA"
+
+[node name="CheckBox" type="CheckBox" parent="UI/SettingsMenu/VBox/TabContainer/Graphics/VBox/MSAA"]
+layout_mode = 2
+button_pressed = true
+
+[node name="Fullscreen" type="HBoxContainer" parent="UI/SettingsMenu/VBox/TabContainer/Graphics/VBox"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="UI/SettingsMenu/VBox/TabContainer/Graphics/VBox/Fullscreen"]
+layout_mode = 2
+custom_minimum_size = Vector2(120, 0)
+text = "Fullscreen"
+
+[node name="CheckBox" type="CheckBox" parent="UI/SettingsMenu/VBox/TabContainer/Graphics/VBox/Fullscreen"]
+layout_mode = 2
+
+[node name="MouseSensitivity" type="HBoxContainer" parent="UI/SettingsMenu/VBox/TabContainer/Graphics/VBox"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="UI/SettingsMenu/VBox/TabContainer/Graphics/VBox/MouseSensitivity"]
+layout_mode = 2
+custom_minimum_size = Vector2(120, 0)
+text = "Mouse Sensitivity"
+
+[node name="Slider" type="HSlider" parent="UI/SettingsMenu/VBox/TabContainer/Graphics/VBox/MouseSensitivity"]
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 0.001
+max_value = 0.01
+step = 0.001
+value = 0.002
+
+[node name="Value" type="Label" parent="UI/SettingsMenu/VBox/TabContainer/Graphics/VBox/MouseSensitivity"]
+layout_mode = 2
+custom_minimum_size = Vector2(40, 0)
+text = "0.002"
+
+[node name="Volume" type="HBoxContainer" parent="UI/SettingsMenu/VBox/TabContainer/Graphics/VBox"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="UI/SettingsMenu/VBox/TabContainer/Graphics/VBox/Volume"]
+layout_mode = 2
+custom_minimum_size = Vector2(120, 0)
+text = "Volume"
+
+[node name="Slider" type="HSlider" parent="UI/SettingsMenu/VBox/TabContainer/Graphics/VBox/Volume"]
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 0.0
+max_value = 100.0
+value = 80.0
+
+[node name="Value" type="Label" parent="UI/SettingsMenu/VBox/TabContainer/Graphics/VBox/Volume"]
+layout_mode = 2
+custom_minimum_size = Vector2(40, 0)
+text = "80%"
+
+[node name="Buttons" type="HBoxContainer" parent="UI/SettingsMenu/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 20
+
+[node name="SaveButton" type="Button" parent="UI/SettingsMenu/VBox/Buttons"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(0, 40)
+text = "SAVE"
+
+[node name="BackButton" type="Button" parent="UI/SettingsMenu/VBox/Buttons"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(0, 40)
+text = "BACK"
+
+[node name="HUD" type="Control" parent="UI"]
+process_mode = 3
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("5")
+
+[node name="MarginContainer" type="MarginContainer" parent="UI/HUD"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBoxLeft" type="VBoxContainer" parent="UI/HUD/MarginContainer"]
+layout_mode = 2
+anchors_preset = 0
+offset_left = 10.0
+offset_top = 10.0
+offset_right = 250.0
+offset_bottom = 120.0
+
+[node name="HealthBar" type="ProgressBar" parent="UI/HUD/MarginContainer/VBoxLeft"]
+layout_mode = 2
+custom_minimum_size = Vector2(200, 20)
+max_value = 100.0
+value = 100.0
+show_percentage = false
+
+[node name="HealthLabel" type="Label" parent="UI/HUD/MarginContainer/VBoxLeft/HealthBar"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+text = "100 / 100"
+horizontal_alignment = 1
+
+[node name="ManaBar" type="ProgressBar" parent="UI/HUD/MarginContainer/VBoxLeft"]
+layout_mode = 2
+custom_minimum_size = Vector2(200, 20)
+max_value = 100.0
+value = 100.0
+show_percentage = false
+
+[node name="ManaLabel" type="Label" parent="UI/HUD/MarginContainer/VBoxLeft/ManaBar"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+text = "100 / 100"
+horizontal_alignment = 1
+
+[node name="XPBar" type="ProgressBar" parent="UI/HUD/MarginContainer/VBoxLeft"]
+layout_mode = 2
+custom_minimum_size = Vector2(200, 20)
+max_value = 100.0
+value = 0.0
+show_percentage = false
+
+[node name="XPLabel" type="Label" parent="UI/HUD/MarginContainer/VBoxLeft/XPBar"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+text = "0 / 100"
+horizontal_alignment = 1
+
+[node name="VBoxRight" type="VBoxContainer" parent="UI/HUD/MarginContainer"]
+layout_mode = 2
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -300.0
+offset_top = 10.0
+offset_right = -10.0
+offset_bottom = 200.0
+
+[node name="ChatPanel" type="PanelContainer" parent="UI/HUD/MarginContainer/VBoxRight"]
+visible = false
+layout_mode = 2
+custom_minimum_size = Vector2(280, 180)
+
+[node name="ScrollContainer" type="ScrollContainer" parent="UI/HUD/MarginContainer/VBoxRight/ChatPanel"]
+layout_mode = 2
+
+[node name="ChatDisplay" type="RichTextLabel" parent="UI/HUD/MarginContainer/VBoxRight/ChatPanel/ScrollContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(260, 150)
+bbcode_enabled = true
+
+[node name="ChatInput" type="LineEdit" parent="UI/HUD/MarginContainer/VBoxRight/ChatPanel"]
+layout_mode = 2
+placeholder_text = "Press Enter to chat..."
+
+[node name="ConnectionStatus" type="Label" parent="UI/HUD"]
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -120.0
+offset_top = 10.0
+offset_right = -10.0
+offset_bottom = 30.0
+text = "Disconnected"
+horizontal_alignment = 2
+
+[node name="DebugInfo" type="Label" parent="UI/HUD"]
+visible = false
+layout_mode = 1
+anchors_preset = 0
+offset_left = 10.0
+offset_top = 130.0
+offset_right = 250.0
+offset_bottom = 250.0
+text = "DEBUG INFO"
+
+[node name="FPSLabel" type="Label" parent="UI/HUD"]
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -100.0
+offset_top = 30.0
+offset_right = -10.0
+offset_bottom = 50.0
+text = "FPS: 60"
+horizontal_alignment = 2
+
+[node name="Minimap" type="Control" parent="UI/HUD"]
+visible = false
+layout_mode = 1
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 10.0
+offset_top = -160.0
+offset_right = 160.0
+offset_bottom = -10.0
+
+[node name="MinimapFrame" type="PanelContainer" parent="UI/HUD/Minimap"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="MinimapTexture" type="TextureRect" parent="UI/HUD/Minimap/MinimapFrame"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="PauseMenu" type="Control" parent="."]
+process_mode = 3
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("6")
+
+[node name="Background" type="ColorRect" parent="PauseMenu"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.7)
+
+[node name="VBoxContainer" type="VBoxContainer" parent="PauseMenu"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -100.0
+offset_top = -120.0
+offset_right = 100.0
+offset_bottom = 120.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 20
+
+[node name="TitleLabel" type="Label" parent="PauseMenu/VBoxContainer"]
+layout_mode = 2
+text = "PAUSED"
+horizontal_alignment = 1
+
+[node name="ResumeButton" type="Button" parent="PauseMenu/VBoxContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(200, 50)
+text = "RESUME"
+
+[node name="SettingsButton" type="Button" parent="PauseMenu/VBoxContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(200, 50)
+text = "SETTINGS"
+
+[node name="DisconnectButton" type="Button" parent="PauseMenu/VBoxContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(200, 50)
+text = "DISCONNECT"
+
+[node name="QuitButton" type="Button" parent="PauseMenu/VBoxContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(200, 50)
+text = "QUIT"
+
 [node name="NetworkManager" type="Node" parent="."]
+script = ExtResource("9")
 
 [node name="ModelGenerator" type="Node" parent="."]
+script = ExtResource("10")
 
 [node name="EntityManager" type="Node" parent="."]
+script = ExtResource("11")
 
 [node name="ConfigLoader" type="Node" parent="."]
+script = ExtResource("12")

@@ -124,8 +124,8 @@ func calculate_height(x: float, z: float) -> float:
 	# Ensure minimum height
 	return max(0.0, height)
 
-func add_terrain_features(x: float, z: float, base_height: float) -> float:
-	var height = base_height
+func add_terrain_features(x: float, z: float, h: float) -> float:
+	var height = h
 	
 	# Add hills
 	var hill_noise = FastNoiseLite.new()

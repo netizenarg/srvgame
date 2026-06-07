@@ -14,8 +14,8 @@ class_name PlayerController
 @onready var camera = $CameraPivot/Camera3D
 
 # Components
-@onready var animation_player = $AnimationPlayer
-@onready var model = $PlayerModel
+@onready var animation_player = $AnimationPlayer if has_node("AnimationPlayer") else null
+@onready var model = $PlayerModel if has_node("PlayerModel") else self
 
 # State
 var current_speed: float = 0.0
@@ -73,7 +73,7 @@ func _input(event):
 
 func process_movement(delta):
 	# Get input
-	move_input = Input.get_vector("move_left", "move_right", "move_forward", "move_back")
+	move_input = Input.get_vector("move_left", "move_right", "move_backward", "move_forward")
 	
 	# Apply gravity
 	if not is_on_floor():
@@ -123,7 +123,7 @@ func process_movement(delta):
 	# Move the character
 	move_and_slide()
 
-func process_camera(delta):
+func process_camera(_delta):
 	# Horizontal rotation (Y axis)
 	camera_pivot.rotate_y(-look_input.x)
 	
@@ -136,30 +136,32 @@ func process_camera(delta):
 
 func process_animation(delta):
 	if animation_player:
-		# Blend walking/running animations
 		if is_grounded:
 			if current_speed > 0:
 				if is_sprinting:
-					animation_player.play("run")
+					play_anim("run")
 				else:
-					animation_player.play("walk")
+					play_anim("walk")
 			else:
 				if is_crouching:
-					animation_player.play("crouch_idle")
+					play_anim("crouch_idle")
 				else:
-					animation_player.play("idle")
+					play_anim("idle")
 		else:
 			if velocity.y > 0:
-				animation_player.play("jump_up")
+				play_anim("jump_up")
 			else:
-				animation_player.play("jump_down")
+				play_anim("jump_down")
 		
-		# Rotate model to face movement direction
 		if move_input.length() > 0 and is_grounded:
 			var direction = Vector3(velocity.x, 0, velocity.z).normalized()
 			if direction.length() > 0.1:
 				var target_rotation = atan2(direction.x, direction.z)
 				model.rotation.y = lerp_angle(model.rotation.y, target_rotation, 10.0 * delta)
+
+func play_anim(anim_name: String):
+	if animation_player.has_animation(anim_name):
+		animation_player.play(anim_name)
 
 func setup_camera():
 	# Set initial camera position
@@ -183,9 +185,7 @@ func jump():
 		is_jumping = true
 
 func perform_attack():
-	# Play attack animation
-	if animation_player:
-		animation_player.play("attack")
+	play_anim("attack")
 	
 	# Send combat event to server
 	if network_manager:
@@ -235,6 +235,6 @@ func _on_grounded_changed(is_now_grounded: bool):
 func get_camera() -> Camera3D:
 	return camera
 
-func set_model_visibility(visible: bool):
+func set_model_visibility(vis: bool):
 	if model:
-		model.visible = visible
+		model.visible = vis

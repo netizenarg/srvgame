@@ -635,7 +635,7 @@ func cleanup():
 	auth_token = ""
 	protocol_negotiated = false
 
-func update_network_quality(success: bool):
+func update_network_quality(_success: bool):
 	pass
 
 # --- Heartbeat ---
@@ -702,7 +702,7 @@ func store_input(input_id: int, position: Vector3, rotation: Vector3, velocity: 
 	if input_buffer.size() > 100:
 		input_buffer.pop_front()
 
-func update_prediction(delta: float):
+func update_prediction(_delta: float):
 	if not prediction_enabled or input_buffer.size() == 0:
 		return
 
