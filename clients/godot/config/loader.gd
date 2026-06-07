@@ -446,7 +446,7 @@ func save_config() -> bool:
 			config_file.set_value(section, key, config[section][key])
 	
 	# Update meta info
-	var current_time = Time.get_unix_time_from_system()
+	var _current_time = Time.get_unix_time_from_system()
 	config_file.set_value("meta", "last_used_version", "1.0.0")
 	config_file.set_value("meta", "settings_version", 1)
 	
@@ -585,7 +585,7 @@ func apply_audio_settings():
 	print("Audio settings applied")
 
 func apply_control_settings():
-	var controls = get_controls_config()
+	var _controls = get_controls_config()
 	
 	# Input map would be updated here
 	# For example:
@@ -620,8 +620,7 @@ func get_key_name(keycode: int) -> String:
 		9: "Tab",
 		13: "Enter",
 		44: "Print Screen",
-		192: "`",
-		86: "V"
+		192: "`"
 	}
 	
 	return key_names.get(keycode, "Key " + str(keycode))

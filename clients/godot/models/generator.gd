@@ -16,17 +16,44 @@ enum ModelType {
 }
 
 # Materials
-@onready var player_material = preload("res://materials/player.tres")
-@onready var npc_material = preload("res://materials/npc.tres")
-@onready var mob_material = preload("res://materials/mob.tres")
-@onready var tree_material = preload("res://materials/tree.tres")
-@onready var stone_material = preload("res://materials/stone.tres")
-@onready var water_material = preload("res://materials/water.tres")
+var player_material: StandardMaterial3D
+var npc_material: StandardMaterial3D
+var mob_material: StandardMaterial3D
+var tree_material: StandardMaterial3D
+var stone_material: StandardMaterial3D
+var water_material: StandardMaterial3D
 
 # Model presets
 var model_presets: Dictionary = {}
 
 func _ready():
+	player_material = StandardMaterial3D.new()
+	player_material.albedo_color = Color(0.3, 0.5, 0.8)
+	player_material.roughness = 0.7
+	
+	npc_material = StandardMaterial3D.new()
+	npc_material.albedo_color = Color(0.8, 0.6, 0.2)
+	npc_material.roughness = 0.7
+	
+	mob_material = StandardMaterial3D.new()
+	mob_material.albedo_color = Color(0.8, 0.2, 0.2)
+	mob_material.roughness = 0.7
+	
+	tree_material = StandardMaterial3D.new()
+	tree_material.albedo_color = Color(0.3, 0.5, 0.2)
+	tree_material.roughness = 0.8
+	
+	stone_material = StandardMaterial3D.new()
+	stone_material.albedo_color = Color(0.5, 0.5, 0.5)
+	stone_material.roughness = 0.9
+	stone_material.metallic = 0.1
+	
+	water_material = StandardMaterial3D.new()
+	water_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	water_material.albedo_color = Color(0.2, 0.4, 0.8, 0.7)
+	water_material.metallic = 0.3
+	water_material.roughness = 0.1
+	
 	initialize_presets()
 
 func initialize_presets():
@@ -175,7 +202,7 @@ func generate_procedural_model(model_type: String, data: Dictionary) -> MeshInst
 		_:
 			return generate_basic_model(model_type, data)
 
-func generate_familiar_model(data: Dictionary) -> MeshInstance3D:
+func generate_familiar_model(_data: Dictionary) -> MeshInstance3D:
 	var mesh_instance = MeshInstance3D.new()
 	
 	# Create a simple familiar (floating crystal/creature)
@@ -217,20 +244,17 @@ func generate_river_model(data: Dictionary) -> MeshInstance3D:
 	
 	mesh_instance.mesh = plane_mesh
 	
-	var material = ShaderMaterial.new()
-	var shader = preload("res://shaders/water.gdshader")
-	material.shader = shader
-	
-	if data.has("color"):
-		material.set_shader_parameter("water_color", Color(data.color))
-	else:
-		material.set_shader_parameter("water_color", Color(0.2, 0.4, 0.8, 0.6))
+	var material = StandardMaterial3D.new()
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.albedo_color = Color(0.2, 0.4, 0.8, 0.6)
+	material.metallic = 0.3
+	material.roughness = 0.1
 	
 	mesh_instance.material_override = material
 	
 	return mesh_instance
 
-func generate_house_model(data: Dictionary) -> MeshInstance3D:
+func generate_house_model(_data: Dictionary) -> MeshInstance3D:
 	var mesh_instance = MeshInstance3D.new()
 	
 	# Create simple house from CSG nodes
@@ -277,7 +301,7 @@ func generate_water_model(data: Dictionary) -> MeshInstance3D:
 	
 	return mesh_instance
 
-func generate_basic_model(model_type: String, data: Dictionary) -> MeshInstance3D:
+func generate_basic_model(model_type: String, _data: Dictionary) -> MeshInstance3D:
 	# Generate a basic placeholder model
 	var mesh_instance = MeshInstance3D.new()
 	
@@ -328,7 +352,7 @@ func generate_low_poly_rock(variation: int = 0) -> MeshInstance3D:
 	return generate_from_preset(ModelType.STONE, {"variation": variation})
 
 func generate_player_model(skin_color: Color = Color(0.8, 0.6, 0.4), 
-                          hair_color: Color = Color(0.3, 0.2, 0.1)) -> MeshInstance3D:
+						  _hair_color: Color = Color(0.3, 0.2, 0.1)) -> MeshInstance3D:
 	var mesh_instance = generate_from_preset(ModelType.PLAYER, {})
 	
 	# Customize player appearance
